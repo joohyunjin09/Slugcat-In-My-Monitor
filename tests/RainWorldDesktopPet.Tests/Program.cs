@@ -1468,6 +1468,8 @@ namespace RainWorldDesktopPet.Tests
                 "Default profile must preserve Survivor/Monk/Hunter/Gourmand colour selection");
             True(SlugcatVisualProfiles.Saint.HeadFamily == "HeadB",
                 "Saint uses the MSC HeadB family");
+            True(SlugcatVisualProfiles.Saint.ResolveFaceFamily(false, 1.0) == "FaceB",
+                "SaintFaceCondition keeps the original Saint eyes closed");
             True(SlugcatVisualProfiles.Spearmaster.OriginalSlugcatId == "Spear",
                 "Spearmaster's DLL identifier is Spear");
         }
@@ -1641,6 +1643,8 @@ namespace RainWorldDesktopPet.Tests
             state = SpriteRenderer.ResolveOriginalFaceState(pose);
             True(state.HeadElement.StartsWith("HeadB", StringComparison.Ordinal),
                 "Saint head uses HeadB in every movement state");
+            True(state.FaceElement.StartsWith("FaceB", StringComparison.Ordinal),
+                "Saint normal face uses the closed-eye FaceB family");
         }
 
         private static void AllVisualProfilesRemainStableAcrossStates()

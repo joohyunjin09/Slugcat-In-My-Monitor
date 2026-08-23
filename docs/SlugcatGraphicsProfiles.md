@@ -115,7 +115,7 @@ MSC의 마지막 gown 예약 슬롯은 cloak story state가 없는 데스크톱 
 
 **Original Slugcat ID:** `Saint`.
 
-**PlayerGraphics branches:** 정상 머리는 공통 `HeadA`가 아니라 `HeadB0..17`이다. face는 `FaceA`/`FaceB`, unconscious/dead는 공유 특수 face다.
+**PlayerGraphics branches:** 정상 머리는 공통 `HeadA`가 아니라 `HeadB0..17`이다. `DefaultFaceSprite`는 `SaintFaceCondition()` 때문에 일반 플레이 중 항상 눈을 감은 `FaceB0..8`을 선택하고, unconscious/dead는 공유 특수 face를 쓴다.
 
 **Sprites:** 공통 세트에서 head만 `HeadB`로 교체된다. 원작은 추가로 tongue rope mesh, god pips, tentacle/ascension sprite를 할당한다.
 
@@ -123,11 +123,11 @@ MSC의 마지막 gown 예약 슬롯은 cloak story state가 없는 데스크톱 
 
 **Tail:** `DefaultTail`.
 
-**Face logic:** `FaceA`/blink `FaceB`, stunned/dead 공유 특수 element. Saint 전용 gameplay eye-close 조건은 대응 Player 상태가 없으므로 발생하지 않는다.
+**Face logic:** 데스크톱의 활성 Saint는 원작의 `player.room != null`, 비승천 상태에 대응하므로 정상 상태에서 항상 `FaceB`; stunned/dead에서는 공유 특수 element를 사용한다. 원작 DLL의 승천 분기만 `killWait < 0.02`일 때 이 조건을 잠시 해제하지만, 데스크톱에는 승천 gameplay가 없다.
 
 **Draw order:** 활성 normal 외형은 공통 순서이며 head index 3만 `HeadB`다.
 
-**Desktop implementation:** 기본색 `#AAF156`, 어두운 눈 `#101010`, `HeadB` family를 사용한다. 혀/승천/karma 능력은 추가하지 않는다.
+**Desktop implementation:** 기본색 `#AAF156`, 어두운 눈 `#101010`, `HeadB` 머리와 닫힌 눈 `FaceB` family를 사용한다. 혀/승천/karma 능력은 추가하지 않는다.
 
 ## 런타임 전환과 안전성
 

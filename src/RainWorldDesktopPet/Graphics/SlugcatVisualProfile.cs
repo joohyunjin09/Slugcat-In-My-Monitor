@@ -126,7 +126,7 @@ namespace RainWorldDesktopPet.Graphics
 
         public string ResolveFaceFamily(bool blink, double faceScaleX)
         {
-            if (blink) return "FaceB";
+            if (Skin == SlugcatSkin.Saint || blink) return "FaceB";
             if (Skin == SlugcatSkin.Artificer) return faceScaleX < 0.0 ? "FaceD" : "FaceC";
             return "FaceA";
         }
@@ -251,7 +251,7 @@ namespace RainWorldDesktopPet.Graphics
             SlugcatSkin.Saint, "Saint", "Saint", Color.FromArgb(170, 241, 86), Color.FromArgb(16, 16, 16),
             false, false, "BodyA", "HipsA", "HeadB", 1.0, 1.0, 1.0, 1.0,
             DefaultTail, 12, 0, new string[] { "Tongue(inactive: gameplay state absent)", "Ascension(inactive)" },
-            new string[] { "BodyA", "HipsA", "HeadB0", "FaceA0", "FaceB0", "FaceStunned", "FaceDead" });
+            new string[] { "BodyA", "HipsA", "HeadB0", "FaceB0", "FaceStunned", "FaceDead" });
 
         private static readonly SlugcatVisualProfile[] all =
         {
