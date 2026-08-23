@@ -2,6 +2,8 @@ name: Release
 
 on:
   push:
+    branches:
+      - main
     tags:
       - "v*"
   workflow_dispatch:
@@ -33,13 +35,19 @@ jobs:
         run: |
           if ("${{ github.event_name }}" -eq "workflow_dispatch") {
             $tag = "${{ inputs.version }}"
-          } else {
+            $rolling = 'false'
+          } elseif ("${{ github.ref_type }}" -eq "tag") {
             $tag = "${{ github.ref_name }}"
+            $rolling = 'false'
+          } else {
+            $tag = 'continuous'
+            $rolling = 'true'
           }
-          if ($tag -notmatch '^v\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$') {
+          if ($tag -ne 'continuous' -and $tag -notmatch '^v\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$') {
             throw "Release tag must look like v0.1.0: $tag"
           }
           "tag=$tag" >> $env:GITHUB_OUTPUT
+          "rolling=$rolling" >> $env:GITHUB_OUTPUT
 
       - name: Build Release and run tests
         shell: powershell
@@ -64,8 +72,41 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $tag = "${{ steps.release.outputs.tag }}"
+          $rolling = "${{ steps.release.outputs.rolling }}" -eq 'true'
           $zip = "artifacts/package/Slugcat-In-My-Monitor-$tag-win-x64.zip"
           $checksum = "$zip.sha256"
+
+          if ($rolling) {
+            gh api "repos/${{ github.repository }}/git/ref/tags/$tag" *> $null
+            if ($LASTEXITCODE -eq 0) {
+              gh api --method PATCH "repos/${{ github.repository }}/git/refs/tags/$tag" `
+                -f sha="${{ github.sha }}" -F force=true *> $null
+            } else {
+              gh api --method POST "repos/${{ github.repository }}/git/refs" `
+                -f ref="refs/tags/$tag" -f sha="${{ github.sha }}" *> $null
+            }
+
+            $shortSha = "${{ github.sha }}".Substring(0, 7)
+            $notes = "Automatically built from the latest main commit [$shortSha](https://github.com/${{ github.repository }}/commit/${{ github.sha }})."
+            gh release view $tag --repo "${{ github.repository }}" *> $null
+            if ($LASTEXITCODE -eq 0) {
+              gh release upload $tag $zip $checksum --clobber --repo "${{ github.repository }}"
+              gh release edit $tag `
+                --title "Latest main build" `
+                --notes $notes `
+                --prerelease `
+                --latest=false `
+                --repo "${{ github.repository }}"
+            } else {
+              gh release create $tag $zip $checksum `
+                --title "Latest main build" `
+                --notes $notes `
+                --prerelease `
+                --latest=false `
+                --repo "${{ github.repository }}"
+            }
+            exit 0
+          }
 
           gh release view $tag --repo "${{ github.repository }}" *> $null
           if ($LASTEXITCODE -eq 0) {

@@ -5,10 +5,13 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-if ($Version -notmatch '^v?\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$') {
-    throw "Version must look like v0.1.0: $Version"
+if ($Version -ne 'continuous' -and
+    $Version -notmatch '^v?\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$') {
+    throw "Version must be continuous or look like v0.1.0: $Version"
 }
-if (-not $Version.StartsWith('v')) { $Version = 'v' + $Version }
+if ($Version -ne 'continuous' -and -not $Version.StartsWith('v')) {
+    $Version = 'v' + $Version
+}
 
 $repoRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $packageRoot = Join-Path $repoRoot 'artifacts\package'
