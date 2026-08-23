@@ -1,0 +1,9 @@
+{
+  "name": "slugcat-in-my-monitor",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node tools/validate-dms-template.mjs",
+    "test:dms-template": "node tools/validate-dms-template.mjs"
+  }
+}

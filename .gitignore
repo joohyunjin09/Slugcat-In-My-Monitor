@@ -1,17 +1,18 @@
-# Godot 4+ specific ignores
+# Third-party DMS fixtures are kept local until redistribution terms are confirmed.
+.local-test-assets/
+
+# Godot-generated files.
 .godot/
 .nomedia
-
-# Godot-specific ignores
 .import/
 export.cfg
 export_credentials.cfg
 *.tmp
 
-# Imported translations (automatically generated from CSV files)
-*.translation
-
-# Mono-specific ignores
+# Godot Mono-generated files.
 .mono/
 data_*/
 mono_crash.*.json
+
+# Imported translations generated from CSV files.
+*.translation

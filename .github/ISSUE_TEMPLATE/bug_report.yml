@@ -1,0 +1,77 @@
+name: 버그 제보
+description: 재현 가능한 오류나 예상과 다른 동작을 알려주세요.
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        제보해주셔서 감사합니다. 문제를 재현할 수 있도록 아래 내용을 작성해주세요.
+
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: 사전 확인
+      options:
+        - label: 기존 이슈에서 같은 문제를 검색했습니다.
+          required: true
+        - label: 가능한 경우 최신 버전에서도 문제가 발생하는지 확인했습니다.
+          required: true
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: 문제 설명
+      description: 어떤 문제가 발생했는지 간단하고 명확하게 설명해주세요.
+      placeholder: 슬러그캣을 던진 뒤 화면 경계에서 멈춥니다.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: 재현 방법
+      description: 문제를 재현하는 데 필요한 단계를 순서대로 적어주세요.
+      placeholder: |
+        1. 앱을 실행합니다.
+        2. 슬러그캣의 몸통을 잡습니다.
+        3. 오른쪽 화면 밖으로 던집니다.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: 예상 동작
+      description: 정상이라면 어떻게 동작해야 하나요?
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: 실행 환경
+      description: OS, 앱 버전 또는 커밋, 모니터 구성, 사용한 스킨 정보를 적어주세요.
+      placeholder: |
+        - OS: Windows 11 24H2
+        - Version/commit: abc1234
+        - Monitors: 1920x1080 2대, 배율 100%
+        - Skin: 기본 스킨 / DMS 팩 이름
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: 로그 및 추가 자료
+      description: 관련 로그, 스크린샷 또는 영상이 있다면 첨부해주세요. 개인정보와 권한 없는 게임 에셋은 제거해주세요.
+      render: shell
+
+  - type: checkboxes
+    id: asset-safety
+    attributes:
+      label: 에셋 확인
+      options:
+        - label: 첨부 자료에 재배포 권한이 없는 Rain World 또는 제3자 에셋을 포함하지 않았습니다.
+          required: true
