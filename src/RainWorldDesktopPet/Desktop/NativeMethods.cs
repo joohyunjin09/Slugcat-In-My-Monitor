@@ -32,6 +32,10 @@ namespace RainWorldDesktopPet.Desktop
         internal const uint MONITOR_DEFAULTTONEAREST = 2;
         internal const uint MOD_NOREPEAT = 0x4000;
         internal const int VK_F1 = 0x70;
+        internal const int VK_LBUTTON = 0x01;
+        internal const int VK_RBUTTON = 0x02;
+        internal const int VK_MBUTTON = 0x04;
+        internal const int VREFRESH = 116;
 
         internal delegate bool EnumWindowsProc(IntPtr handle, IntPtr parameter);
 
@@ -105,13 +109,33 @@ namespace RainWorldDesktopPet.Desktop
             internal uint Colors;
         }
 
+        [StructLayout(LayoutKind.Sequential)]
+        internal struct NativeMessage
+        {
+            internal IntPtr Handle;
+            internal uint Message;
+            internal IntPtr WParam;
+            internal IntPtr LParam;
+            internal uint Time;
+            internal Point Point;
+        }
+
         [DllImport("user32.dll")]
         [return: MarshalAs(UnmanagedType.Bool)]
         internal static extern bool EnumWindows(EnumWindowsProc callback, IntPtr parameter);
 
         [DllImport("user32.dll")]
         [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool PeekMessage(out NativeMessage message, IntPtr handle,
+            uint minimumFilter, uint maximumFilter, uint removeMessage);
+
+        [DllImport("user32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
         internal static extern bool IsWindowVisible(IntPtr handle);
+
+        [DllImport("user32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        internal static extern bool IsWindow(IntPtr handle);
 
         [DllImport("user32.dll")]
         [return: MarshalAs(UnmanagedType.Bool)]
@@ -139,9 +163,15 @@ namespace RainWorldDesktopPet.Desktop
         [DllImport("dwmapi.dll")]
         internal static extern int DwmGetWindowAttribute(IntPtr handle, int attribute, out int value, int valueSize);
 
+        [DllImport("dwmapi.dll")]
+        internal static extern int DwmFlush();
+
         [DllImport("user32.dll")]
         [return: MarshalAs(UnmanagedType.Bool)]
         internal static extern bool GetCursorPos(out Point point);
+
+        [DllImport("user32.dll")]
+        internal static extern short GetAsyncKeyState(int virtualKey);
 
         [DllImport("user32.dll")]
         internal static extern IntPtr GetDC(IntPtr handle);
@@ -171,6 +201,9 @@ namespace RainWorldDesktopPet.Desktop
         [DllImport("gdi32.dll")]
         [return: MarshalAs(UnmanagedType.Bool)]
         internal static extern bool DeleteObject(IntPtr objectHandle);
+
+        [DllImport("gdi32.dll")]
+        internal static extern int GetDeviceCaps(IntPtr deviceContext, int index);
 
         [DllImport("user32.dll", SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]
@@ -223,6 +256,27 @@ namespace RainWorldDesktopPet.Desktop
             }
 
             SetProcessDPIAware();
+        }
+
+        internal static bool IsMessageQueueIdle()
+        {
+            NativeMessage message;
+            return !PeekMessage(out message, IntPtr.Zero, 0, 0, 0);
+        }
+
+        internal static double GetPrimaryDisplayRefreshRate()
+        {
+            IntPtr deviceContext = GetDC(IntPtr.Zero);
+            if (deviceContext == IntPtr.Zero) return 0.0;
+            try
+            {
+                int refresh = GetDeviceCaps(deviceContext, VREFRESH);
+                return refresh > 1 ? refresh : 0.0;
+            }
+            finally
+            {
+                ReleaseDC(IntPtr.Zero, deviceContext);
+            }
         }
     }
 }

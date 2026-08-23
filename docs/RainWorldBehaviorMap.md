@@ -126,6 +126,15 @@ standing 지상 목표 속도는 upper/lower chunk 각각 `4.2/4.0 * runspeedFac
 `vel.y=4/3`, `jumpBoost=8`이며 wall jump는 `y=8/7`, 벽 반대쪽 `x=6/5`다. 원작의
 `+Y`가 위라는 점을 적용한 수치다.
 
+`BodyChunk`는 collision 해결 전 충돌축 velocity와 `lastContactPoint` 기반 first-contact를
+`Player.TerrainImpact`에 전달한다. 일반 Player는 `35/60`, Gourmand는 `40/80`을
+stun/lethal severity 경계로 사용하며, stun 계산은
+`(int)LerpMap(speed, stunThreshold, lethalThreshold, 40, 140, 2.5)`다. 원작의 lethal은
+아래 방향 floor impact에만 적용된다. 데스크톱 구현은 이 판정 결과까지 유지한 뒤
+`DesktopPetImpactResult.None/Stun/MaximumStun` 안전 계층에서 lethal을 `MaximumStun`으로
+바꾼다. `MaxImpactStunDurationSeconds=3.0`을 40 Hz에서 한 번만 `120` tick으로 변환하며,
+최초 impact episode의 절대 deadline은 후속 지형 충돌로 갱신하지 않는다.
+
 ### Desktop Implementation
 
 | 현재 소스 | 정확한 대응 심볼 | 역할 |
@@ -149,7 +158,7 @@ standing 지상 목표 속도는 upper/lower chunk 각각 `4.2/4.0 * runspeedFac
 속도를 최소 `2.5`로 내리고 `Grounded=false`, `BodyMode=Default`, `Animation=Fall`로
 전환한다. 다음 12회의 collision에서 `Slugcat.Step`이 이 id를
 `DesktopCollisionWorld.Resolve`에 넘겨 **같은 `WindowTop`만** 무시한다. 음수 id인
-monitor work-area floor는 통과하지 않는다.
+monitor/taskbar floor는 통과하지 않는다.
 
 animation frame은 지상이고 launch tick이 아닐 때 입력 X가 0이거나 Sit/Sleep posture면
 0으로 고정된다. 이동 중에는 stand `0..6`, crawl `0..10` 범위에서 순환하며 공중에서는
@@ -191,30 +200,37 @@ cooldown을 시작한다. Jump score는 지상·ready·`curiosity>.5`일 때
 | connection | rest `17`, Normal, elasticity `1`, symmetry `.5` | 동일 초기값 |
 | 공기/중력/bounce/surface | `.999 / .9 / .1 / .5` | 동일 숫자, 중력은 y-down 부호 변환 |
 | water friction/buoyancy | `.96 / .95` | 미구현 |
-| 입력 history | 10 packages | 현재 package + `previousJump` 수준 |
+| 입력 history | 10 packages | 최근 4 package + `previousJump` |
 | window-top 통과 | `goThroughFloors`를 포함한 Room floor 처리 | 같은 양수 surface id를 `12` tick 무시, 하향속도 최소 `2.5` |
 | solver 반복 | connection당 tick 1회 | `ConstraintIterations=1` |
-| 데스크톱 속도 제한 | 원작 Player의 일반 전역 clamp가 아님 | `MaximumVelocity=35` |
+| 일반 속도 제한 | 원작 Player의 일반 전역 clamp 없음 | 동일, 전역 clamp 없음 |
+| 화면 world 배율 | `pos += vel` | 내부 적분은 동일, Windows 입출력 경계에서 X/Y `DesktopWorldScale=2.20` |
+| impact stun 상한 | 원작 terrain stun 최대 `140`; floor lethal 가능 | `MaxImpactStunDurationSeconds=3.0` → `120` tick, terrain death 없음 |
 
 ### Differences
 
 - 현재 `SlugcatMovement`는 원작 `MovementUpdate`/`UpdateAnimation`/`UpdateBodyMode`의
-  완전한 port는 아니지만, 지상 목표 `4.2/4.0`, crawl `2.5`, 기본 접근량 `1.2`,
+  완전한 port는 아니지만, 지상 목표 `4.2/4.0`, crawl 기본 `2.5`/수직 입력 시 `1`,
+  공중 제한 `3.6`, 입력 방향 접근량 `2.4*.5=1.2`, idle `surfaceFriction^1.5`,
   standing jump의 y-down `-4/-3`, `jumpBoost=8`은 원작 핵심값에 맞춰져 있다.
-  pre-jump `4` tick, connection을 `12`로 압축한 뒤 평상시 `13.5/17`로 보간하는 처리,
-  공중 가속 `.18/.153`, idle damping `.72`, 단순 wall-climb 값은 데스크톱 적응이다.
+  공중 분기는 generic target-velocity controller가 아니라 현재 momentum이 제한을 넘으면
+  그대로 보존하는 원작 조건식이며, `runspeedFac`를 공중 `3.6`에 곱하지 않는다.
+  일반 점프는 별도 pre-jump 없이 즉시 시작하고 Stand/Crawl/공중/착지 모두 connection
+  `17`을 유지한다. 단순 wall-climb 값은 데스크톱 적응이다.
 - 현재도 chunk 적분·terrain 대응 collision·connection 뒤 이동 힘을 적용하므로 원작의
   큰 update 위상과 one-pass 순서가 맞는다. Windows surface query 자체와 축약된
   state 분기는 원작 Room/Player 전체와 같지 않다.
-- `SlugcatMovement.StabilizePosture`의 일반 stand 분기는 원작 y-up의 upper `+1.5`,
+- 일반 stand 분기는 원작 y-up의 upper `+1.5`,
   lower `-4.5`를 y-down chest `-1.5`, hips `+4.5`로 반전해 적용한다. crawl/sit/sleep은
-  별도의 목표 자세 spring을 쓰는 데스크톱 적응이다. launch tick에는 이 메서드를
-  명시적으로 건너뛴다.
+  임의 목표 자세 spring 없이 `DownOnFours`의 y-down chest `+2`, upper/lower X 반대 힘과
+  `StandUp` 감쇠를 적용한다. 방향 반전은 원작 `CrawlTurn`처럼 잠시 Default mode에서
+  두 chunk를 반대로 회전시키고 손에는 Crawl grip 대신 CrawlTurn target을 준다.
+  launch tick에는 body-mode 힘을 명시적으로 건너뛴다.
 - 현재 CLR enum은 원작의 확장 가능한 `ExtEnum` 일부만 포함한다. 원작에는
   `LedgeGrab`, `CorridorTurn`, 수영, beam, zero-G, dead 등 더 많은 animation/mode가
-  있고, 현재 enum에는 원작 AnimationIndex에 없는 `PreJump`, `Jump`, `Fall`, `Land`,
-  `Sit`, `Sleep`, `WallClimb` 표현 상태가 있다.
-- 물, slope, 20 px tile, beam, corridor, grasp, combat, stun/death, malnourishment,
+  있다. 일반 상승/하강은 원작처럼 `BodyMode.Default + Animation.None`을 유지하고
+  velocity 부호로 구분한다. `Sit`, `Sleep`, `WallClimb`은 데스크톱 표현 상태다.
+- 물, slope, 20 px tile, beam, corridor, grasp, combat, malnourishment,
   aerobic/Gourmand exhaustion은 현재 Player 대응에 없다.
 - 현재 자율 행동은 Windows 환경을 위한 `DesktopPetAI`이며, 원작 캠페인 Player에서
   추출한 AI라고 주장하지 않는다. `JumpReady`/`DropReady`, 240/400-tick cooldown과
@@ -274,7 +290,7 @@ Gourmand는 공통 head와 꼬리를 유지한 채 정상 awake 기준 `BodyA.sc
 |---|---|---|
 | `Graphics/SlugcatGraphics.cs` | `SlugcatGraphics..ctor`, `Step`, `BuildPose`, `ApplyMovingSurfaceDelta` | head/팔/다리/꼬리 상태 갱신, 이동 surface translation, 렌더 보간 pose 생성 |
 | `Graphics/SlugcatPose.cs` | `SlugcatPose` | 논리 graphics 상태와 renderer 사이의 snapshot |
-| `Graphics/SpriteRenderer.cs` | `DrawAtlasBody`, `DrawAtlasArm`, `DrawHead`, `SelectFaceFrame`, `DrawTail`, `DrawOriginalTailMesh`, procedural fallback | atlas frame 선택, FaceA 방향, tail silhouette와 GDI+ 그리기 |
+| `Graphics/SpriteRenderer.cs` | `DrawAtlasBody`, `DrawAtlasArm`, `DrawHead`, `SelectFaceFrame`, `DrawTail`, `DrawOriginalTailMesh` | atlas frame 선택, FaceA 방향, 모든 body 경로의 단일 tail silhouette와 GDI+ 그리기 |
 | `Graphics/BodyPart.cs` | `BodyPart.Step`, `RenderPosition`, `Translate` | current head/limb endpoint의 단순 spring particle와 current/last 동시 이동 |
 | `Graphics/Limb.cs` | `Limb.Step`, `ComputeJoint`, `Translate` | 두 팔·두 다리 endpoint, sleep 공통 hand target, 시각적 관절, target/planted point 이동 |
 | `Graphics/ProceduralTail.cs` | `ProceduralTail.Step`, `CurlAround`, `Translate` | 네 tail segment orchestration과 current/last 동시 이동 |
@@ -299,9 +315,10 @@ screen y-down 좌표에서 `+20`은 몸 아래쪽이며, endpoint는 spring `.55
 gravity `0`으로 그 target을 추적한다. `SleepCurlHandsShareOriginalTarget` 회귀 테스트는
 `Facing=-1`에서 양손 target이 모두 `slugcat.Center+(-10,20)`인지 검증한다.
 
-atlas head의 일반 `FaceA` frame은 `Head-Hips` 축에서 look offset 크기에 따라 수평 성분을
+atlas head의 일반 `FaceA/FaceB` frame은 `Head-Hips` 축에서 look offset 크기에 따라 수평 성분을
 줄인 뒤 screen-space angle 절댓값을 `22.5°` 단위로 반올림해 `0..8`로 고른다. Sleep은
-`1`, Crawl과 Stand+StandUp은 `4`로 override한다. `OriginalFaceFrameSelection` 테스트는 수직축
+`1`, Crawl과 `Stand + input.x!=0`은 `4`로 override한다. Sleep/눈감김은 `FaceB`, 깨어
+있는 기본형은 `FaceA`를 쓴다. `OriginalFaceFrameSelection` 테스트는 수직축
 `0`, 수평축 `4`, sleep `1`을 고정한다. WallClimb arm도 다른 atlas arm과 마찬가지로
 `PlayerArm{frame}`만 그리며, 현재 renderer는 `OnTopOfTerrainHand` overlay를 덧그리지 않는다.
 
@@ -324,12 +341,12 @@ atlas head의 일반 `FaceA` frame은 `Head-Hips` 축에서 look offset 크기�
 - head와 단일 legs particle은 원작 `GenericBodyPart.Update` 및 `BodyPart.ConnectToPoint`
   수식과 상수를 쓴다. 다만 3x3 tile/slope `PushOutOfTerrain`은 desktop surface query의
   부분집합이다. 손의 full grip/retract solver도 아직 부분 이식이다.
-- `SlugcatGraphics.BuildPose`는 `TailRadii[i] = Radius * Stretched`를 전달하고 atlas 경로의
-  `DrawOriginalTailMesh`는 원작의 15개 vertex 및 13개 triangle index와 같은 배치를 쓴다.
-  procedural fallback만 round line을 쓴다.
-- FaceA는 현재 body-head 축을 `22.5°` 단위로 양자화하므로 단순 좌우 look mapping보다
-  원작 선택 경로에 가까워졌지만, 원작의 전체 animation/body-mode별 보정은 여전히
-  부분집합이다. WallClimb에서 `OnTopOfTerrainHand` overlay도 사용하지 않는다. palette는
+- `SlugcatGraphics.BuildPose`는 `TailRadii[i] = Radius * Stretched`를 전달하고
+  `DrawOriginalTailMesh`는 atlas 유무와 무관하게 원작의 15개 vertex 및 13개 triangle
+  index와 같은 하나의 topology를 쓴다. 분절 sprite/round-line tail 경로는 없다.
+- 지원하는 성체 기본 스킨의 face/head 선택과 배치는 `ResolveOriginalFaceState`에서
+  Stand 이동, Crawl, 일반 공중, Wall/Beam/Ledge, Sleep, Stunned/Dead를 원작 분기로
+  처리한다. WallClimb에서 `OnTopOfTerrainHand` overlay는 사용하지 않는다. palette는
   기본 body color를 사용하며 Jolly/custom color, malnourished, poison, hypothermia,
   mark/light blend와 Gourmand exhaustion 호흡 pose는 없다.
 - 현재 Gourmand의 기준 폭과 공통 head/tail 선택은 원작과 맞지만, sleep/malnourished
@@ -385,14 +402,18 @@ slope 바닥에는 별도 tangent 식이 있다.
 | 현재 소스 | 정확한 대응 심볼 | 역할 |
 |---|---|---|
 | `Physics/BodyChunk.cs` | `BodyChunk..ctor`, `BeginTick`, `Integrate`, `RenderPosition`, `SetMass`, `WallSurfaceId`, `WallSurfaceKind` | 최소 질점 상태, y-down 적분·보간, 접촉 wall identity |
-| `Physics/DesktopCollisionWorld.cs` | `Resolve`, `ResolveHorizontal`, `ResolveVertical`, `RecoverAgainstMonitorBounds` | ignored window-top id와 persistent wall contact를 포함한 window/work-area collision |
+| `Physics/DesktopCollisionWorld.cs` | `Resolve`, `ResolveHorizontal`, `ResolveVertical` | ignored window-top id와 persistent wall contact를 포함한 swept window/work-area collision |
 | `Creature/Slugcat.cs` | `Slugcat.Step` | 두 chunk 적분과 constraint/collision 반복 |
 
 `BeginTick`은 `LastPosition=Position`으로 옮기고 floor/left/right/support id,
 `WallSurfaceId/WallSurfaceKind` 및 `FloorImpactSpeed`를 지운다.
-`Integrate`는 y-down에서 `Velocity.Y += gravity`, `Velocity *= airFriction`, 속도 크기를
-`35`로 clamp한 뒤 `Position += Velocity`를 수행한다. `RenderPosition`은
+`Integrate`는 y-down에서 `Velocity.Y += gravity`, `Velocity *= airFriction` 뒤
+원작처럼 `Position += Velocity`를 수행한다. Window rect, cursor, grab 입력은 simulation
+진입 시 `2.20`으로 나누고 렌더 좌표와 local atlas pixel은 출력 시 `2.20`을 곱한다.
+따라서 X/Y 이동·중력·jump·procedural part의 비율이 동일하다. `RenderPosition`은
 `Lerp(LastPosition, Position, interpolation)`이다.
+WallClimb도 원작처럼 base gravity `.9` 적분을 그대로 받고, mode별 접촉/slide force는
+BodyChunk 적분 뒤 movement 단계에서 별도로 적용한다.
 `ResolveVertical`은 wall을 가로지른 순간뿐 아니라 chunk edge가 wall에서 `1.5 px` 안에
 머무는 경우와 거의 정지한 `|Velocity.X| <= .01`인 경우에도 위치를 wall에 맞추고
 `ContactLeft/Right`와 그 surface의 id/kind를 다시 세운다. 따라서 `BeginTick`이 contact
@@ -410,7 +431,7 @@ state를 지워도 다음 collision에서 동일 wall identity가 지속되어
 | bounce | `.1` | floor에서 `.1` |
 | surface friction | `.5`; tangent `*=Clamp(.5*2,0,1)=1` | 동일 tangent 식 |
 | water friction / buoyancy | `.96 / .95` | 없음 |
-| speed clamp | 이 형태의 Player 전역 clamp 없음 | magnitude `35` |
+| speed clamp | 이 형태의 Player 전역 clamp 없음 | 동일 |
 
 ### Differences
 
@@ -421,10 +442,9 @@ state를 지워도 다음 collision에서 동일 wall identity가 지속되어
 - 현재 collision은 Rain World의 20 px tile swept solver가 아니라 Windows surface
   목록의 top/side crossing이다. slope, beam, water, object-pair collision을 하지 않는다.
 - horizontal floor에서는 현재도 `rebound=abs(vy)*bounce`와
-  `stopThreshold=1+9*(1-bounce)`를 적용한다. window side wall의 X `*=-.15`와 monitor
-  경계 recovery, `1.5 px` resting-contact 유지 규칙은 Windows 적응이다.
-- 현재 `MaximumVelocity=35`는 데스크톱에서 폭주를 막는 적응값이다. 원작의
-  `TerrainImpact >35` stun threshold와 의미가 같지 않다.
+  `stopThreshold=1+9*(1-bounce)`를 적용한다. window side wall의 X `*=-.15`와
+  `1.5 px` resting-contact 유지 규칙은 Windows 적응이다. 화면 밖 강제 pin/recovery는
+  collision 결과를 숨기므로 제거했다.
 - 현재도 각 chunk의 desktop collision 뒤 connection을 tick당 한 번 풀어 원작의
   one-pass 큰 순서를 유지한다. collision query의 공간 모델 자체는 Room과 다르다.
 
@@ -645,7 +665,7 @@ shape와 lower chunk submersion으로 보간하고, 각 segment는 hips에서 `9
 | `Physics/TailSegment.cs` | `BeginUpdate`, `ConstrainTo`, `ApplyEnvironment`, `RenderPosition` | segment 적분, overstretch, damping/gravity, 보간 |
 | `Graphics/ProceduralTail.cs` | constructor, `Step`, `ResolveSurface`, `CurlAround`, `Translate` | 네 segment layout, chain 힘, desktop floor, sleep curl, moving-surface 이동 |
 | `Graphics/SlugcatGraphics.cs` | `Step`, `BuildPose`, `ApplyMovingSurfaceDelta` | hips/chest 입력, pose 전달, graphics chain 평행이동 |
-| `Graphics/SpriteRenderer.cs` | `DrawTail`, `DrawOriginalTailMesh` | atlas 경로의 연속 polygon silhouette와 procedural round-line fallback |
+| `Graphics/SpriteRenderer.cs` | `DrawTail`, `DrawOriginalTailMesh` | 모든 렌더 경로의 단일 연속 polygon silhouette |
 
 `TailSegment.ConstrainTo`는 원작과 같은 `stretched` 식을 사용한다. root는 초과분 전부를
 자신에게 적용하고, 나머지는 `AffectPrevious=.5`로 self/previous에 나눈다. y-down
@@ -654,9 +674,10 @@ shape와 lower chunk submersion으로 보간하고, 각 segment는 hips에서 `9
 감소, shape recurrence `(shape*10+1)/11`, hips 거리 `9*(i+1)`을 유지한다.
 `ProceduralTail.Translate`는 moving window delta를 네 segment의 `Position`과
 `LastPosition` 양쪽에 더해 물리 chain과 interpolation 기준을 함께 옮긴다.
-`SlugcatGraphics.BuildPose`는 각 렌더 폭을 `Radius*Stretched`로 전달한다. 원작 atlas
-style이면 `DrawOriginalTailMesh`가 root와 segment 중심선을 따라 양쪽 경계를 이어 9개
-point의 연속 polygon을 채우고, atlas를 쓰지 않는 procedural fallback은 round line을 쓴다.
+`SlugcatGraphics.BuildPose`는 각 렌더 폭을 `Radius*Stretched`로 전달한다.
+`DrawOriginalTailMesh`는 원작의 15개 mesh vertex를 그대로 계산한다. GDI+가
+공유 triangle edge를 따로 anti-alias해 seam을 만들지 않도록 동일 정점의 바깥 경계를
+한 번의 연속 polygon fill로 rasterize한다. atlas load 여부로 꼬리 renderer를 바꾸지 않는다.
 
 ### Important Constants
 
@@ -692,19 +713,24 @@ collision을 제공한다. 현재 구현은 이를 Unity scene이나 Rain World 
 
 | 원작 `Room` 책임 | 현재 Windows 대응 | 정확한 소스 |
 |---|---|---|
-| floor/solid 공간 | 각 monitor work area의 bottom floor, 화면 상단 안전 여백을 만족하는 visible window top 및 left/right wall | `DesktopCollisionWorld.Refresh`, `Desktop/WindowEnumerator.cs` |
-| terrain collision | horizontal crossing/shallow penetration, vertical wall crossing 및 `1.5 px` resting contact | `ResolveHorizontal`, `ResolveVertical` |
+| floor/solid 공간 | monitor별 명시적 floor·bottom taskbar top·노출 좌우 boundary, 화면 상단 안전 여백을 만족하는 visible window top 및 left/right wall | `DesktopCollisionWorld.Refresh`, `AddMonitorTerrain`, `Desktop/WindowEnumerator.cs` |
+| terrain collision | impact-time X/Y를 쓰는 swept crossing, shallow penetration 및 `1.5 px` resting contact | `ResolveHorizontal`, `ResolveVertical` |
 | window top 내려가기 | 선택한 양수 window surface id만 12 tick collision에서 제외 | `VirtualInput.DropThrough`, `SlugcatMovement.IgnoredSurfaceId`, `Resolve(..., ignoredHorizontalSurfaceId)` |
 | limb/tail floor query | x와 최대 낙하 거리 안의 가장 가까운 horizontal surface | `TryGetFloor` |
 | wall-climb hand query | 진행 방향의 실제 window left/right wall X를 최대 `30 px`에서 선택 | `TryGetWall`, `Limb.Step` |
 | ledge 거리 | 현재/선호 surface의 좌우 edge 거리 | `DistanceToEdge` |
 | moving platform/wall | 이전/current bounds에서 top/left/right별 delta를 계산해 body와 전체 graphics chain에 적용 | `RefreshFromSnapshots`, `GetSurfaceMovement(id, kind)`, `Slugcat.ApplyMovingSurfaceDelta`, `SlugcatGraphics.ApplyMovingSurfaceDelta` |
-| world bounds | virtual-monitor X clamp와 화면 밖 recovery | `RecoverAgainstMonitorBounds` |
+| world bounds | monitor floor와 실제 노출 boundary를 같은 snapshot terrain으로 제공; 강제 clamp/teleport 없음 | `RefreshFromSnapshots`, `AddMonitorBoundary`, `Resolve` |
 
 surface 목록은 `SimulationConstants.WindowRefreshSeconds=.25`마다 갱신되며, 물리는 그
-사이 snapshot을 사용한다. 이는 원작 Room이 논리 tick에서 tile query를 제공하는 것과
-다르다. Windows 좌표계는 y-down이고, 작업표시줄 같은 예약 영역은 monitor의
-`WorkArea.Bottom` floor로 자연스럽게 제외된다. `EnumWindows`의 앞→뒤 z-order에서
+사이 snapshot을 사용한다. HWND별 previous/current rect와 z-order를 유지하고, `EnumWindows`
+자체 실패에는 cache를 그대로 보존한다. 성공한 열거에서 누락된 HWND는 2회 refresh까지
+유예하되 실제 HWND가 없어지거나 최소화되면 즉시 제거한다. 이는 원작 Room이 논리 tick에서 tile query를 제공하는 것과
+다르다. Windows 좌표계는 y-down이다. bottom taskbar가 있으면 `WorkArea.Bottom`을
+`TaskbarTop`과 `MonitorFloor`로 함께 기록하고, top/side/없는 배치에서는 `Bounds.Bottom`을
+연속 monitor floor로 사용한다. 좌우 boundary는 이웃 monitor와 Y가 겹치는 구간을 빼므로
+공유 seam은 통과할 수 있고 엇갈린 monitor 사이의 실제 빈 구간만 terrain으로 남는다.
+`EnumWindows`의 앞→뒤 z-order에서
 앞 창 bounds를 뒤 창의 top/left/right span에서 interval subtraction하므로 완전히 가린
 surface는 만들지 않고 부분 가림은 보이는 구간만 남긴다. monitor work-area 상단에서
 `32 px` 이내인 maximized/top-snapped window top은, 그 위에 서면 몸과 머리가 화면 밖에
@@ -770,7 +796,7 @@ procedural fallback이 있으나, 시작 단계의 설치 유효성 정책은 �
 
 | 영역 | 그대로 유지한 핵심 | 의도적 적응 또는 남은 차이 |
 |---|---|---|
-| clock | 40 Hz, frame당 최대 3 catch-up, backlog 폐기, draw interpolation | strict `>1` 대신 epsilon 경계, elapsed `.25 s` clamp |
+| clock | 40 Hz, frame당 최대 3 catch-up, backlog 폐기, draw interpolation | DWM/monitor refresh draw, strict `>1` 대신 epsilon 경계, elapsed `.25 s` clamp |
 | Player body | radius `9/8`, 총질량 `.7*weight`, rest `17`, 기본 물리 상수, collision→1 solve→movement 순서 | Room collision 공간, 상태/입력 축약, window-only 12-tick drop-through |
 | desktop AI | 가상 입력이 Player 대응 계층만 구동 | safer-edge, 55 px urgent Avoid, wall rising-edge·18-tick grace·urgent climb은 Windows 펫 전용 |
 | variants | 네 기본색, run/weight, Gourmand `1.4/1.6`, 공통 head/tail | skills, malnourishment, exhaustion 미구현 |

@@ -3,6 +3,7 @@ using RainWorldDesktopPet.AI;
 using RainWorldDesktopPet.Core;
 using RainWorldDesktopPet.Creature;
 using RainWorldDesktopPet.Physics;
+using RainWorldDesktopPet.RainWorld;
 
 namespace RainWorldDesktopPet.Graphics
 {
@@ -12,18 +13,34 @@ namespace RainWorldDesktopPet.Graphics
         private readonly Limb[] arms;
         private readonly BodyPart head;
         private readonly BodyPart legs;
-        private readonly ProceduralTail tail;
+        private ProceduralTail tail;
+        private SlugcatVisualProfile visualProfile;
+        private ISlugcatGraphicsExtension[] extensions;
+        private RainWorldAtlasSet atlas;
         private readonly SlugcatPose renderPose;
+        private readonly Random graphicsRandom = new Random();
         private readonly Vec2[,] drawPositions = new Vec2[2, 2];
         private Vec2 lookDirection;
         private Vec2 lastLookDirection;
+        private Vec2 originalLookDirection;
+        private Vec2 lastOriginalLookDirection;
+        private bool mouseAttentionActive;
         private Vec2 legsDirection = Vec2.Down;
         private Vec2 lastLegsDirection = Vec2.Down;
         private Vec2 legsTargetPosition;
+        private Vec2 headTargetPosition;
         private double breath;
         private double lastBreath;
+        private int blink;
+        private double airborneCounter;
 
         public SlugcatGraphics(Slugcat slugcat)
+            : this(slugcat, SlugcatVisualProfiles.Default, null)
+        {
+        }
+
+        public SlugcatGraphics(Slugcat slugcat, SlugcatVisualProfile profile,
+            RainWorldAtlasSet atlas)
         {
             this.slugcat = slugcat;
             Vec2 chest = slugcat.BodyChunks[0].Position;
@@ -36,29 +53,82 @@ namespace RainWorldDesktopPet.Graphics
             arms = new Limb[2];
             arms[0] = new Limb(LimbKind.Arm, -1, chest + new Vec2(-4.0, 8.0), 20.0);
             arms[1] = new Limb(LimbKind.Arm, 1, chest + new Vec2(4.0, 8.0), 20.0);
-            tail = new ProceduralTail(hips);
             renderPose = new SlugcatPose();
-            int count = tail.Segments.Length;
-            renderPose.Tail = new Vec2[count];
-            renderPose.TailLast = new Vec2[count];
-            renderPose.TailCurrent = new Vec2[count];
-            renderPose.TailRadii = new double[count];
+            SetVisualProfile(profile ?? SlugcatVisualProfiles.Default, atlas);
         }
 
         public ProceduralTail Tail { get { return tail; } }
         public Limb[] Arms { get { return arms; } }
         public BodyPart Legs { get { return legs; } }
         public BodyPart Head { get { return head; } }
+        public SlugcatVisualProfile VisualProfile { get { return visualProfile; } }
+        public ISlugcatGraphicsExtension[] Extensions { get { return extensions; } }
+
+        public void SetVisualProfile(SlugcatVisualProfile profile, RainWorldAtlasSet sourceAtlas)
+        {
+            if (profile == null) throw new ArgumentNullException("profile");
+            ProceduralTail previous = tail;
+            visualProfile = profile;
+            atlas = sourceAtlas;
+            tail = new ProceduralTail(slugcat.BodyChunks[1].Position, profile.Tail);
+            if (previous != null && previous.Segments.Length == tail.Segments.Length)
+            {
+                for (int i = 0; i < tail.Segments.Length; i++)
+                {
+                    tail.Segments[i].Position = previous.Segments[i].Position;
+                    tail.Segments[i].LastPosition = previous.Segments[i].LastPosition;
+                    tail.Segments[i].Velocity = previous.Segments[i].Velocity;
+                }
+            }
+
+            extensions = SlugcatGraphicsExtensionFactory.Create(profile, slugcat, atlas);
+            int count = tail.Segments.Length;
+            renderPose.Tail = new Vec2[count];
+            renderPose.TailLast = new Vec2[count];
+            renderPose.TailCurrent = new Vec2[count];
+            renderPose.TailRadii = new double[count];
+            int extraCount = 0;
+            for (int i = 0; i < extensions.Length; i++) extraCount += extensions[i].SpriteCount;
+            renderPose.ExtraParts = new ExtraGraphicsPartPose[extraCount];
+            for (int i = 0; i < extraCount; i++) renderPose.ExtraParts[i] = new ExtraGraphicsPartPose();
+        }
 
         // Called after Player/PhysicalObject update, matching GraphicsModule.Update.
         public void Step(AttentionSystem attention, DesktopCollisionWorld world)
+        {
+            Step(attention, attention.Target, false, world);
+        }
+
+        public void Step(AttentionSystem attention, Vec2 originalAttentionTarget,
+            bool isMouseAttentionActive, DesktopCollisionWorld world)
         {
             lastBreath = breath;
             breath += slugcat.State.Animation == AnimationIndex.Sleep
                 ? 0.0125
                 : 1.0 / MathUtil.Lerp(60.0, 15.0, Math.Pow(slugcat.State.AerobicLevel, 1.5));
             lastLookDirection = lookDirection;
+            lastOriginalLookDirection = originalLookDirection;
+            originalLookDirection = (originalAttentionTarget - head.Position).Normalized;
             lookDirection = (attention.Smoothed - head.Position).Normalized;
+            mouseAttentionActive = isMouseAttentionActive && slugcat.State.Conscious &&
+                !slugcat.State.Dead && slugcat.State.StunCounter < 1;
+            if (!slugcat.State.Conscious)
+            {
+                // PlayerGraphics clears objectLooker and zeroes lookDirection
+                // whenever Creature.Consious is false.
+                originalLookDirection = Vec2.Zero;
+                lookDirection = Vec2.Zero;
+                blink = 10;
+            }
+            blink--;
+            if (blink < -graphicsRandom.Next(2, 1800))
+            {
+                int blinkUpper = graphicsRandom.Next(3, 10);
+                blink = blinkUpper <= 3 ? 3 : graphicsRandom.Next(3, blinkUpper);
+            }
+            if (slugcat.State.Animation == AnimationIndex.Sleep)
+                blink = Math.Max(2, blink);
+            blink = Math.Max(blink, slugcat.State.ImpactBlinkTicks);
             lastLegsDirection = legsDirection;
 
             for (int i = 0; i < 2; i++)
@@ -67,6 +137,16 @@ namespace RainWorldDesktopPet.Graphics
                 drawPositions[i, 0] = slugcat.BodyChunks[i].Position;
             }
             ApplyOriginalBodyModeOffsets();
+
+            bool noChunkContact = !slugcat.BodyChunks[0].ContactFloor &&
+                !slugcat.BodyChunks[0].ContactLeft && !slugcat.BodyChunks[0].ContactRight &&
+                !slugcat.BodyChunks[1].ContactFloor &&
+                !slugcat.BodyChunks[1].ContactLeft && !slugcat.BodyChunks[1].ContactRight;
+            if (slugcat.State.BodyMode == BodyModeIndex.Default &&
+                slugcat.State.Animation == AnimationIndex.None && noChunkContact)
+                airborneCounter += slugcat.BodyChunks[0].Velocity.Length;
+            else
+                airborneCounter = 0.0;
 
             Vec2 upper = drawPositions[0, 0];
             Vec2 lower = drawPositions[1, 0];
@@ -88,13 +168,16 @@ namespace RainWorldDesktopPet.Graphics
                 slugcat.State.Facing, slugcat.State.BodyMode, world);
 
             head.Update();
+            world.PushOutOfTerrain(head, slugcat.BodyChunks[0].Position);
             Vec2 neckDirection = bodyUp * 3.0;
             if (slugcat.State.BodyMode == BodyModeIndex.Crawl) neckDirection.X *= 2.5;
             Vec2 headTarget = Vec2.Lerp(upper, lower, 0.2) + neckDirection;
+            headTargetPosition = headTarget;
             head.ConnectToPoint(headTarget, 3.0, false, 0.2,
                 slugcat.BodyChunks[0].Velocity, 0.7, 0.1);
 
             legs.Update();
+            world.PushOutOfTerrain(legs, slugcat.BodyChunks[1].Position);
             bool grounded = slugcat.BodyChunks[1].ContactFloor;
             Vec2 legsTarget = grounded
                 ? slugcat.BodyChunks[1].Position + new Vec2(legsDirection.X * 8.0, -1.0)
@@ -118,7 +201,8 @@ namespace RainWorldDesktopPet.Graphics
             for (int i = 0; i < 2; i++)
             {
                 arms[i].Step(slugcat, slugcat.BodyChunks[0].Position,
-                    slugcat.BodyChunks[1].Position, slugcat.BodyChunks[0].Velocity, world);
+                    slugcat.BodyChunks[1].Position, slugcat.BodyChunks[0].Velocity,
+                    world, i == 0 ? null : arms[0], airborneCounter);
             }
             if (slugcat.State.Animation == AnimationIndex.Sleep)
             {
@@ -127,6 +211,8 @@ namespace RainWorldDesktopPet.Graphics
                     center + new Vec2(slugcat.State.Facing * 5.0, 3.0), 0.35);
                 tail.CurlAround(lower, slugcat.State.Facing, 1.0);
             }
+            for (int i = 0; i < extensions.Length; i++)
+                extensions[i].Step(slugcat, lookDirection);
         }
 
         private void ApplyOriginalBodyModeOffsets()
@@ -182,6 +268,24 @@ namespace RainWorldDesktopPet.Graphics
             SlugcatPose pose = renderPose;
             pose.SimulationTick = simulationTick;
             pose.TimeStacker = timeStacker;
+            pose.CurrentSkin = visualProfile.Skin;
+            pose.OriginalSlugcatId = visualProfile.ResolveOriginalSlugcatId(slugcat.Appearance);
+            pose.VisualProfileName = visualProfile.DisplayName;
+            pose.BaseSpriteCount = visualProfile.BaseSpriteCount;
+            pose.ExtraSpriteCount = visualProfile.ExtraSpriteCount;
+            pose.GraphicsExtensions = visualProfile.ExtensionNames.Length == 0
+                ? "none"
+                : string.Join(", ", visualProfile.ExtensionNames);
+            pose.TailProfileName = visualProfile.Tail.Name;
+            pose.TailRootRadius = visualProfile.Tail.RootRadius;
+            pose.VisualBodyColor = visualProfile.ResolveBodyColor(slugcat.Appearance);
+            pose.VisualEyeColor = visualProfile.EyeColor;
+            pose.BodyElement = visualProfile.BodyElement;
+            pose.HipsElement = visualProfile.HipsElement;
+            pose.VisualBodyScale = visualProfile.ResolveBodyScale(slugcat.Appearance);
+            pose.VisualHipsScale = visualProfile.ResolveHipsScale(slugcat.Appearance);
+            pose.VisualHeadScale = visualProfile.HeadScale;
+            pose.ArmShoulderScale = visualProfile.ArmShoulderScale;
             for (int i = 0; i < 2; i++)
             {
                 pose.ChunkLast[i] = slugcat.BodyChunks[i].LastPosition;
@@ -198,7 +302,12 @@ namespace RainWorldDesktopPet.Graphics
             pose.HeadLast = head.LastPosition;
             pose.HeadCurrent = head.Position;
             pose.Head = head.RenderPosition(timeStacker);
+            pose.HeadTarget = headTargetPosition;
+            pose.HeadVelocity = head.Velocity;
             pose.LookDirection = Vec2.Lerp(lastLookDirection, lookDirection, timeStacker);
+            pose.OriginalLookDirection = Vec2.Lerp(lastOriginalLookDirection,
+                originalLookDirection, timeStacker);
+            pose.MouseAttentionActive = mouseAttentionActive;
             pose.HeadDirection = (pose.Head - Vec2.Lerp(pose.Hips, pose.Chest, 0.5)).Normalized;
             pose.LegsLast = legs.LastPosition;
             pose.LegsCurrent = legs.Position;
@@ -208,6 +317,51 @@ namespace RainWorldDesktopPet.Graphics
             pose.Animation = slugcat.State.Animation;
             pose.BodyMode = slugcat.State.BodyMode;
             pose.AnimationFrame = slugcat.State.AnimationFrame;
+            pose.InputX = slugcat.LastInput.X;
+            VirtualInput[] inputHistory = slugcat.Movement.InputHistory;
+            pose.PreviousInputX = inputHistory[1].X;
+            pose.InputY = slugcat.LastInput.Y;
+            pose.InputJump = slugcat.LastInput.Jump;
+            pose.Conscious = slugcat.State.Conscious;
+            pose.Dead = slugcat.State.Dead;
+            pose.Blink = blink > 0;
+            pose.IsAirborne = !slugcat.State.Grounded &&
+                slugcat.State.BodyMode == BodyModeIndex.Default;
+            double verticalVelocity = (slugcat.BodyChunks[0].Velocity.Y +
+                slugcat.BodyChunks[1].Velocity.Y) * 0.5;
+            pose.IsRising = pose.IsAirborne && verticalVelocity < 0.0;
+            pose.IsFalling = pose.IsAirborne && verticalVelocity >= 0.0;
+            pose.AirborneCounter = airborneCounter;
+            pose.AirMovementContribution[0] = slugcat.Movement.LastAirMovementContribution[0];
+            pose.AirMovementContribution[1] = slugcat.Movement.LastAirMovementContribution[1];
+            pose.AirHorizontalVelocityBefore[0] = slugcat.Movement.LastAirHorizontalVelocityBefore[0];
+            pose.AirHorizontalVelocityBefore[1] = slugcat.Movement.LastAirHorizontalVelocityBefore[1];
+            pose.AirHorizontalVelocityAfter[0] = slugcat.Movement.LastAirHorizontalVelocityAfter[0];
+            pose.AirHorizontalVelocityAfter[1] = slugcat.Movement.LastAirHorizontalVelocityAfter[1];
+            pose.AirControlBranch = slugcat.Movement.LastAirControlBranch;
+            pose.IsStunned = slugcat.State.IsStunned;
+            pose.StunCounter = slugcat.State.StunCounter;
+            pose.InitialStunValue = slugcat.State.InitialStunValue;
+            pose.Standing = slugcat.State.Standing;
+            TerrainImpactData impact = slugcat.LastTerrainImpact;
+            pose.TerrainImpactSequence = slugcat.TerrainImpactSequence;
+            pose.ImpactBodyChunk = impact.BodyChunkIndex;
+            pose.PreImpactVelocity = impact.PreImpactVelocity;
+            pose.PostImpactVelocity = impact.PostImpactVelocity;
+            pose.ImpactDirection = impact.ImpactDirection;
+            pose.ImpactCollisionNormal = impact.CollisionNormal;
+            pose.ImpactSpeed = impact.ImpactSpeed;
+            pose.ImpactSurfaceId = impact.SurfaceId;
+            pose.ImpactSurfaceKind = impact.SurfaceKind;
+            pose.ImpactFirstContact = impact.FirstContact;
+            pose.TerrainImpactTriggered = impact.TerrainImpactTriggered;
+            pose.CalculatedImpactStun = impact.CalculatedStun;
+            pose.AppliedImpactStun = impact.AppliedStun;
+            pose.ImpactWasOriginallyLethal = impact.WasOriginallyLethal;
+            pose.ImpactSafetyOverrideApplied = impact.SafetyOverrideApplied;
+            pose.DesktopImpactResult = impact.DesktopResult;
+            pose.ImpactStunDeadlineTick = impact.ImpactStunDeadlineTick;
+            pose.ImpactCausedDeath = impact.CausedDeath;
             pose.Breath = 0.5 + 0.5 * Math.Sin(MathUtil.Lerp(lastBreath, breath, timeStacker) * Math.PI * 2.0);
             pose.LandingCompression = slugcat.State.LandingCompression;
             for (int i = 0; i < 2; i++)
@@ -223,9 +377,17 @@ namespace RainWorldDesktopPet.Graphics
                 pose.ArmMaxLengths[i] = arms[i].Length;
                 pose.ArmRetractCounters[i] = arms[i].RetractCounter;
                 pose.ArmModes[i] = arms[i].Mode;
+                pose.ArmGripSurfaceIds[i] = arms[i].GripSurfaceId;
                 pose.ArmVisible[i] = arms[i].Mode != LimbMode.Retracted;
                 pose.Elbows[i] = arms[i].ComputeJoint(pose.Chest, pose.Hands[i], timeStacker);
-                pose.Feet[i] = pose.Legs + pose.BodyRight * (i == 0 ? -2.0 : 2.0);
+                double side = i == 0 ? -2.0 : 2.0;
+                Vec2 lastBodyUp = (drawPositions[0, 1] - drawPositions[1, 1]).Normalized;
+                if (lastBodyUp.LengthSquared < 0.1) lastBodyUp = Vec2.Up;
+                Vec2 currentBodyUp = (drawPositions[0, 0] - drawPositions[1, 0]).Normalized;
+                if (currentBodyUp.LengthSquared < 0.1) currentBodyUp = Vec2.Up;
+                pose.FootLast[i] = pose.LegsLast + lastBodyUp.Perpendicular * side;
+                pose.FootCurrent[i] = pose.LegsCurrent + currentBodyUp.Perpendicular * side;
+                pose.Feet[i] = Vec2.Lerp(pose.FootLast[i], pose.FootCurrent[i], timeStacker);
                 pose.FootTargets[i] = legsTargetPosition;
                 pose.Knees[i] = Vec2.Lerp(pose.Hips, pose.Feet[i], 0.5);
             }
@@ -240,10 +402,31 @@ namespace RainWorldDesktopPet.Graphics
             }
             pose.CharacterOrigin = (pose.Chest + pose.Hips) * 0.5;
             pose.CharacterRenderScale = SimulationConstants.CharacterRenderScale;
-            pose.FaceScaleX = SpriteRenderer.SelectFaceScaleX(pose);
-            pose.SelectedFaceElement = "FaceA" + SpriteRenderer.SelectFaceFrame(pose);
+            pose.TailRoot = (pose.Hips * 3.0 + pose.Chest) / 4.0;
+            OriginalFaceState face = SpriteRenderer.ResolveOriginalFaceState(pose);
+            pose.SelectedFaceElement = face.FaceElement;
+            pose.FacePosition = face.FacePosition;
+            pose.FaceRotation = face.FaceRotation;
+            pose.FaceScaleX = face.FaceScaleX;
+            pose.FaceSelectionReason = face.Reason;
+            pose.HeadElement = face.HeadElement;
+            pose.HeadSpritePosition = face.HeadPosition;
+            pose.HeadRotation = face.HeadRotation;
+            pose.HeadScaleX = face.HeadScaleX;
+            pose.TailRenderMode = "OriginalTriangleMesh";
+            pose.TailMeshVertexCount = 15;
             for (int i = 0; i < 2; i++)
+            {
                 pose.ArmShoulders[i] = SpriteRenderer.ComputeArmShoulder(pose, i);
+                pose.ArmDirections[i] = (pose.ArmShoulders[i] - pose.Hands[i]).Normalized;
+                pose.ArmRotations[i] = SpriteRenderer.ComputeArmRotation(pose, i);
+                pose.ArmScaleY[i] = SpriteRenderer.ComputeArmScaleY(pose, i);
+            }
+            int extraIndex = 0;
+            for (int i = 0; i < extensions.Length; i++)
+                extraIndex = extensions[i].BuildPose(pose, extraIndex, timeStacker);
+            if (extraIndex != pose.ExtraParts.Length)
+                throw new InvalidOperationException("Graphics extension sprite allocation did not match its declared count.");
             pose.UpdateGraphicsBounds();
             return pose;
         }
@@ -255,6 +438,7 @@ namespace RainWorldDesktopPet.Graphics
             legs.Translate(delta);
             for (int i = 0; i < 2; i++) arms[i].Translate(delta);
             tail.Translate(delta);
+            for (int i = 0; i < extensions.Length; i++) extensions[i].Translate(delta);
             for (int i = 0; i < 2; i++)
             {
                 drawPositions[i, 0] += delta;

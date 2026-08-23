@@ -19,10 +19,12 @@ namespace RainWorldDesktopPet.Desktop
     {
         private readonly uint currentProcessId = (uint)Process.GetCurrentProcess().Id;
 
+        public bool LastEnumerationSucceeded { get; private set; }
+
         public IList<DesktopWindowSnapshot> Enumerate(IntPtr overlayHandle)
         {
             List<DesktopWindowSnapshot> result = new List<DesktopWindowSnapshot>(64);
-            NativeMethods.EnumWindows(delegate(IntPtr handle, IntPtr parameter)
+            LastEnumerationSucceeded = NativeMethods.EnumWindows(delegate(IntPtr handle, IntPtr parameter)
             {
                 DesktopWindowSnapshot snapshot;
                 if (TryGetWindow(handle, overlayHandle, out snapshot))
@@ -32,7 +34,17 @@ namespace RainWorldDesktopPet.Desktop
 
                 return true;
             }, IntPtr.Zero);
+            if (!LastEnumerationSucceeded) result.Clear();
             return result;
+        }
+
+        public bool IsWindowAlive(IntPtr handle)
+        {
+            if (!NativeMethods.IsWindow(handle) || !NativeMethods.IsWindowVisible(handle) ||
+                NativeMethods.IsIconic(handle)) return false;
+            int cloaked;
+            return NativeMethods.DwmGetWindowAttribute(handle, NativeMethods.DWMWA_CLOAKED,
+                out cloaked, sizeof(int)) != 0 || cloaked == 0;
         }
 
         private bool TryGetWindow(IntPtr handle, IntPtr overlayHandle, out DesktopWindowSnapshot snapshot)

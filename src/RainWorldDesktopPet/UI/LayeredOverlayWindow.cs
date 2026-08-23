@@ -16,9 +16,11 @@ namespace RainWorldDesktopPet.UI
         private const int HotKeyId = 0x5343;
         private readonly RainWorldInstallation installation;
         private readonly SlugcatVariant startVariant;
+        private readonly SlugcatSkin startSkin;
         private readonly Timer renderTimer;
         private readonly NotifyIcon trayIcon;
-        private readonly ToolStripMenuItem skinMenu;
+        private readonly ToolStripMenuItem variantMenu;
+        private readonly ToolStripMenuItem visualSkinMenu;
         private readonly ToolStripMenuItem debugItem;
         private readonly ToolStripMenuItem retryRenderItem;
         private LayeredBackBuffer backBuffer;
@@ -27,11 +29,21 @@ namespace RainWorldDesktopPet.UI
         private RenderSpace renderSpace;
         private bool mouseCaptured;
         private int renderErrorCount;
+        private bool renderingEnabled;
+        private bool renderingFrame;
+        private double displayRefreshRate;
 
         public LayeredOverlayWindow(RainWorldInstallation installation, bool startDebug, SlugcatVariant startVariant)
+            : this(installation, startDebug, startVariant, SlugcatSkin.Default)
+        {
+        }
+
+        public LayeredOverlayWindow(RainWorldInstallation installation, bool startDebug,
+            SlugcatVariant startVariant, SlugcatSkin startSkin)
         {
             this.installation = installation;
             this.startVariant = startVariant;
+            this.startSkin = startSkin;
             FormBorderStyle = FormBorderStyle.None;
             ShowInTaskbar = false;
             TopMost = true;
@@ -42,7 +54,9 @@ namespace RainWorldDesktopPet.UI
             Text = "Slugcat in My Monitor";
 
             renderTimer = new Timer();
-            renderTimer.Interval = 16;
+            // This timer is only an error-retry/fallback wakeup. Normal frames
+            // are paced by DWM composition from Application.Idle.
+            renderTimer.Interval = 250;
             renderTimer.Tick += RenderTimerTick;
 
             ContextMenuStrip menu = new ContextMenuStrip();
@@ -64,12 +78,19 @@ namespace RainWorldDesktopPet.UI
             retryRenderItem.Click += RetryRendering;
             ToolStripMenuItem exitItem = new ToolStripMenuItem("Exit");
             exitItem.Click += delegate { Close(); };
-            skinMenu = new ToolStripMenuItem("Original slugcat");
-            skinMenu.DropDownItems.Add(CreateVariantItem("Survivor (white)", SlugcatVariant.Survivor, startVariant));
-            skinMenu.DropDownItems.Add(CreateVariantItem("Monk (yellow)", SlugcatVariant.Monk, startVariant));
-            skinMenu.DropDownItems.Add(CreateVariantItem("Hunter (red)", SlugcatVariant.Hunter, startVariant));
-            skinMenu.DropDownItems.Add(CreateVariantItem("Gourmand", SlugcatVariant.Gourmand, startVariant));
-            menu.Items.Add(skinMenu);
+            variantMenu = new ToolStripMenuItem("Player physics / base colour");
+            variantMenu.DropDownItems.Add(CreateVariantItem("Survivor (white)", SlugcatVariant.Survivor, startVariant));
+            variantMenu.DropDownItems.Add(CreateVariantItem("Monk (yellow)", SlugcatVariant.Monk, startVariant));
+            variantMenu.DropDownItems.Add(CreateVariantItem("Hunter (red)", SlugcatVariant.Hunter, startVariant));
+            variantMenu.DropDownItems.Add(CreateVariantItem("Gourmand", SlugcatVariant.Gourmand, startVariant));
+            visualSkinMenu = new ToolStripMenuItem("Slugcat skin");
+            visualSkinMenu.DropDownItems.Add(CreateSkinItem("Default", SlugcatSkin.Default, startSkin));
+            visualSkinMenu.DropDownItems.Add(CreateSkinItem("Artificer / 기술병", SlugcatSkin.Artificer, startSkin));
+            visualSkinMenu.DropDownItems.Add(CreateSkinItem("Spearmaster / 창술가", SlugcatSkin.Spearmaster, startSkin));
+            visualSkinMenu.DropDownItems.Add(CreateSkinItem("Rivulet / 물살이", SlugcatSkin.Rivulet, startSkin));
+            visualSkinMenu.DropDownItems.Add(CreateSkinItem("Saint / 성자", SlugcatSkin.Saint, startSkin));
+            menu.Items.Add(variantMenu);
+            menu.Items.Add(visualSkinMenu);
             menu.Items.Add(debugItem);
             menu.Items.Add(pauseItem);
             menu.Items.Add(retryRenderItem);
@@ -85,7 +106,9 @@ namespace RainWorldDesktopPet.UI
             Shown += delegate
             {
                 gameLoop.DebugEnabled = startDebug;
-                renderTimer.Start();
+                displayRefreshRate = NativeMethods.GetPrimaryDisplayRefreshRate();
+                renderingEnabled = true;
+                Application.Idle += ApplicationIdle;
             };
         }
 
@@ -106,13 +129,16 @@ namespace RainWorldDesktopPet.UI
         {
             base.OnHandleCreated(e);
             ConfigureVirtualDesktopOverlay(false);
-            gameLoop = new GameLoop(Handle, installation, startVariant);
+            gameLoop = new GameLoop(Handle, installation, startVariant, startSkin);
+            RefreshSkinAvailability();
             NativeMethods.RegisterHotKey(Handle, HotKeyId, NativeMethods.MOD_NOREPEAT, NativeMethods.VK_F1);
         }
 
         protected override void OnHandleDestroyed(EventArgs e)
         {
             NativeMethods.UnregisterHotKey(Handle, HotKeyId);
+            renderingEnabled = false;
+            Application.Idle -= ApplicationIdle;
             renderTimer.Stop();
             if (gameLoop != null) gameLoop.Renderer.Dispose();
             if (backBuffer != null) backBuffer.Dispose();
@@ -123,6 +149,33 @@ namespace RainWorldDesktopPet.UI
 
         private void RenderTimerTick(object sender, EventArgs e)
         {
+            renderTimer.Stop();
+            renderingEnabled = true;
+            RenderFrame();
+        }
+
+        private void ApplicationIdle(object sender, EventArgs e)
+        {
+            while (renderingEnabled && NativeMethods.IsMessageQueueIdle())
+            {
+                RenderFrame();
+                if (!renderingEnabled) break;
+                // DwmFlush waits for the next compositor frame, allowing the
+                // draw loop to follow 60/120/144/165/240 Hz displays without
+                // advancing the fixed 40 Hz simulation at that rate.
+                if (NativeMethods.DwmFlush() != 0)
+                {
+                    renderTimer.Interval = 1;
+                    renderTimer.Start();
+                    break;
+                }
+            }
+        }
+
+        private void RenderFrame()
+        {
+            if (!renderingEnabled || renderingFrame) return;
+            renderingFrame = true;
             try
             {
                 gameLoop.Advance(Handle);
@@ -134,10 +187,10 @@ namespace RainWorldDesktopPet.UI
                 gameLoop.Renderer.Render(graphics, pose, renderSpace, gameLoop.DebugEnabled,
                     gameLoop.World, gameLoop.Slugcat, gameLoop.AI, gameLoop.AssetStatus, gameLoop.Appearance);
                 backBuffer.Present(Handle, renderSpace.WorldOrigin);
+                gameLoop.RecordRenderFrame(displayRefreshRate);
                 if (renderErrorCount != 0)
                 {
                     renderErrorCount = 0;
-                    renderTimer.Interval = 16;
                     retryRenderItem.Enabled = false;
                 }
             }
@@ -154,15 +207,21 @@ namespace RainWorldDesktopPet.UI
                 // transient. Keep the tray alive and let the user explicitly
                 // retry, while recording this failure only once.
                 Program.LogException(exception);
+                renderingEnabled = false;
                 renderTimer.Stop();
                 retryRenderItem.Enabled = true;
                 trayIcon.ShowBalloonTip(5000, "Slugcat rendering paused",
                     exception.Message + " Use Retry rendering from the tray menu.", ToolTipIcon.Error);
             }
+            finally
+            {
+                renderingFrame = false;
+            }
         }
 
         private void HandlePresentationFailure(LayeredPresentationException exception)
         {
+            renderingEnabled = false;
             renderErrorCount++;
             if (renderErrorCount == 1)
             {
@@ -201,6 +260,7 @@ namespace RainWorldDesktopPet.UI
 
             int delay = 250 << Math.Min(renderErrorCount - 1, 4);
             renderTimer.Interval = Math.Min(delay, 4000);
+            renderTimer.Start();
         }
 
         private void RetryRendering(object sender, EventArgs e)
@@ -210,8 +270,9 @@ namespace RainWorldDesktopPet.UI
                 ReplaceBackBuffer();
                 renderErrorCount = 0;
                 retryRenderItem.Enabled = false;
-                renderTimer.Interval = 16;
-                renderTimer.Start();
+                displayRefreshRate = NativeMethods.GetPrimaryDisplayRefreshRate();
+                renderingEnabled = true;
+                RenderFrame();
             }
             catch (Exception exception)
             {
@@ -262,10 +323,12 @@ namespace RainWorldDesktopPet.UI
                 try
                 {
                     ConfigureVirtualDesktopOverlay(true);
+                    displayRefreshRate = NativeMethods.GetPrimaryDisplayRefreshRate();
                 }
                 catch (Exception exception)
                 {
                     Program.LogException(exception);
+                    renderingEnabled = false;
                     renderTimer.Stop();
                     retryRenderItem.Enabled = true;
                 }
@@ -326,12 +389,57 @@ namespace RainWorldDesktopPet.UI
         {
             ToolStripMenuItem selected = sender as ToolStripMenuItem;
             if (selected == null) return;
-            for (int i = 0; i < skinMenu.DropDownItems.Count; i++)
+            for (int i = 0; i < variantMenu.DropDownItems.Count; i++)
             {
-                ToolStripMenuItem item = skinMenu.DropDownItems[i] as ToolStripMenuItem;
+                ToolStripMenuItem item = variantMenu.DropDownItems[i] as ToolStripMenuItem;
                 if (item != null) item.Checked = ReferenceEquals(item, selected);
             }
             if (gameLoop != null) gameLoop.SetVariant((SlugcatVariant)selected.Tag);
+        }
+
+        private ToolStripMenuItem CreateSkinItem(string label, SlugcatSkin skin,
+            SlugcatSkin selected)
+        {
+            ToolStripMenuItem item = new ToolStripMenuItem(label);
+            item.Tag = skin;
+            item.Checked = skin == selected;
+            item.Click += SkinItemClick;
+            return item;
+        }
+
+        private void SkinItemClick(object sender, EventArgs e)
+        {
+            ToolStripMenuItem selected = sender as ToolStripMenuItem;
+            if (selected == null || gameLoop == null) return;
+            SlugcatSkin skin = (SlugcatSkin)selected.Tag;
+            if (!gameLoop.SetSkin(skin))
+            {
+                string reason;
+                gameLoop.CanUseSkin(skin, out reason);
+                trayIcon.ShowBalloonTip(4000, "Downpour skin unavailable",
+                    reason, ToolTipIcon.Warning);
+                return;
+            }
+            for (int i = 0; i < visualSkinMenu.DropDownItems.Count; i++)
+            {
+                ToolStripMenuItem item = visualSkinMenu.DropDownItems[i] as ToolStripMenuItem;
+                if (item != null) item.Checked = ReferenceEquals(item, selected);
+            }
+        }
+
+        private void RefreshSkinAvailability()
+        {
+            if (gameLoop == null) return;
+            for (int i = 0; i < visualSkinMenu.DropDownItems.Count; i++)
+            {
+                ToolStripMenuItem item = visualSkinMenu.DropDownItems[i] as ToolStripMenuItem;
+                if (item == null) continue;
+                string reason;
+                SlugcatSkin skin = (SlugcatSkin)item.Tag;
+                item.Enabled = gameLoop.CanUseSkin(skin, out reason);
+                item.ToolTipText = reason ?? "Local Rain World PlayerGraphics assets available";
+                item.Checked = skin == gameLoop.Skin;
+            }
         }
 
         private static Vec2 ScreenPointFromLParam(IntPtr value)

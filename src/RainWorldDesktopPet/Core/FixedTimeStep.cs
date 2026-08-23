@@ -18,6 +18,7 @@ namespace RainWorldDesktopPet.Core
         }
 
         public double StepSeconds { get { return stepSeconds; } }
+        public double AccumulatorSeconds { get { return accumulator; } }
         public double Alpha { get { return MathUtil.Clamp01(accumulator / stepSeconds); } }
 
         public void AddElapsed(double seconds)

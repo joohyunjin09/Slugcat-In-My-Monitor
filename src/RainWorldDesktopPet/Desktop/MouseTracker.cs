@@ -7,9 +7,20 @@ namespace RainWorldDesktopPet.Desktop
         private Vec2 lastPosition;
         private Vec2 velocity;
         private bool initialized;
+        private bool leftDown;
+        private bool rightDown;
+        private bool middleDown;
+        private bool clickPending;
 
         public Vec2 Position { get; private set; }
         public Vec2 Velocity { get { return velocity; } }
+
+        public bool ConsumeClick()
+        {
+            bool result = clickPending;
+            clickPending = false;
+            return result;
+        }
 
         public void Sample(double elapsedSeconds)
         {
@@ -19,7 +30,20 @@ namespace RainWorldDesktopPet.Desktop
                 return;
             }
 
-            Position = new Vec2(point.X, point.Y);
+            Position = DesktopWorldTransform.ToSimulation(new Vec2(point.X, point.Y));
+            short leftState = NativeMethods.GetAsyncKeyState(NativeMethods.VK_LBUTTON);
+            short rightState = NativeMethods.GetAsyncKeyState(NativeMethods.VK_RBUTTON);
+            short middleState = NativeMethods.GetAsyncKeyState(NativeMethods.VK_MBUTTON);
+            bool currentLeft = (leftState & 0x8000) != 0;
+            bool currentRight = (rightState & 0x8000) != 0;
+            bool currentMiddle = (middleState & 0x8000) != 0;
+            if ((leftState & 1) != 0 || (rightState & 1) != 0 ||
+                (middleState & 1) != 0 || (currentLeft && !leftDown) ||
+                (currentRight && !rightDown) || (currentMiddle && !middleDown))
+                clickPending = true;
+            leftDown = currentLeft;
+            rightDown = currentRight;
+            middleDown = currentMiddle;
             if (!initialized)
             {
                 initialized = true;
@@ -35,5 +59,6 @@ namespace RainWorldDesktopPet.Desktop
 
             lastPosition = Position;
         }
+
     }
 }

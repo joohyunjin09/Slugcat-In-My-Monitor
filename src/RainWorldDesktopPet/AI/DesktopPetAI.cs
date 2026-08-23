@@ -35,6 +35,9 @@ namespace RainWorldDesktopPet.AI
         private int dropCooldownTicks;
         private int wallContactGraceTicks;
         private int lastWallDirection = 1;
+        private bool originalAttentionInitialized;
+        private AttentionKind originalAttentionKind;
+        private Vec2 originalAttentionTarget;
 
         public DesktopPetAI(int seed)
         {
@@ -46,8 +49,17 @@ namespace RainWorldDesktopPet.AI
         public DesktopBehavior Behavior { get; private set; }
         public AttentionSystem Attention { get; private set; }
         public UtilityContext LastContext { get; private set; }
+        public AttentionKind OriginalAttentionKind { get { return originalAttentionKind; } }
+        public Vec2 OriginalAttentionTarget { get { return originalAttentionTarget; } }
+        public bool MouseAttentionActive { get; private set; }
 
         public VirtualInput Step(Slugcat slugcat, DesktopCollisionWorld world, MouseTracker mouse)
+        {
+            return Step(slugcat, world, mouse, null);
+        }
+
+        public VirtualInput Step(Slugcat slugcat, DesktopCollisionWorld world, MouseTracker mouse,
+            MouseAttentionState mouseAttention)
         {
             behaviorTicks++;
             if (jumpCooldownTicks > 0) jumpCooldownTicks--;
@@ -64,7 +76,7 @@ namespace RainWorldDesktopPet.AI
             }
 
             VirtualInput input = ProduceInput(slugcat, mouse, context);
-            UpdateAttention(slugcat, mouse, context);
+            UpdateAttention(slugcat, mouse, context, mouseAttention);
             Attention.Step();
             return input;
         }
@@ -180,26 +192,43 @@ namespace RainWorldDesktopPet.AI
             }
         }
 
-        private void UpdateAttention(Slugcat slugcat, MouseTracker mouse, UtilityContext context)
+        private void UpdateAttention(Slugcat slugcat, MouseTracker mouse, UtilityContext context,
+            MouseAttentionState mouseAttention)
         {
-            if (Behavior == DesktopBehavior.FollowMouse || Behavior == DesktopBehavior.AvoidMouse || context.MouseDistance < 170.0)
+            if (!originalAttentionInitialized)
             {
-                Attention.SetTarget(AttentionKind.Mouse, mouse.Position);
+                originalAttentionInitialized = true;
+                originalAttentionKind = AttentionKind.RandomPoint;
+                originalAttentionTarget = slugcat.Center + new Vec2(slugcat.State.Facing * 60.0, -20.0);
             }
-            else if (Behavior == DesktopBehavior.BalanceNearEdge)
+
+            if (Behavior == DesktopBehavior.BalanceNearEdge)
             {
-                Attention.SetTarget(AttentionKind.ScreenEdge, slugcat.Center + new Vec2(slugcat.State.Facing * context.EdgeDistance, 12.0));
+                originalAttentionKind = AttentionKind.ScreenEdge;
+                originalAttentionTarget = slugcat.Center +
+                    new Vec2(slugcat.State.Facing * context.EdgeDistance, 12.0);
             }
             else if (Behavior == DesktopBehavior.ObserveWindow)
             {
-                Attention.SetTarget(AttentionKind.Window, slugcat.Center + new Vec2(slugcat.State.Facing * 90.0, 45.0));
+                originalAttentionKind = AttentionKind.Window;
+                originalAttentionTarget = slugcat.Center +
+                    new Vec2(slugcat.State.Facing * 90.0, 45.0);
             }
             else if (behaviorTicks % 80 == 1)
             {
                 double x = (random.NextDouble() * 2.0 - 1.0) * 130.0;
                 double y = (random.NextDouble() * 2.0 - 1.0) * 70.0;
-                Attention.SetTarget(AttentionKind.RandomPoint, slugcat.Center + new Vec2(x, y));
+                originalAttentionKind = AttentionKind.RandomPoint;
+                originalAttentionTarget = slugcat.Center + new Vec2(x, y);
             }
+
+            MouseAttentionActive = slugcat.State.Conscious && !slugcat.State.Dead &&
+                slugcat.State.StunCounter < 1 &&
+                mouseAttention != null && mouseAttention.IsActive;
+            if (MouseAttentionActive)
+                Attention.SetTarget(AttentionKind.Mouse, mouse.Position);
+            else
+                Attention.SetTarget(originalAttentionKind, originalAttentionTarget);
         }
 
         private static int MinimumTicks(DesktopBehavior behavior)

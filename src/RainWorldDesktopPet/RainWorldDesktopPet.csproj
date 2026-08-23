@@ -53,6 +53,7 @@
     <Compile Include="AI\UtilityEvaluator.cs" />
     <Compile Include="Core\FixedTimeStep.cs" />
     <Compile Include="Core\GameLoop.cs" />
+    <Compile Include="Core\DesktopWorldTransform.cs" />
     <Compile Include="Core\MathUtil.cs" />
     <Compile Include="Core\SimulationConstants.cs" />
     <Compile Include="Core\Vec2.cs" />
@@ -64,6 +65,7 @@
     <Compile Include="Desktop\DesktopSurface.cs" />
     <Compile Include="Desktop\MonitorManager.cs" />
     <Compile Include="Desktop\MouseTracker.cs" />
+    <Compile Include="Desktop\MouseAttentionState.cs" />
     <Compile Include="Desktop\NativeMethods.cs" />
     <Compile Include="Desktop\WindowEnumerator.cs" />
     <Compile Include="Graphics\BodyPart.cs" />
@@ -72,11 +74,15 @@
     <Compile Include="Graphics\ParityDiagnostics.cs" />
     <Compile Include="Graphics\RenderSpace.cs" />
     <Compile Include="Graphics\SlugcatGraphics.cs" />
+    <Compile Include="Graphics\SlugcatGraphicsExtension.cs" />
     <Compile Include="Graphics\SlugcatPose.cs" />
+    <Compile Include="Graphics\SlugcatVisualProfile.cs" />
     <Compile Include="Graphics\SpriteRenderer.cs" />
     <Compile Include="Physics\BodyChunk.cs" />
     <Compile Include="Physics\BodyChunkConnection.cs" />
+    <Compile Include="Physics\DesktopCollisionSnapshot.cs" />
     <Compile Include="Physics\DesktopCollisionWorld.cs" />
+    <Compile Include="Physics\TerrainImpactData.cs" />
     <Compile Include="Physics\TailSegment.cs" />
     <Compile Include="Program.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />

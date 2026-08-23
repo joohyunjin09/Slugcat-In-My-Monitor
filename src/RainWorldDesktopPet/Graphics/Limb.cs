@@ -60,6 +60,8 @@ namespace RainWorldDesktopPet.Graphics
         public bool ReachedSnapPosition;
         public bool Retract;
         public int RetractCounter;
+        public long GripSurfaceId;
+        public DesktopSurfaceKind GripSurfaceKind = DesktopSurfaceKind.ScreenEdge;
         public bool IsPlanted { get { return ReachedSnapPosition && Mode == LimbMode.HuntAbsolutePosition; } }
         public int LimbNumber { get { return limbNumber; } }
 
@@ -68,18 +70,37 @@ namespace RainWorldDesktopPet.Graphics
         public void Step(Slugcat player, Vec2 connection, Vec2 rotationChunk,
             Vec2 connectionVelocity, DesktopCollisionWorld world)
         {
+            Step(player, connection, rotationChunk, connectionVelocity, world, null);
+        }
+
+        public void Step(Slugcat player, Vec2 connection, Vec2 rotationChunk,
+            Vec2 connectionVelocity, DesktopCollisionWorld world, Limb leadLimb)
+        {
+            Step(player, connection, rotationChunk, connectionVelocity, world, leadLimb, 0.0);
+        }
+
+        public void Step(Slugcat player, Vec2 connection, Vec2 rotationChunk,
+            Vec2 connectionVelocity, DesktopCollisionWorld world, Limb leadLimb,
+            double airborneCounter)
+        {
             LastConnectionPosition = ConnectionPosition;
             ConnectionPosition = connection;
+            if (GripSurfaceId != 0 && !world.ContainsSurface(GripSurfaceId,
+                GripSurfaceKind, AbsoluteHuntPosition, 3.0))
+            {
+                ReleaseSurfaceGrip();
+            }
             UpdateLimb(connection, rotationChunk, connectionVelocity);
             End.ConnectToPoint(connection, Length, false, 0.0,
                 connectionVelocity, 0.0, 0.0);
 
-            bool retractWhenUnused = EngageInMovement(player, world);
+            bool retractWhenUnused = EngageInMovement(player, world, leadLimb, airborneCounter);
             if (player.State.Animation == AnimationIndex.Sleep)
             {
                 Vec2 center = (player.BodyChunks[0].Position + player.BodyChunks[1].Position) * 0.5;
                 Mode = LimbMode.HuntAbsolutePosition;
                 AbsoluteHuntPosition = center + new Vec2(player.State.Facing * 10.0, 20.0);
+                GripSurfaceId = 0;
                 retractWhenUnused = false;
             }
 
@@ -157,7 +178,8 @@ namespace RainWorldDesktopPet.Graphics
             }
         }
 
-        private bool EngageInMovement(Slugcat player, DesktopCollisionWorld world)
+        private bool EngageInMovement(Slugcat player, DesktopCollisionWorld world, Limb leadLimb,
+            double airborneCounter)
         {
             SlugcatState state = player.State;
             Vec2 connection = player.BodyChunks[0].Position;
@@ -170,7 +192,7 @@ namespace RainWorldDesktopPet.Graphics
                 Mode = LimbMode.HuntAbsolutePosition;
                 HuntSpeed = 12.0;
                 Quickness = 0.7;
-                FindCrawlGrip(player, world);
+                FindCrawlGrip(player, world, leadLimb);
             }
             else if (state.BodyMode == BodyModeIndex.CorridorClimb)
             {
@@ -180,7 +202,7 @@ namespace RainWorldDesktopPet.Graphics
                 Vec2 input = new Vec2(player.LastInput.X, player.LastInput.Y).Normalized;
                 Vec2 goal = connection + (bodyDirection + input * 1.5).Normalized * 20.0 +
                     bodyDirection.Perpendicular * (6.0 - 12.0 * limbNumber);
-                FindGrip(world, connection, goal, 20.0);
+                if (!FindGrip(world, connection, goal, 20.0)) Mode = LimbMode.Dangle;
             }
             else if (state.BodyMode == BodyModeIndex.WallClimb)
             {
@@ -188,23 +210,38 @@ namespace RainWorldDesktopPet.Graphics
                 Mode = LimbMode.HuntAbsolutePosition;
                 double wallX;
                 long wallId;
-                if (!world.TryGetWall(connection.X, connection.Y, state.Facing, 30.0, out wallX, out wallId))
+                DesktopSurfaceKind wallKind;
+                if (!world.TryGetWall(connection.X, connection.Y, state.Facing, 30.0,
+                    out wallX, out wallId, out wallKind))
+                {
                     wallX = connection.X + state.Facing * 10.0;
+                    GripSurfaceId = 0;
+                }
+                else
+                {
+                    GripSurfaceId = wallId;
+                    GripSurfaceKind = wallKind;
+                }
                 AbsoluteHuntPosition.X = wallX;
                 bool lowHand = (limbNumber == 0) == (state.Facing == -1);
                 AbsoluteHuntPosition.Y = connection.Y + (lowHand ? 7.0 : -3.0);
             }
             else if (state.BodyMode == BodyModeIndex.Default &&
-                     Math.Abs(velocity.X) + Math.Abs(velocity.Y) > 4.0 &&
-                     state.AnimationFrame > 180)
+                     velocity.Length > 4.0 &&
+                     airborneCounter > 180.0)
             {
-                // Original long-airborne branch. Desktop jumps normally finish
-                // before this threshold, so ordinary jump/fall arms retract.
                 unused = false;
+                RetractCounter = 0;
                 Mode = LimbMode.HuntRelativePosition;
+                GripSurfaceId = 0;
+                bool chestPastHips = player.BodyChunks[0].Position.Y <
+                    player.BodyChunks[1].Position.Y - 5.0;
+                double originalRelativeY = -velocity.Y *
+                    (chestPastHips ? -3.0 : -0.9) +
+                    Math.Abs(velocity.X * 0.6) + 1.0;
                 RelativeHuntPosition = new Vec2(
                     (Math.Abs(velocity.X) + 4.0) * (-1.0 + 2.0 * limbNumber),
-                    velocity.Y * -0.9 + Math.Abs(velocity.X * 0.6) + 1.0);
+                    -originalRelativeY);
                 HuntSpeed = 8.0;
                 Quickness = 0.6;
             }
@@ -214,6 +251,7 @@ namespace RainWorldDesktopPet.Graphics
             {
                 unused = false;
                 Mode = LimbMode.HuntAbsolutePosition;
+                GripSurfaceId = 0;
                 Vec2 normalizedVelocity = velocity.Normalized;
                 AbsoluteHuntPosition = connection + new Vec2(
                     -6.0 + 12.0 * limbNumber + normalizedVelocity.X * 20.0,
@@ -223,24 +261,35 @@ namespace RainWorldDesktopPet.Graphics
             return unused;
         }
 
-        private void FindCrawlGrip(Slugcat player, DesktopCollisionWorld world)
+        private void FindCrawlGrip(Slugcat player, DesktopCollisionWorld world, Limb leadLimb)
         {
             Vec2 connection = player.BodyChunks[0].Position;
             if (player.State.Animation == AnimationIndex.DownOnFours ||
-                player.State.Animation == AnimationIndex.CrawlTurn) return;
+                player.State.Animation == AnimationIndex.CrawlTurn)
+            {
+                GripSurfaceId = 0;
+                return;
+            }
+            // SlugcatHand.EngageInMovement lets hand 0 establish the next
+            // Crawl grip. Hand 1 may search only after hand 0 is planted near
+            // the upper chunk; both retain their previous target within 29u.
+            if (limbNumber != 0 && (leadLimb == null ||
+                Math.Abs(leadLimb.End.Position.X - connection.X) >= 10.0 ||
+                !leadLimb.ReachedSnapPosition)) return;
             if (Vec2.Distance(connection, AbsoluteHuntPosition) < 29.0) return;
 
             Vec2 goal = new Vec2(connection.X + player.State.Facing * 28.0, connection.Y + 10.0);
-            FindGrip(world, connection, goal, 20.0);
+            FindGrip(world, connection, goal, 100.0);
         }
 
         // Desktop Room adapter for Limb.FindGrip: choose the nearest exposed
         // horizontal/vertical surface point to goal within the arm constraint.
-        private void FindGrip(DesktopCollisionWorld world, Vec2 attachedPosition,
+        private bool FindGrip(DesktopCollisionWorld world, Vec2 attachedPosition,
             Vec2 goalPosition, double maximumRadius)
         {
             Vec2 best = AbsoluteHuntPosition;
             double bestDistance = double.MaxValue;
+            DesktopSurface bestSurface = null;
             for (int i = 0; i < world.Surfaces.Count; i++)
             {
                 DesktopSurface surface = world.Surfaces[i];
@@ -259,12 +308,27 @@ namespace RainWorldDesktopPet.Graphics
                 if (distance >= bestDistance) continue;
                 best = candidate;
                 bestDistance = distance;
+                bestSurface = surface;
             }
             if (bestDistance < double.MaxValue)
             {
                 Mode = LimbMode.HuntAbsolutePosition;
                 AbsoluteHuntPosition = best;
+                GripSurfaceId = bestSurface.Id;
+                GripSurfaceKind = bestSurface.Kind;
+                return true;
             }
+            GripSurfaceId = 0;
+            return false;
+        }
+
+        private void ReleaseSurfaceGrip()
+        {
+            GripSurfaceId = 0;
+            GripSurfaceKind = DesktopSurfaceKind.ScreenEdge;
+            ReachedSnapPosition = false;
+            Mode = LimbMode.Dangle;
+            AbsoluteHuntPosition = End.Position;
         }
 
         private static Vec2 RotateRelative(Vec2 relative, Vec2 rotationChunk, Vec2 connection)

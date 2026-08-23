@@ -6,17 +6,24 @@ RainWorld.exe, Steam 게임 프로세스, Unity Player, BepInEx를 실행하거�
 
 ## 현재 구현
 
-- 40 Hz 고정 시뮬레이션과 가변 렌더링 보간(`lastPosition → position`)
+- 40 Hz 고정 시뮬레이션과 DWM/모니터 주사율 렌더링 보간(`lastPosition → position`)
+- 원작 단위 물리를 유지하고 Windows 좌표 경계에서 X/Y 모두 적용하는 `DesktopWorldScale=2.20`
 - 원작과 같은 반지름 9/8의 두 몸통 chunk, 17 px connection, 질량·탄성·대칭값
-- 중력, 공기 저항, 바닥 마찰, 낙하, 착지 압축, 점프 준비, 벽 오르기, 자세 안정화
-- 원작 기본형과 같은 4개 segment의 절차적 꼬리, 보간된 stretched radius, 15-vertex/13-triangle tail mesh
+- 중력, 공기 저항, 바닥 마찰, 낙하, 착지 압축, 점프 준비, 벽 오르기, 원작 body-mode 힘
+- 원작 기본형과 같은 4개 `TailSegment` 물리점과 보간된 stretched radius, 모든 렌더 경로에서 하나로 이어지는 15-vertex/13-triangle tail mesh
 - 원작 `GenericBodyPart` 머리/단일 legs particle과 `SlugcatHand` mode·retract·20 px constraint
 - `DesktopPetAI → VirtualInput → SlugcatMovement` 계층과 13개 utility 행동
-- 모니터 work area, 작업 표시줄, 실제 top-level 창의 윗면/옆면을 충돌 지형으로 사용
-- 이동하는 창 surface 추적, 멀티 모니터 및 화면 밖 recovery
+- 모니터별 floor·작업 표시줄 상단·노출된 좌우 경계와 실제 top-level 창의 윗면/옆면을 하나의 충돌 snapshot으로 사용
+- 창 끝 낙하 시 아래 창 또는 monitor floor와 swept 충돌하며, 음수 좌표·엇갈린 멀티 모니터 경계를 연속 topology로 추적
+- 원작 공중 수평 제어와 충돌 직전 방향 성분 기반 `TerrainImpact`, Survivor/Hunter/Monk `35/60` 및 Gourmand `40/80` severity 임계값
+- lethal terrain severity를 최대 3초(`120` tick) 기절로 바꾸고 연속 충돌에도 최초 recovery deadline을 연장하지 않는 데스크톱 펫 안전 계층
+- 원작 충돌→연결 제약 순서는 유지하되 제약이 만든 모니터 바닥/외곽 모서리 관통은 같은 terrain snapshot에서 즉시 접촉 재투영
+- 원작 tick stun 감소, 기절 중 계속되는 BodyChunk·꼬리 물리, `FaceStunned`, 손 retract와 mouse attention 차단
+- HWND 수명/누락 유예, 이동하는 창 surface 및 멀티 모니터 추적
 - 전체 virtual desktop persistent DIB 기반 투명 layered overlay, 음수 모니터 좌표, click-through, tray/F1 디버그
-- 물리는 유지하고 전체 캐릭터 렌더 좌표에만 적용하는 단일 2.20배 visual scale
+- 창·커서 desktop pixel을 원작 simulation unit으로 변환하고 렌더/화면 이동에 일관되게 적용하는 2.20배 world scale
 - 마우스로 몸통을 잡아 끌고 놓아 던지는 상호작용
+- 머리에서 원작 90-unit 이내의 실제 좌/우/중 클릭에만 1.5초간 활성화되는 임시 마우스 시선
 
 ## 원작 Slugcat
 
@@ -30,6 +37,8 @@ DMS 스킨은 현재 자동 탐색하거나 적용하지 않습니다. 먼저 �
 | `gourmand` | Gourmand | `Gourmand` | `#F0C197` |
 
 Gourmand는 원작 `PlayerGraphics.DrawSprites`처럼 body의 X scale을 1.4, hips의 X scale을 1.6으로 적용합니다. Monk/Hunter/Gourmand의 몸무게와 Hunter의 달리기 계수도 `SlugcatStats`에서 확인한 값을 사용합니다.
+
+Downpour가 설치되어 `rainworldmsc`의 필수 element가 모두 확인되면 tray의 `Slugcat skin`에서 Artificer, Spearmaster, Rivulet, Saint 외형을 별도로 선택할 수 있습니다. 이 선택은 물리/AI를 바꾸지 않습니다. 캐릭터별 DLL 분기와 sprite index는 [docs/SlugcatGraphicsProfiles.md](docs/SlugcatGraphicsProfiles.md)에 기록되어 있습니다.
 
 ## 빌드와 실행
 
@@ -50,6 +59,9 @@ Gourmand는 원작 `PlayerGraphics.DrawSprites`처럼 body의 X scale을 1.4, hi
 # 원작 캐릭터 선택과 디버그 표시
 .\artifacts\Release\RainWorldDesktopPet.exe --slugcat gourmand --debug
 
+# Player 물리는 유지하고 Downpour 외형만 선택
+.\artifacts\Release\RainWorldDesktopPet.exe --skin rivulet --debug
+
 # 자동 탐색이 실패할 때 설치 경로 지정
 .\artifacts\Release\RainWorldDesktopPet.exe `
   --rain-world "C:\Program Files (x86)\Steam\steamapps\common\Rain World"
@@ -62,7 +74,7 @@ Gourmand는 원작 `PlayerGraphics.DrawSprites`처럼 body의 X scale을 1.4, hi
 - Slugcat 위에서 마우스 왼쪽 버튼: 잡기
 - 잡은 채 이동 후 놓기: 던지기
 - `F1`: physics/AI/procedural graphics 디버그 표시
-- tray 메뉴: 원작 Slugcat 변경, 일시 정지, 종료
+- tray 메뉴: Player 물리/기본색 및 Slugcat skin 변경, 일시 정지, 종료
 
 ## 로컬 자산 처리
 
@@ -103,7 +115,7 @@ src/RainWorldDesktopPet/
 .\build.ps1 -Configuration Debug
 ```
 
-테스트는 fixed-step, 원작 connection/Stand/jump 식, desktop collision, AI/physics 분리와 행동 도달성, DropDown, 휴식 frame, atlas metadata, 설치 경로 탐색을 검증합니다. 로컬 설치본이 있으면 embedded 원작 atlas가 DMS 없이 로드되는지도 검사합니다.
+테스트는 fixed-step, 원작 connection/Stand/jump/air-control 식, monitor topology와 창 끝 낙하, pre-impact TerrainImpact, 극단·반복 충돌의 비치명 3초 stun cap, 단일 tail mesh topology, stunned graphics/mouse recovery, AI/physics 분리와 행동 도달성, DropDown, 휴식 frame, atlas metadata, 설치 경로 탐색을 검증합니다. 로컬 설치본이 있으면 embedded 원작 atlas가 DMS 없이 로드되는지도 검사합니다.
 
 ## 에셋 및 상표
 

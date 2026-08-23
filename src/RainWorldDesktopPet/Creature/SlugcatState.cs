@@ -15,12 +15,9 @@ namespace RainWorldDesktopPet.Creature
         Roll,
         Flip,
         BellySlide,
-        PreJump,
-        Jump,
-        Fall,
-        Land,
         Sit,
-        Sleep
+        Sleep,
+        Dead
     }
 
     public enum BodyModeIndex
@@ -32,7 +29,9 @@ namespace RainWorldDesktopPet.Creature
         CorridorClimb,
         WallClimb,
         Swimming,
-        ZeroG
+        ZeroG,
+        Stunned,
+        Dead
     }
 
     public sealed class SlugcatState
@@ -47,5 +46,15 @@ namespace RainWorldDesktopPet.Creature
         public double RunCycle;
         public double Stillness;
         public double AerobicLevel;
+        public bool Conscious = true;
+        public bool Dead;
+        public bool Standing;
+        public int StunCounter;
+        public int InitialStunValue;
+        public int ImpactBlinkTicks;
+
+        // Creature.Stunned is deliberately not equivalent to stun > 0.
+        // Rain World considers a creature unconscious only while stun >= 10.
+        public bool IsStunned { get { return StunCounter >= 10; } }
     }
 }

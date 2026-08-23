@@ -10,16 +10,20 @@ namespace RainWorldDesktopPet.Graphics
         private readonly TailSegment[] segments;
 
         public ProceduralTail(Vec2 hips)
+            : this(hips, SlugcatVisualProfiles.Default.Tail)
         {
-            int count = SimulationConstants.TailSegmentCount;
+        }
+
+        public ProceduralTail(Vec2 hips, SlugcatTailProfile profile)
+        {
+            if (profile == null) throw new ArgumentNullException("profile");
+            int count = profile.Radii.Length;
             segments = new TailSegment[count];
-            double[] radii = { 6.0, 4.0, 2.5, 1.0 };
-            double[] lengths = { 4.0, 7.0, 7.0, 7.0 };
             Vec2 position = hips;
             for (int i = 0; i < count; i++)
             {
-                double radius = radii[i];
-                double length = lengths[i];
+                double radius = profile.Radii[i];
+                double length = profile.Lengths[i];
                 position += new Vec2(-length, 2.0);
                 segments[i] = new TailSegment(position, radius, length, i == 0 ? 1.0 : 0.5);
             }
@@ -87,6 +91,18 @@ namespace RainWorldDesktopPet.Graphics
                 outwardForce *= 0.5;
                 forceOrigin = nextForceOrigin;
                 nextForceOrigin = segment.Position;
+            }
+
+            // Later segment constraints can push an earlier segment after its
+            // own hips-distance check. Re-apply the same PlayerGraphics bound
+            // after the chain pass so the enlarged desktop X travel cannot
+            // leave a visually detached root between fixed ticks.
+            for (int i = 0; i < segments.Length; i++)
+            {
+                Vec2 fromHips = segments[i].Position - hips;
+                double maximumDistance = 9.0 * (i + 1);
+                if (fromHips.Length > maximumDistance)
+                    segments[i].Position = hips + fromHips.Normalized * maximumDistance;
             }
         }
 

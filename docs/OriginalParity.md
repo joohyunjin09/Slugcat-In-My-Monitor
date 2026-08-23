@@ -16,6 +16,53 @@ Jolly/custom palette, malnourished 및 다른 모드 자산은 이 경로에 들
 - **데스크톱 대응**: 원작 Room/terrain 책임을 Windows surface로 대체한다.
 - **부분**: 원작에 존재하는 분기 가운데 데스크톱에서 의미 있는 일부만 이식했다.
 
+## Physics/timing parity table
+
+| 항목 | 원작 | 데스크톱 구현 | 일치 | 근거/확인 방법 |
+|---|---:|---:|---|---|
+| simulation frequency | 40 Hz (`0.025 s`) | 40 Hz fixed accumulator | 동일 | `MainLoopProcess.framesPerSecond=40`, `RawUpdate`; ILSpy |
+| render frequency | display frame마다 `GrafUpdate` | DWM composition 주기, 60/120/144/165/240 Hz | 대응 | `RawUpdate → GrafUpdate(myTimeStacker)`; `Application.Idle + DwmFlush` |
+| catch-up limit | frame당 최대 3 update 뒤 backlog 폐기 | 최대 3 tick 뒤 accumulator reset | 동일 | `MainLoopProcess.RawUpdate`; ILSpy |
+| graphics/animation update | simulation tick마다 1회 | simulation tick마다 1회 | 동일 | `PlayerGraphics.Update`, `animationFrame`; ILSpy/60·144·240 회귀 |
+| draw interpolation | `lastPos→pos`, `timeStacker` | 모든 chunk/head/hand/foot/tail last→current | 동일 | `PlayerGraphics.DrawSprites`; ILSpy/shared interpolation 회귀 |
+| BodyChunk count | 2 | 2 | 동일 | `Player..ctor`; ILSpy |
+| chunk radius | 9 / 8 | 9 / 8 | 동일 | `Player..ctor`; ILSpy |
+| normal mass | `.35 / .35` | `.35 / .35` | 동일 | 총 `.7`, 절반씩; ILSpy |
+| gravity | `.9` per tick, Y-up 감소; WallClimb도 base gravity 유지 | `.9` per tick, screen Y-down 증가 | 동일 | `BodyChunk.Update`/`Player.UpdateBodyMode`; ILSpy/자유낙하 수치 회귀 |
+| air friction | `.999` per tick | `.999` per tick | 동일 | `BodyChunk.Update`, `Player..ctor`; ILSpy |
+| surface friction | `.5` | `.5` | 동일 | `Player..ctor`; ILSpy |
+| bounce | `.1` | `.1` | 동일 | `Player..ctor`; ILSpy |
+| water friction / buoyancy | `.96 / .95` | Windows Room에 물 없음 | 미지원 | `Player..ctor`; ILSpy |
+| 일반 최대 낙하 속도 | 전역 clamp 없음 | 전역 clamp 없음 | 동일 | `BodyChunk.Update` 전체 decompile/80-tick 회귀 |
+| connection | Normal, rest 17, elasticity 1, symmetry .5 | 같은 식을 tick당 1회 | 동일 | `BodyChunkConnection.Update`; ILSpy/equation 회귀 |
+| internal integration | `pos += vel` | `pos += vel` | 동일 | `BodyChunk.Update`; ILSpy/free-fall 회귀 |
+| desktop world scale | Room/camera transform | Windows 입력 `/2.20`, 화면 출력 `*2.20` | 데스크톱 대응 | X/Y travel·sprite·terrain 경계 회귀 |
+| Crawl input 0 | Facing 자체가 물리 힘을 만들지 않음 | 현재 chunk X offset 보존, Facing 비참조 | 동일 | `Player.MovementUpdate`/`UpdateBodyMode`; ILSpy/양 Facing 30초 회귀 |
+| floor/wall collision | 20 px tile swept collision | HWND top/side와 monitor floor/boundary swept crossing | 데스크톱 대응 | `CheckVerticalCollision`/`CheckHorizontalCollision`; ILSpy/좁은 창·창 끝 낙하 회귀 |
+| terrain impact speed | 해결 전 충돌축 velocity 성분 | 동일 pre-impact X/Y 성분 | 동일 | `BodyChunk` → `Player.TerrainImpact`; ILSpy/pre-impact 회귀 |
+| impact severity | normal `35/60`, Gourmand `40/80`, `LerpMap(...,40,140,2.5)` | 동일 판정 후 lethal을 최대 120-tick stun으로 변환 | 데스크톱 안전 대응 | first-contact·극단/반복 충돌 회귀 |
+| stun update | tick당 `stun--`, `stun>=10`에서 unconscious, 물리 계속 | 동일 | 동일 | 입력 차단·물리·자연 회복 회귀 |
+| surface lifetime | Room terrain identity 지속 | HWND identity cache, 열거 실패 보존, 2회 누락 유예 | 데스크톱 대응 | `EnumWindows` 성공 여부/HWND 유효성 회귀 |
+| moving terrain | Room object/terrain update | 이전/현재 HWND rect delta로 연결된 두 chunk 운반 | 데스크톱 대응 | 5방향·고속 창 이동 회귀 |
+| stale limb grip | terrain이 사라지면 grip 불성립 | HWND/kind/point 검증 후 `Dangle` 해제 | 데스크톱 대응 | stale-grip 회귀 |
+
+### 원작 자유낙하 수치
+
+초기 `posY=0`, `velY=0`에서 Windows Y-down 부호로
+`velY=(velY+0.9)*0.999`, `posY+=velY`를 적용한 결과다. 어떤 값에도 `deltaTime`을
+다시 곱하지 않으며 전역 속도 clamp도 없다.
+
+| tick | time (s) | posY | velY | gravity/tick | air friction/tick |
+|---:|---:|---:|---:|---:|---:|
+| 0 | 0.000 | 0 | 0 | .9 | .999 |
+| 1 | 0.025 | 0.8991 | 0.8991 | .9 | .999 |
+| 2 | 0.050 | 2.6964009 | 1.7973009 | .9 | .999 |
+| 5 | 0.125 | 13.4685314811 | 4.4865179865 | .9 | .999 |
+| 10 | 0.250 | 49.3024447880 | 8.9506482034 | .9 | .999 |
+| 20 | 0.500 | 187.6205598664 | 17.8121916318 | .9 | .999 |
+| 40 | 1.000 | 727.7679760958 | 35.2715035274 | .9 | .999 |
+| 80 | 2.000 | 2837.8459089535 | 69.1593134045 | .9 | .999 |
+
 ## Update → graphics → draw 계약
 
 Feature: simulation frequency and render interpolation
@@ -30,7 +77,9 @@ Current Desktop Implementation:
 `GameLoop.Advance`는 고정 1/40초마다
 `DesktopPetAI.Step → Slugcat.Step → SlugcatGraphics.Step`을 호출한다. AI는
 `VirtualInput`만 반환한다. 최대 세 tick 뒤 accumulator를 버리고, `BuildPose`가 한 번만
-`FixedTimeStep.Alpha`를 읽어 모든 draw state에 전달한다.
+`FixedTimeStep.Alpha`를 읽어 모든 draw state에 전달한다. `LayeredOverlayWindow`는
+16 ms timer가 아니라 `Application.Idle`에서 draw하고 `DwmFlush`로 monitor/DWM refresh에
+맞춘다. 실패 재시도 timer는 정상 render cadence에 사용하지 않는다.
 
 Difference:
 Rain World의 `Room`, shortcut, grasp, water 및 creature pair update는 없다.
@@ -52,13 +101,15 @@ physics 또는 graphics particle을 수정하지 않는다.
 | air friction | `.999` | `.999` | 동일 |
 | surface friction | `.5` | `.5` | 동일 |
 | bounce | `.1` | `.1` | 동일 |
+| maximum fall speed | 전역 clamp 없음 | 전역 clamp 없음 | 동일 |
+| final screen X/Y travel | camera/world transform | `velocity * 2.20` | 데스크톱 대응 |
 | stand target speed upper/lower | `4.2 / 4.0 * runspeedFac` | 동일 | 동일 |
-| crawl target speed | 2.5 | 2.5 | 동일 |
+| crawl target speed | 2.5 base, 1 with vertical input | 동일 | 동일 |
 | ground acceleration | `2.4 * .5 = 1.2` | 1.2 | 동일 |
-| air control upper/lower | `.18 / .153` | `.18 / .153` | 동일 |
+| airborne target/acceleration | `3.6 / (2.4*.5=1.2)` | 동일 | 동일 |
 | standing jump upper/lower | `4 / 3` Y-up | `-4 / -3` screen Y | 동일 |
 | held jump boost | start 8, decrement 1.5, add `(boost+1)*.3` | 동일, Y sign converted | 동일 |
-| landing reaction | `TerrainImpact` state branches | impact-derived 6-tick compression | 부분 |
+| landing reaction | `TerrainImpact` blink/stun/death branches | 동일 blink/severity, death 대신 recoverable stun과 desktop landing compression | 동일/안전 대응 |
 
 Feature: movement and animation transitions
 
@@ -71,15 +122,49 @@ stand, crawl, wall, beam, corridor, swim, zero-G, roll and special-character bra
 Current Desktop Implementation:
 `Slugcat.Step` snapshots both chunks, integrates/collides them, solves the connection, then
 `SlugcatMovement.ApplyInput` adds the next-tick movement forces. Stand, crawl, default airborne,
-wall climb, pre-jump/jump/fall/land, sit and sleep remain separate state values.
+wall climb, crawl turn, sit, sleep, stunned and dead use their corresponding state branches.
 
 Difference:
 Beam/corridor/swim/zero-G/shortcut/grasp and full roll/belly-slide/super-jump branches are not
-reachable in the Windows Room adapter. Landing death/stun and creature collision are omitted.
+reachable in the Windows Room adapter. Creature-to-creature collision is omitted.
 
 Fix:
 Desktop AI never assigns position, animation, body part or tail state. All autonomous actions pass
 through `VirtualInput` and the Player-equivalent movement layer.
+
+### Air control parity
+
+Ordinary `BodyMode.Default + Animation.None` air uses `dynamicRunSpeed=3.6` for both chunks and
+changes X by at most `2.4*surfaceFriction=1.2` toward the input direction. It does not multiply the
+air limit by `runspeedFac`, does not converge to a custom target velocity, and applies no grounded
+friction branch. Thus a `+3.6` velocity with left input becomes approximately `+2.3964`, `+1.1940`,
+then `-0.0072` after integration and control over three ticks. Tests A–D cover held direction,
+neutral momentum, opposite input, and left/right control from a vertical fall.
+
+### TerrainImpact and stun parity
+
+`DesktopCollisionWorld` records the collision-axis velocity before bounce/stop resolution and
+passes the original-equivalent direction, desktop normal, chunk, speed, previous directional
+contact, and terrain identity through `TerrainImpactData`. Like `BodyChunk.lastContactPoint`, first
+contact depends on the previous contact direction—not a window/monitor ID change. Impact callbacks
+run only above the original `PhysicalObject.impactTreshhold=1`.
+
+On first contact, Survivor/Monk/Hunter use stun/lethal thresholds `35/60`; Gourmand uses `40/80`.
+Only a downward floor impact is originally lethal, while a wall impact can still reach severity 140.
+Original duration/severity is `(int)LerpMap(speed, stunThreshold, lethalThreshold, 40, 140, 2.5)`.
+The desktop-pet safety layer maps every originally lethal result to stun, caps only the applied value
+at `MaxImpactStunDurationSeconds=3.0` (`120` ticks at 40 Hz), and fixes an absolute deadline when the
+first impact starts an episode. Later terrain impacts may raise stun only within the remaining ticks;
+they cannot reset that deadline. `Creature.Stunned` remains
+`stun>=10`, the counter decreases once per 40 Hz tick, and `MovementUpdate` is skipped while
+`stun>0`; BodyChunk integration, collision, bounce, connection, graphics particles, and limbs keep
+updating. Unconscious graphics clear look direction, use `FaceStunned`, and unused hands follow the
+original `SlugcatHand` retraction path. TerrainImpact never sets `dead` in the desktop pet.
+
+After the original BodyChunk collision and BodyChunkConnection order, a connection can move one
+chunk a few units back through the junction of an exposed monitor boundary and its floor. A final
+contact-only projection uses the same frozen terrain snapshot for those shallow monitor penetrations.
+It emits no duplicate TerrainImpact and is not an off-screen recovery teleport.
 
 ## PlayerGraphics procedural state
 
@@ -154,7 +239,7 @@ offset, and derives face scaleX from the interpolated upper/lower body direction
 attention direction.
 
 Current Desktop Implementation:
-Crawl selects `HeadA7`/`FaceA4`; face X offset ignores look X, while Y look remains independent.
+Crawl selects `HeadA7`/`FaceA4` (or blink `FaceB4`); face X offset ignores look X, while Y look remains independent.
 Strong body-axis direction selects scaleX and a 0.5 px dead band falls back to persistent Facing, so
 small procedural chunk motion cannot flip the face for one frame.
 
@@ -170,8 +255,10 @@ and hips distance limit `9*(i+1)`. Draw sprite 2 is a 15-vertex, 13-triangle cus
 
 Current Desktop Implementation:
 The same segment layout, connection solver, `StretchedRad`, damping/gravity/outward force and limit
-are used. Both stretch and position are last/current interpolated. `SpriteRenderer` uses the exact
-triangle index list:
+are used. Both stretch and position are last/current interpolated. `SpriteRenderer` calculates the
+exact triangle vertices/index list, then submits their shared outer boundary as one GDI+ fill so
+anti-aliased shared edges cannot appear as separate TailSegments. This same mesh path is unconditional
+for both loaded-atlas and procedural-body rendering; no segmented sprite/round-line tail fallback remains:
 
 ```text
 (0,1,2) (1,2,3) (4,5,6) (5,6,7) (8,9,10) (9,10,11)
@@ -258,16 +345,18 @@ Overlay/Render Space
 Sprite Local Space
 ```
 
-All body parts store desktop world coordinates. There is no moving pet root and therefore no double
-translation. `SpritePlacement` records physics source, interpolated position, anchor, local rect,
-overlay position and final screen position for debug comparison.
+All body parts store Rain World simulation coordinates. There is no moving pet root and therefore
+no double translation. Windows terrain/cursor data is divided by the world scale once at ingress;
+`SpritePlacement` records physics source, interpolated position, anchor, local rect, overlay
+position and final screen position for debug comparison.
 
 Feature: visual size
 
-Physics stays at original Rain World scale. A single `CharacterRenderScale=2.20` matrix is applied
-around the interpolated body midpoint after world interpolation and before atlas-local drawing.
-Positions, atlas pixels, tail mesh and pen widths therefore receive the same scale without changing
-BodyChunk radius, gravity, connection length or movement. `GraphicsBounds` transforms all
+Physics stays at original Rain World scale. A single `DesktopWorldScale=2.20` matrix maps absolute
+simulation coordinates and atlas-local drawing to desktop pixels. Window surfaces, cursor/grab
+input and moving-window deltas use the inverse transform at ingress. Positions, atlas pixels, tail
+mesh, pen widths and X/Y travel therefore receive the same scale without changing BodyChunk radius,
+gravity, connection length or procedural-part host velocity. `GraphicsBounds` transforms all
 extremities through the same matrix and scales its sprite reach margin.
 
 Feature: overlay clipping
@@ -288,24 +377,49 @@ no longer clipped by a 560×420 pet-following HWND.
 
 ## Debug and regression evidence
 
-F1 debug output additionally contains both shoulder points, hand last/current/render/target,
-connection last/current/render, max length, mode/retract state, hip/legs target, HeadDirection,
-selected face element/scaleX and CharacterRenderScale. Lines show shoulder→hand and hand→target.
+F1 debug output contains simulation Hz/tick/step/time/accumulator/timeStacker, frame당 simulation
+step 수, measured render FPS/monitor refresh, both chunks의 pos/last/render/velocity/contact 및
+surface id/kind, 현재 monitor id/bounds/work-area/taskbar/floor, gravity/air/connection/X
+multiplier, surface LTRB/previous/current rect/velocity/miss, 이전/현재 air input과 두 chunk의
+pre/post air X, TerrainImpact pre/post velocity·direction·normal·speed·first-contact·surface,
+stun counter/initial value/conscious/dead/face, animation/body/frame/input/facing,
+head/hand/foot/tail last/current/render, tail root/tip/tangent/perpendicular/radius/mesh L-R
+vertices와 wireframe, grip id, look/face state.
+Lines show shoulder→hand and hand→target.
 Per-sprite anchor/local/overlay/final placement is retained in the pose. `ParityDiagnostics` writes
 only detected body, tail, hand-length, hand-tick, or unexplained Crawl face-flip discontinuities to
 `%LOCALAPPDATA%\SlugcatInMyMonitor\parity.log`; it never corrects state. A Crawl flip record includes
 animation, body mode, persistent facing, look/head directions, selected face/scaleX, both hand
 snapshots, targets, connection points, and limb modes.
+접촉이 사라지면 `%LOCALAPPDATA%\SlugcatInMyMonitor\surface-loss.log`에 tick, chunk, HWND/kind,
+reason, pos/last/velocity, 이전/현재 contact, input, surface 존재 여부, 이전/현재 rect와 surface
+velocity를 기록한다. 이 로그 역시 복구·pin·teleport를 하지 않는다.
+공중 입력 변화는 `air-control.log`, `impactTreshhold`를 넘은 충돌은 `terrain-impact.log`에
+기록한다. monitor floor 아래 terrain escape가 실제로 관측되면 `terrain-escape.log`에 현재
+monitor bounds/work area/floor, chunk 상태, 마지막 terrain, snapshot version과 후보 surface를
+기록할 뿐 위치나 속도는 수정하지 않는다.
 
 The executable test suite covers:
 
 - exact `ConnectToPoint` equation and Futile trim/anchor coordinates;
 - shared interpolation for draw positions, head, legs and tail;
-- 40 simulation updates under 240 render samples;
+- 60/144/240 render samples에서 동일한 40 Hz physics/graphics/animation 상태;
+- tick 0..80 원작 자유낙하 수치와 swept landing;
+- 양 Facing Crawl idle 30초 무드리프트;
 - 520 ticks (13 seconds) of idle, walking, repeated turns, jump/fall/landing;
 - negative virtual-screen origin round trip and graphics bounds;
 - Stand/Walk retraction, Crawl target equations, 20 px arm constraints, Crawl face stability,
   rotated shoulder basis, uniform 2.20 scale and non-mutating expanded debug rendering;
+- 고속 이동의 좁은 창 top swept collision과 tick당 동일 immutable snapshot version;
+- 창 끝→아래 창→monitor floor 순서, taskbar/floor/boundary identity, 음수·엇갈린 monitor seam;
+- 공중 입력 A–D, 반대 입력 momentum, Hunter 공중 제한 3.6;
+- pre-impact 방향 성분, 방향 기반 first-contact, normal/Gourmand severity threshold와 비치명 safety 변환;
+- 극단 충돌 140→120 tick cap, 반복 충돌 deadline 비연장, 3초 후 conscious recovery;
+- atlas 유무와 무관한 단일 15-vertex tail topology, root/width/tip/tangent/perpendicular;
+- stun 중 physics/input/limb/FaceStunned/mouse 차단과 현재 물리 상태에서의 자연 회복;
+- Crawl/반전 30초 arm rotation 연속성, head start/stop 3-unit 연결, 입력 가속/마찰 parity;
+- HWND 열거 실패/2회 miss grace/실제 expiry, stale limb grip release;
+- 모든 방향의 빠른 moving-window carry와 5분 상당 varied-window sprite integrity;
 - moving window tops/walls, occlusion, screen-edge and embedded original atlas loading.
 
 ## Remaining non-parity surface

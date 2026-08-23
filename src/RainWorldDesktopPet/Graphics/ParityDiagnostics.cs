@@ -1,7 +1,11 @@
 using System;
+using System.Drawing;
 using System.IO;
+using System.Text;
 using RainWorldDesktopPet.Core;
 using RainWorldDesktopPet.Creature;
+using RainWorldDesktopPet.Desktop;
+using RainWorldDesktopPet.Physics;
 
 namespace RainWorldDesktopPet.Graphics
 {
@@ -12,16 +16,111 @@ namespace RainWorldDesktopPet.Graphics
         private readonly string logPath = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "SlugcatInMyMonitor", "parity.log");
+        private readonly string surfaceLogPath = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "SlugcatInMyMonitor", "surface-loss.log");
+        private readonly string terrainEscapeLogPath = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "SlugcatInMyMonitor", "terrain-escape.log");
+        private readonly string airControlLogPath = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "SlugcatInMyMonitor", "air-control.log");
+        private readonly string impactLogPath = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "SlugcatInMyMonitor", "terrain-impact.log");
         private long lastLoggedTick = -100;
         private bool hasCrawlFaceSample;
         private double lastCrawlFaceScaleX;
         private int lastCrawlFacing;
         private int lastCrawlBodyAxisSign;
+        private readonly double[] lastArmRotation = new double[2];
+        private readonly double[] lastArmLength = new double[2];
+        private readonly bool[] lastArmVisible = new bool[2];
+        private bool hasArmSample;
+        private readonly bool[] terrainEscapeActive = new bool[2];
+        private long lastAirControlLogTick = -1;
+        private long lastImpactSequence;
 
         public string LogPath { get { return logPath; } }
+        public string SurfaceLogPath { get { return surfaceLogPath; } }
+
+        public void ObserveSurfaceState(Slugcat slugcat, DesktopCollisionWorld world,
+            VirtualInput input, long tick)
+        {
+            for (int i = 0; i < slugcat.BodyChunks.Length; i++)
+            {
+                BodyChunk chunk = slugcat.BodyChunks[i];
+                if (chunk.PreviousSupportingSurfaceId != 0 && chunk.SupportingSurfaceId == 0)
+                    LogSurfaceLoss(chunk, world, input, tick, true);
+                if (chunk.PreviousWallSurfaceId != 0 && chunk.WallSurfaceId == 0)
+                    LogSurfaceLoss(chunk, world, input, tick, false);
+                ObserveTerrainEscape(chunk, world, tick);
+            }
+        }
+
+        private void LogSurfaceLoss(BodyChunk chunk, DesktopCollisionWorld world,
+            VirtualInput input, long tick, bool floor)
+        {
+            long id = floor ? chunk.PreviousSupportingSurfaceId : chunk.PreviousWallSurfaceId;
+            DesktopSurfaceKind kind = floor
+                ? chunk.PreviousSupportingSurfaceKind
+                : chunk.PreviousWallSurfaceKind;
+            DesktopSurface surface;
+            bool stillExists = world.TryGetSurface(id, kind, out surface);
+            string reason;
+            if (input.DropThrough) reason = "drop-through input";
+            else if (input.Jump) reason = "jump input";
+            else if (!stillExists) reason = "surface removed or enumeration grace expired";
+            else if (floor && (chunk.Position.X < surface.Left - chunk.Radius ||
+                               chunk.Position.X > surface.Right + chunk.Radius)) reason = "left surface span";
+            else reason = "collision no longer reported contact";
+
+            bool expectedRelease = input.DropThrough || input.Jump;
+            if (stillExists && floor)
+            {
+                bool notPenetrating = chunk.Position.Y + chunk.Radius <= surface.Top + 0.5;
+                bool clearlyAboveAndRising = chunk.Position.Y + chunk.Radius < surface.Top - 0.5 &&
+                    chunk.Velocity.Y < 0.0;
+                bool leftSpan = chunk.Position.X < surface.Left - chunk.Radius ||
+                                chunk.Position.X > surface.Right + chunk.Radius;
+                expectedRelease |= notPenetrating || clearlyAboveAndRising || leftSpan;
+            }
+            else if (stillExists && !floor)
+            {
+                bool movingAway = surface.BlocksPositiveX
+                    ? chunk.Velocity.X < 0.0
+                    : chunk.Velocity.X > 0.0;
+                expectedRelease |= movingAway;
+            }
+            if (expectedRelease) return;
+
+            Rectangle previous = stillExists ? surface.PreviousWindowBounds : Rectangle.Empty;
+            Rectangle current = stillExists ? surface.CurrentWindowBounds : Rectangle.Empty;
+            Vec2 movement = stillExists ? surface.MovementVelocity : Vec2.Zero;
+            try
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(surfaceLogPath));
+                File.AppendAllText(surfaceLogPath, string.Format(
+                    "[UNEXPECTED SURFACE LOSS] {0:u} tick={1} snapshot={20} chunk={2} lost={3}/{4} reason={5}; pos={6} last={7} vel={8}; " +
+                    "prevContact F/L/R={9}/{10}/{11} current={12}/{13}/{14}; input={15}; " +
+                    "surfaceExists={16} previousRect={17} currentRect={18} surfaceVelocity={19}{21}",
+                    DateTime.Now, tick, chunk.Index, id, kind, reason,
+                    chunk.Position, chunk.LastPosition, chunk.Velocity,
+                    chunk.PreviousContactFloor, chunk.PreviousContactLeft, chunk.PreviousContactRight,
+                    chunk.ContactFloor, chunk.ContactLeft, chunk.ContactRight, input,
+                    stillExists, previous, current, movement,
+                    chunk.CollisionSnapshotVersion, Environment.NewLine));
+            }
+            catch (Exception)
+            {
+            }
+        }
 
         public void Observe(SlugcatPose pose)
         {
+            ObserveAirControl(pose);
+            ObserveTerrainImpact(pose);
+            ObserveArmRotations(pose);
             string reason = null;
             if (Vec2.Distance(pose.ChunkLast[0], pose.ChunkCurrent[0]) > 45.0 ||
                 Vec2.Distance(pose.ChunkLast[1], pose.ChunkCurrent[1]) > 45.0)
@@ -86,6 +185,136 @@ namespace RainWorldDesktopPet.Graphics
             catch (Exception)
             {
             }
+        }
+
+        private void ObserveTerrainEscape(BodyChunk chunk, DesktopCollisionWorld world, long tick)
+        {
+            MonitorInfo monitor = world.FindMonitor(chunk.Position);
+            double floor = DesktopWorldTransform.ToSimulationLength(monitor.FloorY);
+            bool escaped = chunk.Position.Y - chunk.Radius > floor + 1.0;
+            if (!escaped)
+            {
+                terrainEscapeActive[chunk.Index] = false;
+                return;
+            }
+            if (terrainEscapeActive[chunk.Index]) return;
+            terrainEscapeActive[chunk.Index] = true;
+
+            StringBuilder available = new StringBuilder();
+            for (int i = 0; i < world.Surfaces.Count; i++)
+            {
+                DesktopSurface surface = world.Surfaces[i];
+                if (surface.Bounds.Right < monitor.Bounds.Left ||
+                    surface.Bounds.Left > monitor.Bounds.Right ||
+                    surface.Bounds.Bottom < monitor.Bounds.Top ||
+                    surface.Bounds.Top > monitor.Bounds.Bottom) continue;
+                available.AppendFormat("  {0}/{1} {2} LTRB={3},{4},{5},{6}\n",
+                    surface.Id, surface.Kind, surface.Label, surface.Left,
+                    surface.Top, surface.Right, surface.Bottom);
+            }
+            try
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(terrainEscapeLogPath));
+                File.AppendAllText(terrainEscapeLogPath, string.Format(
+                    "[DESKTOP TERRAIN ESCAPE] {0:u}\nTick: {1}\nMonitor: {2}/{3}\nMonitor Bounds: {4}\nWorkArea: {5}\nFloorY: {6:0.###}\nChunk: {7}\nChunk Position: {8}\nLast Position: {9}\nVelocity: {10}\nLast Surface: {11}/{12}\nCollision Snapshot: {13}\nAvailable Surfaces:\n{14}\n",
+                    DateTime.Now, tick, monitor.Name, monitor.TerrainId, monitor.Bounds,
+                    monitor.WorkArea, floor, chunk.Index, chunk.Position,
+                    chunk.LastPosition, chunk.Velocity, chunk.PreviousSupportingSurfaceId,
+                    chunk.PreviousSupportingSurfaceKind, chunk.CollisionSnapshotVersion,
+                    available));
+            }
+            catch (Exception)
+            {
+            }
+        }
+
+        private void ObserveAirControl(SlugcatPose pose)
+        {
+            if (!pose.IsAirborne || pose.InputX == pose.PreviousInputX ||
+                pose.SimulationTick == lastAirControlLogTick) return;
+            lastAirControlLogTick = pose.SimulationTick;
+            try
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(airControlLogPath));
+                File.AppendAllText(airControlLogPath, string.Format(
+                    "[AIR CONTROL] {0:u}\nTick: {1}\nInput X: {2}\nPrevious Input X: {3}\nVelocity Before: {4:0.###}, {5:0.###}\nVelocity After: {6:0.###}, {7:0.###}\nAnimation: {8}\nBodyMode: {9}\nOriginal-equivalent branch: {10}\n\n",
+                    DateTime.Now, pose.SimulationTick, pose.InputX, pose.PreviousInputX,
+                    pose.AirHorizontalVelocityBefore[0], pose.AirHorizontalVelocityBefore[1],
+                    pose.AirHorizontalVelocityAfter[0], pose.AirHorizontalVelocityAfter[1],
+                    pose.Animation, pose.BodyMode, pose.AirControlBranch));
+            }
+            catch (Exception)
+            {
+            }
+        }
+
+        private void ObserveTerrainImpact(SlugcatPose pose)
+        {
+            if (pose.TerrainImpactSequence == 0 ||
+                pose.TerrainImpactSequence == lastImpactSequence) return;
+            lastImpactSequence = pose.TerrainImpactSequence;
+            try
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(impactLogPath));
+                File.AppendAllText(impactLogPath, string.Format(
+                    "[TERRAIN IMPACT] {0:u}\nTick: {1}\nChunk: {2}\nSurface: {3}/{4}\nPreImpact Velocity: {5}\nPostImpact Velocity: {6}\nCollision Normal: {7}\nImpact Direction: {8}\nImpact Speed: {9:0.###}\nFirst Contact: {10}\nOriginal Calculated Stun: {11}\nApplied Impact Stun: {12}\nDesktop Result: {13}\nOriginally Lethal: {14}\nSafety Override: {15}\nImpact Stun Deadline Tick: {16}\nFinal Stun Counter: {17}\nDead: {18}\nFace Element: {19}\n\n",
+                    DateTime.Now, pose.SimulationTick, pose.ImpactBodyChunk,
+                    pose.ImpactSurfaceId, pose.ImpactSurfaceKind, pose.PreImpactVelocity,
+                    pose.PostImpactVelocity, pose.ImpactCollisionNormal,
+                    pose.ImpactDirection, pose.ImpactSpeed, pose.ImpactFirstContact,
+                    pose.CalculatedImpactStun, pose.AppliedImpactStun,
+                    pose.DesktopImpactResult, pose.ImpactWasOriginallyLethal,
+                    pose.ImpactSafetyOverrideApplied, pose.ImpactStunDeadlineTick,
+                    pose.StunCounter, pose.ImpactCausedDeath || pose.Dead,
+                    pose.SelectedFaceElement));
+            }
+            catch (Exception)
+            {
+            }
+        }
+
+        private void ObserveArmRotations(SlugcatPose pose)
+        {
+            for (int i = 0; i < 2; i++)
+            {
+                double rotation = pose.ArmRotations[i];
+                double armLength = Vec2.Distance(pose.Hands[i], pose.ArmShoulders[i]);
+                if (hasArmSample && lastArmVisible[i] && pose.ArmVisible[i] &&
+                    lastArmLength[i] >= 6.0 && armLength >= 6.0)
+                {
+                    double delta = ShortestAngleDelta(lastArmRotation[i], rotation);
+                    if (Math.Abs(delta) > 120.0)
+                    {
+                        try
+                        {
+                            Directory.CreateDirectory(Path.GetDirectoryName(logPath));
+                            File.AppendAllText(logPath, string.Format(
+                                "[ARM ROTATION SPIKE] {0:u} tick={1} arm={2} previous={3:0.###} current={4:0.###} shortestDelta={5:0.###}; " +
+                                "hand={6} shoulder={7} direction={8} distance={9:0.###} target={10} connection={11} mode={12} retract={13} body={14} animation={15} scaleY={16:0.###}{17}",
+                                DateTime.Now, pose.SimulationTick, i, lastArmRotation[i], rotation, delta,
+                                pose.Hands[i], pose.ArmShoulders[i], pose.ArmDirections[i],
+                                Vec2.Distance(pose.Hands[i], pose.ArmShoulders[i]), pose.HandTargets[i],
+                                pose.ArmConnections[i], pose.ArmModes[i], pose.ArmRetractCounters[i],
+                                pose.BodyMode, pose.Animation, pose.ArmScaleY[i], Environment.NewLine));
+                        }
+                        catch (Exception)
+                        {
+                        }
+                    }
+                }
+                lastArmRotation[i] = rotation;
+                lastArmLength[i] = armLength;
+                lastArmVisible[i] = pose.ArmVisible[i];
+            }
+            hasArmSample = true;
+        }
+
+        private static double ShortestAngleDelta(double from, double to)
+        {
+            double delta = to - from;
+            while (delta > 180.0) delta -= 360.0;
+            while (delta < -180.0) delta += 360.0;
+            return delta;
         }
 
         private static bool Finite(Vec2 value)

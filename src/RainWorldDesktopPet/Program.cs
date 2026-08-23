@@ -6,6 +6,7 @@ using RainWorldDesktopPet.Desktop;
 using RainWorldDesktopPet.RainWorld;
 using RainWorldDesktopPet.UI;
 using RainWorldDesktopPet.Creature;
+using RainWorldDesktopPet.Graphics;
 
 namespace RainWorldDesktopPet
 {
@@ -45,7 +46,8 @@ namespace RainWorldDesktopPet
 
                 bool debug = HasFlag(args, "--debug");
                 SlugcatVariant variant = ReadVariant(ReadOption(args, "--slugcat"));
-                Application.Run(new LayeredOverlayWindow(installation, debug, variant));
+                SlugcatSkin skin = ReadSkin(ReadOption(args, "--skin"));
+                Application.Run(new LayeredOverlayWindow(installation, debug, variant, skin));
             }
         }
 
@@ -98,6 +100,13 @@ namespace RainWorldDesktopPet
             if (value.Equals("gourmand", StringComparison.OrdinalIgnoreCase))
                 return SlugcatVariant.Gourmand;
             return SlugcatVariant.Survivor;
+        }
+
+        private static SlugcatSkin ReadSkin(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value)) return SlugcatSkin.Default;
+            SlugcatSkin result;
+            return Enum.TryParse(value, true, out result) ? result : SlugcatSkin.Default;
         }
 
         public static void LogException(Exception exception)
