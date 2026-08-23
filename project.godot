@@ -1,0 +1,30 @@
+; Engine configuration file.
+; Edit through the Godot editor when possible.
+
+config_version=5
+
+[application]
+
+config/name="Slugcat in My Monitor"
+run/main_scene="res://scenes/main.tscn"
+
+[display]
+
+window/per_pixel_transparency/allowed=true
+window/size/always_on_top=true
+window/size/borderless=true
+window/size/resizable=false
+window/size/transparent=true
+window/size/viewport_height=600
+window/size/viewport_width=900
+
+[physics]
+
+common/physics_ticks_per_second=60
+
+[rendering]
+
+environment/defaults/default_clear_color=Color(0, 0, 0, 0)
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"
+viewport/transparent_background=true

@@ -5,7 +5,7 @@
 모니터 위를 돌아다니고, 마우스로 잡아당기거나 던질 수 있는 슬러그캣 데스크톱 컴패니언을 만드는 오픈소스 프로젝트입니다.
 
 > [!IMPORTANT]
-> 이 프로젝트는 개발 초기 단계입니다. 아직 실행 가능한 데스크톱 앱은 제공하지 않습니다.
+> 이 프로젝트는 개발 초기 단계입니다. 소스에서 실행할 수 있는 물리 프로토타입은 있지만 배포용 앱은 아직 제공하지 않습니다.
 
 ## 목표
 
@@ -25,18 +25,46 @@
 4. DMS atlas 파싱과 스프라이트 조립
 5. 투명 데스크톱 오버레이 적용
 
-데스크톱 앱은 Godot 4 기반으로 개발할 예정입니다. DMS atlas 파서와 검증 도구는 엔진에 종속되지 않도록 분리합니다.
+데스크톱 앱은 Godot 4.7 기반으로 개발합니다. DMS atlas 파서와 검증 도구는 엔진에 종속되지 않도록 분리합니다.
 
 ## 현재 구현
 
-현재 저장소에는 DMS 템플릿 호환성 검증기가 포함되어 있습니다. 검증기는 다음 항목을 확인합니다.
+- 투명하고 항상 위에 표시되는 테두리 없는 창
+- 두 개의 몸통 물리점과 반복 거리 제약
+- 8개 점으로 구성된 Verlet 꼬리
+- 바닥과 좌우 화면 경계 충돌
+- 마우스로 몸통을 잡아 끌고 속도를 보존해 던지는 상호작용
+- 캐릭터 주변만 입력을 받는 동적 마우스 통과 영역
+- 외부 에셋 없이 그려지는 임시 슬러그캣 실루엣
+
+### 프로토타입 실행
+
+요구 사항:
+
+- [Godot 4.7.2 Standard](https://godotengine.org/download/archive/4.7.2-stable/) 또는 호환되는 Godot 4.7 버전
+
+Godot 프로젝트 관리자에서 `project.godot`을 가져온 뒤 프로젝트를 실행하거나, 명령줄에서 실행합니다.
+
+```bash
+godot --path .
+```
+
+슬러그캣의 상체나 하체를 마우스 왼쪽 버튼으로 잡아 움직인 뒤 놓으면 던질 수 있습니다.
+
+Godot 스모크 테스트는 다음 명령으로 실행합니다.
+
+```bash
+godot --headless --path . --script res://tests/slugcat_smoke_test.gd
+```
+
+### DMS 템플릿 검증
+
+DMS 템플릿 호환성 검증기는 다음 항목을 확인합니다.
 
 - `metadata.json` 필수 필드
 - 같은 이름의 PNG/TXT atlas 쌍
 - 필수 신체 파트 atlas
 - PNG 크기와 각 프레임 사각형의 범위
-
-### DMS 템플릿 검증
 
 요구 사항:
 
@@ -70,8 +98,15 @@ node tools/validate-dms-template.mjs "path/to/dressmyslugcat/skin"
 ```text
 .
 ├─ .github/                    # 이슈 및 PR 템플릿
+├─ scenes/
+│  └─ main.tscn                # 메인 프로토타입 장면
+├─ src/
+│  └─ main.gd                  # 리그, 물리, 입력 및 임시 렌더링
+├─ tests/
+│  └─ slugcat_smoke_test.gd
 ├─ tools/
 │  └─ validate-dms-template.mjs
+├─ project.godot
 ├─ package.json
 └─ THIRD_PARTY_TEST_ASSETS.md
 ```
