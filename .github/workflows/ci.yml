@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    name: Windows build and tests
+    runs-on: windows-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Build Release and run tests
+        shell: powershell
+        run: .\build.ps1 -Configuration Release
+
+      - name: Check DMS validator syntax
+        shell: powershell
+        run: node --check tools/validate-dms-template.mjs
+
+      - name: Upload Windows build
+        uses: actions/upload-artifact@v4
+        with:
+          name: Slugcat-In-My-Monitor-${{ github.sha }}
+          if-no-files-found: error
+          path: |
+            artifacts/Release/RainWorldDesktopPet.exe
+            artifacts/Release/RainWorldDesktopPet.exe.config
+            README.md
+            LICENSE
