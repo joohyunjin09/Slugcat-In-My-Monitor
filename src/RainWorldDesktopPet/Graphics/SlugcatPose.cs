@@ -132,6 +132,11 @@ namespace RainWorldDesktopPet.Graphics
         public double TailRootRadius = 6.0;
         public Color VisualBodyColor = Color.White;
         public Color VisualEyeColor = Color.FromArgb(16, 16, 16);
+        public Color VisualHeadColor = Color.White;
+        public Color VisualArmColor = Color.White;
+        public Color VisualHipsColor = Color.White;
+        public Color VisualLegsColor = Color.White;
+        public Color VisualTailColor = Color.White;
         public string BodyElement = "BodyA";
         public string HipsElement = "HipsA";
         public double VisualBodyScale = 1.0;

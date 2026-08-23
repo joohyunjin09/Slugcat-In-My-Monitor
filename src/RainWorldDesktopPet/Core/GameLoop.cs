@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
 using RainWorldDesktopPet.AI;
@@ -10,7 +11,7 @@ using RainWorldDesktopPet.RainWorld;
 
 namespace RainWorldDesktopPet.Core
 {
-    public sealed class GameLoop
+    public sealed class GameLoop : IDisposable
     {
         private readonly Stopwatch clock = Stopwatch.StartNew();
         private readonly FixedTimeStep fixedTimeStep = new FixedTimeStep(SimulationConstants.LogicStepSeconds);
@@ -26,6 +27,10 @@ namespace RainWorldDesktopPet.Core
         private double renderFramesPerSecond;
         private double monitorRefreshRate;
         private readonly RainWorldAtlasSet atlas;
+        private bool disposed;
+        private int offscreenTicks;
+        private Vec2 lastVisibleCenter;
+        private bool hasVisibleCenter;
 
         public GameLoop(IntPtr overlayHandle, RainWorldInstallation installation, SlugcatVariant variant)
             : this(overlayHandle, installation, variant, SlugcatSkin.Default)
@@ -34,7 +39,14 @@ namespace RainWorldDesktopPet.Core
 
         public GameLoop(IntPtr overlayHandle, RainWorldInstallation installation,
             SlugcatVariant variant, SlugcatSkin skin)
+            : this(overlayHandle, installation, variant, skin, 0)
         {
+        }
+
+        public GameLoop(IntPtr overlayHandle, RainWorldInstallation installation,
+            SlugcatVariant variant, SlugcatSkin skin, int spawnIndex)
+        {
+            Installation = installation;
             World = new DesktopCollisionWorld(new WindowEnumerator());
             World.Refresh(overlayHandle);
             Point cursor = System.Windows.Forms.Cursor.Position;
@@ -42,10 +54,21 @@ namespace RainWorldDesktopPet.Core
             double spawnMargin = DesktopWorldTransform.ToDesktopLength(70.0);
             double spawnX = MathUtil.Clamp(cursor.X, monitor.WorkArea.Left + spawnMargin,
                 monitor.WorkArea.Right - spawnMargin);
+            if (spawnIndex > 0)
+            {
+                int step = (spawnIndex + 1) / 2;
+                int direction = spawnIndex % 2 == 1 ? 1 : -1;
+                spawnX = MathUtil.Clamp(spawnX + direction * step *
+                    DesktopWorldTransform.ToDesktopLength(48.0),
+                    monitor.WorkArea.Left + spawnMargin,
+                    monitor.WorkArea.Right - spawnMargin);
+            }
             Vec2 spawn = DesktopWorldTransform.ToSimulation(new Vec2(spawnX,
                 monitor.WorkArea.Bottom - DesktopWorldTransform.ToDesktopLength(
                     SimulationConstants.HipsChunkRadius + 2.0)));
             Slugcat = new Slugcat(spawn, variant);
+            lastVisibleCenter = Slugcat.Center;
+            hasVisibleCenter = true;
             AI = new DesktopPetAI(Environment.TickCount);
             AI.Attention.SetTarget(AttentionKind.RandomPoint,
                 spawn + new Vec2(Slugcat.State.Facing * 60.0, -20.0));
@@ -69,6 +92,7 @@ namespace RainWorldDesktopPet.Core
         public readonly DesktopPetAI AI;
         public readonly SlugcatGraphics Graphics;
         public readonly SpriteRenderer Renderer;
+        public readonly RainWorldInstallation Installation;
         public string AssetStatus { get; private set; }
         public bool DebugEnabled { get; set; }
         public bool Paused { get; set; }
@@ -79,6 +103,51 @@ namespace RainWorldDesktopPet.Core
         public double RenderFramesPerSecond { get { return renderFramesPerSecond; } }
         public double MonitorRefreshRate { get { return monitorRefreshRate; } }
         public MouseAttentionState MouseAttention { get { return mouseAttention; } }
+        public int OffscreenRecoveryCount { get; private set; }
+
+        public bool TryGetAtlasSprite(string name, bool original, out AtlasSprite sprite)
+        {
+            sprite = null;
+            if (atlas == null) return false;
+            return original ? atlas.TryGetBase(name, out sprite) : atlas.TryGet(name, out sprite);
+        }
+
+        public bool SetPartAtlas(string part, string imagePath, string metadataPath, out string reason)
+        {
+            reason = null;
+            if (atlas == null)
+            {
+                reason = "The original Rain World atlas is unavailable.";
+                return false;
+            }
+            try
+            {
+                RainWorldAtlas replacement = RainWorldAtlasLoader.Load(imagePath, metadataPath);
+                atlas.SetPartOverride(part, replacement);
+                return true;
+            }
+            catch (Exception exception)
+            {
+                reason = exception.Message;
+                return false;
+            }
+        }
+
+        public void ClearPartAtlas(string part)
+        {
+            if (atlas != null) atlas.ClearPartOverride(part);
+        }
+
+        public Color GetPartColor(string part) { return Graphics.GetPartColor(part); }
+        public void SetPartColor(string part, Color color) { Graphics.SetPartColor(part, color); }
+        public void ClearPartColors() { Graphics.ClearPartColors(); }
+
+        public void Dispose()
+        {
+            if (disposed) return;
+            disposed = true;
+            Renderer.Dispose();
+        }
 
         public void RecordRenderFrame(double displayRefreshRate)
         {
@@ -131,6 +200,7 @@ namespace RainWorldDesktopPet.Core
                     ? VirtualInput.Neutral
                     : AI.Step(Slugcat, World, mouse, mouseAttention);
                 Slugcat.Step(input, World, mouse.Position, mouse.Velocity);
+                RecoverFromDesktopEscape();
                 if (!Slugcat.State.Conscious || Slugcat.State.Dead ||
                     Slugcat.State.StunCounter > 0)
                     mouseAttention.Suppress(now, mouse.Position, Graphics.Head.Position);
@@ -232,6 +302,53 @@ namespace RainWorldDesktopPet.Core
         public void EndGrab()
         {
             Slugcat.Release(mouse.Velocity);
+        }
+
+        private void RecoverFromDesktopEscape()
+        {
+            if (Slugcat.IsGrabbed)
+            {
+                offscreenTicks = 0;
+                return;
+            }
+
+            IList<MonitorInfo> monitors = World.CurrentSnapshot.Monitors;
+            if (DesktopRecovery.IsNearAnyMonitor(Slugcat.Center, monitors))
+            {
+                lastVisibleCenter = Slugcat.Center;
+                hasVisibleCenter = true;
+                offscreenTicks = 0;
+                return;
+            }
+
+            // A throw through the top of a monitor is a temporary ceiling
+            // excursion, not a lost pet. Keep simulating the original upward
+            // momentum and gravity so the Slugcat naturally falls back into
+            // the same monitor. Horizontal and lower-screen escapes still use
+            // the normal timed/hard recovery below.
+            if (DesktopRecovery.IsAboveMonitorCeiling(Slugcat.Center, monitors))
+            {
+                offscreenTicks = 0;
+                return;
+            }
+
+            offscreenTicks++;
+            bool hardEscape = DesktopRecovery.IsFarOutsideVirtualDesktop(
+                Slugcat.Center, World.VirtualBounds);
+            if (!hardEscape && offscreenTicks < DesktopRecovery.OffscreenGraceTicks) return;
+
+            Vec2 preferred = hasVisibleCenter ? lastVisibleCenter : Slugcat.Center;
+            Vec2 safeHips = DesktopRecovery.FindSafeHipsPosition(preferred, monitors,
+                SimulationConstants.HipsChunkRadius);
+            Vec2 delta = safeHips - Slugcat.BodyChunks[1].Position;
+            Slugcat.Reposition(safeHips);
+            Graphics.ApplyMovingSurfaceDelta(delta);
+            AI.Attention.SetTarget(AttentionKind.RandomPoint,
+                Slugcat.Center + new Vec2(Slugcat.State.Facing * 60.0, -20.0));
+            lastVisibleCenter = Slugcat.Center;
+            hasVisibleCenter = true;
+            offscreenTicks = 0;
+            OffscreenRecoveryCount++;
         }
 
         public void SetVariant(SlugcatVariant variant)

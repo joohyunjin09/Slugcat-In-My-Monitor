@@ -54,6 +54,7 @@
     <Compile Include="Core\FixedTimeStep.cs" />
     <Compile Include="Core\GameLoop.cs" />
     <Compile Include="Core\DesktopWorldTransform.cs" />
+    <Compile Include="Core\DesktopRecovery.cs" />
     <Compile Include="Core\MathUtil.cs" />
     <Compile Include="Core\SimulationConstants.cs" />
     <Compile Include="Core\Vec2.cs" />
@@ -88,6 +89,7 @@
     <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="RainWorld\AtlasElement.cs" />
     <Compile Include="RainWorld\DxtDecoder.cs" />
+    <Compile Include="RainWorld\DmsSpriteCatalog.cs" />
     <Compile Include="RainWorld\EmbeddedUnityAtlasProvider.cs" />
     <Compile Include="RainWorld\RainWorldAssetLoader.cs" />
     <Compile Include="RainWorld\RainWorldAtlasLoader.cs" />
@@ -95,6 +97,7 @@
     <Compile Include="RainWorld\RainWorldLocator.cs" />
     <Compile Include="RainWorld\UnitySerializedFileReader.cs" />
     <Compile Include="UI\LayeredOverlayWindow.cs" />
+    <Compile Include="UI\SkinEditorWindow.cs" />
   </ItemGroup>
   <ItemGroup>
     <None Include="App.config" />

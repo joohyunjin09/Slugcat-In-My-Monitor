@@ -1,5 +1,7 @@
 # Third-party DMS fixtures are kept local until redistribution terms are confirmed.
 .local-test-assets/
+assets/skins/
+*.simmskin
 
 # Portable development tools downloaded for local use.
 .tools/
@@ -13,18 +15,5 @@ artifacts/
 *.suo
 settings.local.ini
 
-# Godot-generated files.
-.godot/
-.nomedia
-.import/
-export.cfg
-export_credentials.cfg
+# Temporary files.
 *.tmp
-
-# Godot Mono-generated files.
-.mono/
-data_*/
-mono_crash.*.json
-
-# Imported translations generated from CSV files.
-*.translation

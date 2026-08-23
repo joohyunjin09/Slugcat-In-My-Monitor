@@ -49,11 +49,14 @@ namespace RainWorldDesktopPet.Tests
             Run("Window-edge falls land on the first lower window", WindowEdgeFallLandsOnLowerWindow);
             Run("Window-edge falls with empty space land on monitor terrain", EmptyAreaFallLandsOnMonitorFloor);
             Run("Negative and staggered monitors keep continuous terrain identity", MultiMonitorTopologyUsesVirtualCoordinates);
+            Run("Offscreen throws recover to a visible monitor floor", OffscreenThrowRecoveryTarget);
             Run("Connection penetration cannot become an infinite desktop fall", LongFloorContactSurvivesConnectionPenetration);
             Run("Monitor floor corners survive post-connection penetration", MonitorCornerSurvivesConnectionPenetration);
             Run("Swept high-speed travel cannot tunnel through a small window", FastHorizontalSmallWindowDoesNotTunnel);
             Run("AI produces VirtualInput without moving physics directly", AiDoesNotMoveCreature);
             Run("Futile atlas metadata parses frame geometry", AtlasMetadataParses);
+            Run("DMS part atlas overrides and restores original sprites", DmsPartAtlasOverrideRestoresBase);
+            Run("Customize colors reach each rendered sprite part", PartColorsReachRenderedPose);
             Run("Rain World locator validates an explicit installation", LocatorValidatesExplicitPath);
             Run("Required autonomous behavior states are present", RequiredBehaviorsExist);
             Run("Jump and DropDown utility states are reachable", UtilityActionsAreReachable);
@@ -542,6 +545,96 @@ namespace RainWorldDesktopPet.Tests
             {
                 if (Directory.Exists(root)) Directory.Delete(root, true);
             }
+        }
+
+        private static void OffscreenThrowRecoveryTarget()
+        {
+            MonitorInfo monitor = new MonitorInfo("RECOVERY",
+                new Rectangle(0, 0, 1920, 1080),
+                new Rectangle(0, 0, 1920, 1040), true);
+            IList<MonitorInfo> monitors = new List<MonitorInfo> { monitor };
+            Vec2 visible = DesktopWorldTransform.ToSimulation(new Vec2(960.0, 500.0));
+            Vec2 escaped = DesktopWorldTransform.ToSimulation(new Vec2(2600.0, -500.0));
+            True(DesktopRecovery.IsNearAnyMonitor(visible, monitors), "visible point detection");
+            True(!DesktopRecovery.IsNearAnyMonitor(escaped, monitors), "escaped point detection");
+            True(DesktopRecovery.IsFarOutsideVirtualDesktop(escaped, monitor.Bounds),
+                "hard escape detection");
+
+            Vec2 aboveCeiling = DesktopWorldTransform.ToSimulation(new Vec2(960.0, -500.0));
+            Vec2 aboveButOutsideColumn = DesktopWorldTransform.ToSimulation(
+                new Vec2(2300.0, -500.0));
+            True(DesktopRecovery.IsAboveMonitorCeiling(aboveCeiling, monitors),
+                "ceiling throw remains a physical excursion");
+            True(!DesktopRecovery.IsAboveMonitorCeiling(aboveButOutsideColumn, monitors),
+                "side escape above the ceiling still recovers");
+
+            Vec2 safe = DesktopRecovery.FindSafeHipsPosition(escaped, monitors,
+                SimulationConstants.HipsChunkRadius);
+            Vec2 safeDesktop = DesktopWorldTransform.ToDesktop(safe);
+            True(safeDesktop.X >= monitor.WorkArea.Left && safeDesktop.X < monitor.WorkArea.Right,
+                "recovery x inside work area");
+            True(safeDesktop.Y < monitor.FloorY && safeDesktop.Y > monitor.WorkArea.Top,
+                "recovery hips above desktop floor");
+
+            Slugcat slugcat = new Slugcat(Vec2.Zero);
+            slugcat.BodyChunks[0].Velocity = new Vec2(20.0, -15.0);
+            slugcat.BodyChunks[1].Velocity = new Vec2(20.0, -15.0);
+            slugcat.Reposition(safe);
+            Near(0.0, slugcat.BodyChunks[0].Velocity.Length, 0.000001,
+                "recovered chest velocity");
+            Near(0.0, slugcat.BodyChunks[1].Velocity.Length, 0.000001,
+                "recovered hips velocity");
+            Near(SimulationConstants.BodyConnectionDistance,
+                Vec2.Distance(slugcat.BodyChunks[0].Position, slugcat.BodyChunks[1].Position),
+                0.000001, "recovered body connection");
+        }
+
+        private static void DmsPartAtlasOverrideRestoresBase()
+        {
+            string root = Path.Combine(Path.GetTempPath(), "slugcat-dms-test-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(root);
+            string json = "{\"frames\":{\"BodyA.png\":{\"frame\":{\"x\":0,\"y\":0,\"w\":8,\"h\":8}," +
+                "\"rotated\":false,\"spriteSourceSize\":{\"x\":0,\"y\":0,\"w\":8,\"h\":8}," +
+                "\"sourceSize\":{\"w\":8,\"h\":8}}}}";
+            string basePng = Path.Combine(root, "base.png");
+            string baseTxt = Path.Combine(root, "base.txt");
+            string dmsPng = Path.Combine(root, "body.png");
+            string dmsTxt = Path.Combine(root, "body.txt");
+            try
+            {
+                using (Bitmap bitmap = new Bitmap(8, 8)) bitmap.Save(basePng, ImageFormat.Png);
+                using (Bitmap bitmap = new Bitmap(8, 8)) bitmap.Save(dmsPng, ImageFormat.Png);
+                File.WriteAllText(baseTxt, json);
+                File.WriteAllText(dmsTxt, json);
+                using (RainWorldAtlasSet set = new RainWorldAtlasSet())
+                {
+                    set.Add(RainWorldAtlasLoader.Load(basePng, baseTxt));
+                    set.SetPartOverride("Body", RainWorldAtlasLoader.Load(dmsPng, dmsTxt));
+                    AtlasSprite sprite;
+                    True(set.TryGet("BodyA", out sprite) && sprite.Atlas.ImagePath == dmsPng,
+                        "DMS body must override the base atlas");
+                    set.ClearPartOverride("Body");
+                    True(set.TryGet("BodyA", out sprite) && sprite.Atlas.ImagePath == basePng,
+                        "Default must restore the original atlas sprite");
+                }
+            }
+            finally
+            {
+                if (Directory.Exists(root)) Directory.Delete(root, true);
+            }
+        }
+
+        private static void PartColorsReachRenderedPose()
+        {
+            Slugcat slugcat = new Slugcat(new Vec2(200.0, 200.0));
+            SlugcatGraphics graphics = new SlugcatGraphics(slugcat);
+            graphics.SetPartColor("Head", Color.CornflowerBlue);
+            graphics.SetPartColor("Face", Color.OrangeRed);
+            graphics.SetPartColor("Tail", Color.MediumPurple);
+            SlugcatPose pose = graphics.BuildPose(0.0, new AttentionSystem());
+            True(pose.VisualHeadColor.ToArgb() == Color.CornflowerBlue.ToArgb(), "head tint");
+            True(pose.VisualEyeColor.ToArgb() == Color.OrangeRed.ToArgb(), "face tint");
+            True(pose.VisualTailColor.ToArgb() == Color.MediumPurple.ToArgb(), "tail tint");
         }
 
         private static void LocatorValidatesExplicitPath()

@@ -335,6 +335,37 @@ namespace RainWorldDesktopPet.Creature
             grabbedChunk = -1;
         }
 
+        public void Reposition(Vec2 hipsPosition)
+        {
+            grabbedChunk = -1;
+            BodyChunks[1].Position = hipsPosition;
+            BodyChunks[0].Position = hipsPosition -
+                new Vec2(0.0, SimulationConstants.BodyConnectionDistance);
+            for (int i = 0; i < BodyChunks.Length; i++)
+            {
+                BodyChunk chunk = BodyChunks[i];
+                chunk.LastPosition = chunk.Position;
+                chunk.Velocity = Vec2.Zero;
+                chunk.ContactFloor = false;
+                chunk.ContactLeft = false;
+                chunk.ContactRight = false;
+                chunk.SupportingSurfaceId = 0;
+                chunk.WallSurfaceId = 0;
+                chunk.PreviousContactFloor = false;
+                chunk.PreviousContactLeft = false;
+                chunk.PreviousContactRight = false;
+                chunk.PreviousSupportingSurfaceId = 0;
+                chunk.PreviousWallSurfaceId = 0;
+            }
+            State.Animation = AnimationIndex.None;
+            State.BodyMode = BodyModeIndex.Default;
+            State.Grounded = false;
+            State.Standing = false;
+            State.StunCounter = 0;
+            State.InitialStunValue = 0;
+            State.Conscious = true;
+        }
+
         public bool HitTest(Vec2 point)
         {
             return PickChunk(point, 18.0) >= 0;

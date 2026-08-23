@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using System.Drawing;
 using RainWorldDesktopPet.AI;
 using RainWorldDesktopPet.Core;
 using RainWorldDesktopPet.Creature;
@@ -33,6 +35,8 @@ namespace RainWorldDesktopPet.Graphics
         private double lastBreath;
         private int blink;
         private double airborneCounter;
+        private readonly Dictionary<string, Color> partColors =
+            new Dictionary<string, Color>(StringComparer.OrdinalIgnoreCase);
 
         public SlugcatGraphics(Slugcat slugcat)
             : this(slugcat, SlugcatVisualProfiles.Default, null)
@@ -63,6 +67,27 @@ namespace RainWorldDesktopPet.Graphics
         public BodyPart Head { get { return head; } }
         public SlugcatVisualProfile VisualProfile { get { return visualProfile; } }
         public ISlugcatGraphicsExtension[] Extensions { get { return extensions; } }
+
+        public Color GetPartColor(string part)
+        {
+            Color color;
+            if (partColors.TryGetValue(part, out color)) return color;
+            Color body = visualProfile.ResolveBodyColor(slugcat.Appearance);
+            return string.Equals(part, "Face", StringComparison.OrdinalIgnoreCase)
+                ? visualProfile.EyeColor
+                : body;
+        }
+
+        public void SetPartColor(string part, Color color)
+        {
+            if (string.IsNullOrWhiteSpace(part)) return;
+            partColors[part] = Color.FromArgb(255, color.R, color.G, color.B);
+        }
+
+        public void ClearPartColors()
+        {
+            partColors.Clear();
+        }
 
         public void SetVisualProfile(SlugcatVisualProfile profile, RainWorldAtlasSet sourceAtlas)
         {
@@ -278,8 +303,13 @@ namespace RainWorldDesktopPet.Graphics
                 : string.Join(", ", visualProfile.ExtensionNames);
             pose.TailProfileName = visualProfile.Tail.Name;
             pose.TailRootRadius = visualProfile.Tail.RootRadius;
-            pose.VisualBodyColor = visualProfile.ResolveBodyColor(slugcat.Appearance);
-            pose.VisualEyeColor = visualProfile.EyeColor;
+            pose.VisualBodyColor = GetPartColor("Body");
+            pose.VisualEyeColor = GetPartColor("Face");
+            pose.VisualHeadColor = GetPartColor("Head");
+            pose.VisualArmColor = GetPartColor("Arms");
+            pose.VisualHipsColor = GetPartColor("Hips");
+            pose.VisualLegsColor = GetPartColor("Legs");
+            pose.VisualTailColor = GetPartColor("Tail");
             pose.BodyElement = visualProfile.BodyElement;
             pose.HipsElement = visualProfile.HipsElement;
             pose.VisualBodyScale = visualProfile.ResolveBodyScale(slugcat.Appearance);
