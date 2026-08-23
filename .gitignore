@@ -3,6 +3,15 @@
 
 # Portable development tools downloaded for local use.
 .tools/
+.local-tools/
+
+# Native C# build output and local runtime configuration.
+bin/
+obj/
+artifacts/
+*.user
+*.suo
+settings.local.ini
 
 # Godot-generated files.
 .godot/
