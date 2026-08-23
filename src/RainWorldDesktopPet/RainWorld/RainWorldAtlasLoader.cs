@@ -49,6 +49,12 @@ namespace RainWorldDesktopPet.RainWorld
     {
         private readonly List<RainWorldAtlas> atlases = new List<RainWorldAtlas>();
         private readonly Dictionary<string, AtlasSprite> sprites = new Dictionary<string, AtlasSprite>(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, RainWorldAtlas> overrideAtlases =
+            new Dictionary<string, RainWorldAtlas>(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, List<string>> overrideNames =
+            new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, AtlasSprite> overrides =
+            new Dictionary<string, AtlasSprite>(StringComparer.OrdinalIgnoreCase);
 
         public int AtlasCount { get { return atlases.Count; } }
 
@@ -70,7 +76,66 @@ namespace RainWorldDesktopPet.RainWorld
 
         public bool TryGet(string name, out AtlasSprite sprite)
         {
+            return overrides.TryGetValue(name, out sprite) || overrides.TryGetValue(name + ".png", out sprite) ||
+                sprites.TryGetValue(name, out sprite) || sprites.TryGetValue(name + ".png", out sprite);
+        }
+
+        public bool TryGetBase(string name, out AtlasSprite sprite)
+        {
             return sprites.TryGetValue(name, out sprite) || sprites.TryGetValue(name + ".png", out sprite);
+        }
+
+        public void SetPartOverride(string part, RainWorldAtlas atlas)
+        {
+            if (string.IsNullOrWhiteSpace(part)) throw new ArgumentNullException("part");
+            ClearPartOverride(part);
+            if (atlas == null) return;
+
+            overrideAtlases[part] = atlas;
+            List<string> names = new List<string>();
+            foreach (KeyValuePair<string, AtlasElement> item in atlas.Elements)
+            {
+                names.Add(item.Key);
+                if (item.Key.EndsWith(".png", StringComparison.OrdinalIgnoreCase))
+                {
+                    string shortName = item.Key.Substring(0, item.Key.Length - 4);
+                    names.Add(shortName);
+                }
+            }
+            overrideNames[part] = names;
+            RebuildOverrides();
+        }
+
+        public void ClearPartOverride(string part)
+        {
+            List<string> names;
+            if (overrideNames.TryGetValue(part, out names))
+            {
+                for (int i = 0; i < names.Count; i++) overrides.Remove(names[i]);
+                overrideNames.Remove(part);
+            }
+            RainWorldAtlas atlas;
+            if (overrideAtlases.TryGetValue(part, out atlas))
+            {
+                overrideAtlases.Remove(part);
+                atlas.Dispose();
+            }
+            RebuildOverrides();
+        }
+
+        private void RebuildOverrides()
+        {
+            overrides.Clear();
+            foreach (RainWorldAtlas atlas in overrideAtlases.Values)
+            {
+                foreach (KeyValuePair<string, AtlasElement> item in atlas.Elements)
+                {
+                    AtlasSprite sprite = new AtlasSprite { Atlas = atlas, Element = item.Value };
+                    overrides[item.Key] = sprite;
+                    if (item.Key.EndsWith(".png", StringComparison.OrdinalIgnoreCase))
+                        overrides[item.Key.Substring(0, item.Key.Length - 4)] = sprite;
+                }
+            }
         }
 
         public void Dispose()
@@ -78,6 +143,10 @@ namespace RainWorldDesktopPet.RainWorld
             for (int i = 0; i < atlases.Count; i++) atlases[i].Dispose();
             atlases.Clear();
             sprites.Clear();
+            foreach (RainWorldAtlas atlas in overrideAtlases.Values) atlas.Dispose();
+            overrideAtlases.Clear();
+            overrideNames.Clear();
+            overrides.Clear();
         }
     }
 

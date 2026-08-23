@@ -27,7 +27,9 @@ if (-not (Test-Path -LiteralPath $referenceAssembly)) {
     Remove-Item -LiteralPath $packagePath -Force
 }
 
-& $msbuild (Join-Path $repoRoot 'RainWorldDesktopPet.sln') /t:Build /p:Configuration=$Configuration /m /nologo
+# The app and test projects share the same output directory. Legacy MSBuild can
+# report a false parallel-build failure while both projects copy their outputs.
+& $msbuild (Join-Path $repoRoot 'RainWorldDesktopPet.sln') /t:Build /p:Configuration=$Configuration /m:1 /nologo
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 if (-not $SkipTests) {

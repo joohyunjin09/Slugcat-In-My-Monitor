@@ -32,6 +32,9 @@ namespace RainWorldDesktopPet.Desktop
         internal const uint MONITOR_DEFAULTTONEAREST = 2;
         internal const uint MOD_NOREPEAT = 0x4000;
         internal const int VK_F1 = 0x70;
+        internal const int VK_F2 = 0x71;
+        internal const int VK_F3 = 0x72;
+        internal const int VK_F4 = 0x73;
         internal const int VK_LBUTTON = 0x01;
         internal const int VK_RBUTTON = 0x02;
         internal const int VK_MBUTTON = 0x04;

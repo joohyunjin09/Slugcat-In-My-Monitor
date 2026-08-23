@@ -27,7 +27,10 @@ RainWorld.exe, Steam 게임 프로세스, Unity Player, BepInEx를 실행하거�
 
 ## 원작 Slugcat
 
-DMS 스킨은 현재 자동 탐색하거나 적용하지 않습니다. 먼저 아래 원작 캐릭터를 동일한 기본 `rainWorld` atlas와 DLL에서 확인한 색/체형 값으로 렌더링합니다.
+DMS 스킨 에디터는 실행 파일 주변의 `skins`, 개발 저장소의 `assets/skins`,
+`%LOCALAPPDATA%\SlugcatInMyMonitor\skins`, Rain World의 로컬 mod 폴더에서
+`metadata.json`과 파츠별 PNG/TXT 아틀라스 쌍을 검색합니다. 검색된 세트를 선택하면
+원본 `rainWorld` 아틀라스의 해당 파츠 위에 실제 프레임을 오버라이드합니다.
 
 | 실행 이름 | 캐릭터 | 원작 내부 이름 | 색 |
 |---|---|---|---|
@@ -73,8 +76,19 @@ Downpour가 설치되어 `rainworldmsc`의 필수 element가 모두 확인되면
 
 - Slugcat 위에서 마우스 왼쪽 버튼: 잡기
 - 잡은 채 이동 후 놓기: 던지기
+- 모든 모니터 밖으로 던져진 경우: 1초 후 마지막 모니터의 안전한 바닥으로 자동 복귀
 - `F1`: physics/AI/procedural graphics 디버그 표시
-- tray 메뉴: Player 물리/기본색 및 Slugcat skin 변경, 일시 정지, 종료
+- `F2`: Slugcat 외형 편집기 열기/닫기
+- `F3`: 현재 선택된 종류와 스킨으로 Slugcat 추가 스폰(최대 8마리)
+- `F4`: 다음 Slugcat 선택
+- Slugcat을 클릭하거나 잡기: 해당 개체 선택
+- tray의 `Slugcats`: 개체 스폰·선택·선택 개체 제거
+- tray 메뉴: 선택 개체의 Player 물리/기본색 및 Slugcat skin 변경, 전체 일시 정지, 종료
+
+스킨 편집기는 일반적인 Windows 프로그램 구조를 사용합니다. 왼쪽 캐릭터 목록,
+가운데 파츠별 스프라이트 선택·색상 버튼, 오른쪽 실제 아틀라스 미리보기와 하단
+Reset/Copy/Paste/Reload 버튼을 제공합니다. DMS 폴더 탐색과 atlas 재적용을 지원하며,
+여러 마리를 실행할 때 편집기와 외형 메뉴는 현재 선택된 Slugcat 한 마리에만 적용됩니다.
 
 ## 로컬 자산 처리
 
@@ -107,7 +121,7 @@ src/RainWorldDesktopPet/
 
 전체 데이터 흐름은 [`docs/Architecture.md`](docs/Architecture.md), 원본과 독립 구현의 대응은 [`docs/RainWorldBehaviorMap.md`](docs/RainWorldBehaviorMap.md), 자산 조사 근거는 [`docs/analysis/AssetFindings.md`](docs/analysis/AssetFindings.md), DLL 조사 근거는 [`docs/analysis/DllFindings.md`](docs/analysis/DllFindings.md)에 기록합니다.
 
-기존 Godot 프로토타입(`project.godot`, `scenes/`, `src/main.gd`)은 비교 자료로 보존되어 있으며 현재 네이티브 실행 프로그램의 진입점이 아닙니다.
+현재 실행 구현은 C#/.NET Framework 기반 네이티브 Windows 애플리케이션입니다. 이전 Godot 프로토타입의 검토 기록은 `docs/analysis/PrototypeReview.md`에 역사적 참고 자료로 남겨 두었습니다.
 
 ## 테스트
 

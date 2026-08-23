@@ -119,26 +119,27 @@ namespace RainWorldDesktopPet.Graphics
 
                 if (atlas != null)
                 {
-                    // PlayerGraphics.AddToContainer keeps sprites 0..6 in this
-                    // exact Futile order, then FaceA (9) above both arms.
-                    DrawAtlasTorso(graphics, pose); // 0 Body, 1 Hips
-                    DrawTail(graphics, pose, pose.VisualBodyColor); // 2
-                    DrawExtraGraphics(graphics, pose, ExtraGraphicsLayer.AfterTailBeforeHead);
-                    DrawAtlasHeadPart(graphics, pose, pose.VisualBodyColor, false); // 3
+                    // Keep the procedural tail and legs behind the torso for
+                    // the desktop view. Broad custom parts otherwise appear
+                    // to pass across the front of the Slugcat.
+                    DrawTail(graphics, pose, pose.VisualTailColor); // 2
                     DrawAtlasLegs(graphics, pose); // 4
-                    DrawAtlasArm(graphics, pose, 0, pose.VisualBodyColor); // 5
-                    DrawAtlasArm(graphics, pose, 1, pose.VisualBodyColor); // 6
+                    DrawAtlasTorso(graphics, pose); // 0 Body, 1 Hips
+                    DrawExtraGraphics(graphics, pose, ExtraGraphicsLayer.AfterTailBeforeHead);
+                    DrawAtlasHeadPart(graphics, pose, pose.VisualHeadColor, false); // 3
+                    DrawAtlasArm(graphics, pose, 0, pose.VisualArmColor); // 5
+                    DrawAtlasArm(graphics, pose, 1, pose.VisualArmColor); // 6
                     DrawExtraGraphics(graphics, pose, ExtraGraphicsLayer.BehindFace);
-                    DrawAtlasHeadPart(graphics, pose, pose.VisualBodyColor, true); // 9
+                    DrawAtlasHeadPart(graphics, pose, pose.VisualHeadColor, true); // 9
                     DrawExtraGraphics(graphics, pose, ExtraGraphicsLayer.InFront);
                 }
                 else
                 {
-                    DrawTail(graphics, pose, pose.VisualBodyColor);
-                    DrawLimbs(graphics, pose, 0, pose.VisualBodyColor);
+                    DrawTail(graphics, pose, pose.VisualTailColor);
+                    DrawLimbs(graphics, pose, 0, pose.VisualArmColor);
                     DrawProceduralBody(graphics, pose);
-                    DrawLimbs(graphics, pose, 1, pose.VisualBodyColor);
-                    DrawHead(graphics, pose, false, pose.VisualBodyColor);
+                    DrawLimbs(graphics, pose, 1, pose.VisualArmColor);
+                    DrawHead(graphics, pose, false, pose.VisualHeadColor);
                 }
 
                 if (debug)
@@ -474,7 +475,7 @@ namespace RainWorldDesktopPet.Graphics
             FillCircle(graphics, pose.Chest, 10.3, OutlineColor);
             FillCircle(graphics, pose.Hips, 10.0, OutlineColor);
             FillCircle(graphics, pose.Chest, 7.4 * pose.VisualBodyScale, pose.VisualBodyColor);
-            FillCircle(graphics, pose.Hips, 7.1 * pose.VisualHipsScale, Shade(pose.VisualBodyColor));
+            FillCircle(graphics, pose.Hips, 7.1 * pose.VisualHipsScale, Shade(pose.VisualHipsColor));
         }
 
         private void DrawAtlasTorso(System.Drawing.Graphics graphics, SlugcatPose pose)
@@ -491,7 +492,7 @@ namespace RainWorldDesktopPet.Graphics
             Vec2 tailTarget = pose.Tail.Length > 0 ? pose.Tail[0] : pose.Hips + (pose.Hips - pose.Chest);
             double hipsAngle = AimScreen(pose.Chest, tailTarget);
             DrawElement(graphics, pose.HipsElement, hipsPosition, hipsAngle, hipsWidth, 1.0,
-                0.5, 0.5, pose.VisualBodyColor);
+                0.5, 0.5, pose.VisualHipsColor);
         }
 
         private void DrawAtlasLegs(System.Drawing.Graphics graphics, SlugcatPose pose)
@@ -510,7 +511,7 @@ namespace RainWorldDesktopPet.Graphics
                 ? pose.Facing
                 : 1.0;
             DrawElement(graphics, legsName, pose.Legs, legsAngle, legsScaleX, 1.0,
-                0.5, 0.25, pose.VisualBodyColor);
+                0.5, 0.25, pose.VisualLegsColor);
         }
 
         private void DrawAtlasArm(System.Drawing.Graphics graphics, SlugcatPose pose, int index, Color bodyColor)
