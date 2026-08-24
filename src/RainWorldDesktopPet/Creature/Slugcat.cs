@@ -124,7 +124,7 @@ namespace RainWorldDesktopPet.Creature
 
             // PhysicalObject.Update advances and resolves every BodyChunk before
             // updating BodyChunkConnections. Keep that one-pass ordering here.
-            for (int i = 0; i < BodyChunks.Length; i++)
+            for (int i = 0; grabbedChunk < 0 && i < BodyChunks.Length; i++)
             {
                 world.Resolve(BodyChunks[i], tickSnapshot, Movement.IgnoredSurfaceId,
                     consciousForSurfaceFriction
@@ -142,7 +142,7 @@ namespace RainWorldDesktopPet.Creature
             // collision. Preserve that order, then close only shallow monitor
             // corner penetrations created by the connection itself so a chunk
             // cannot begin the next swept pass outside desktop terrain.
-            for (int i = 0; i < BodyChunks.Length; i++)
+            for (int i = 0; grabbedChunk < 0 && i < BodyChunks.Length; i++)
                 world.ResolveMonitorTerrainAfterConstraints(BodyChunks[i], tickSnapshot);
 
             // Player.Update runs PhysicalObject/BodyChunk collision and connection

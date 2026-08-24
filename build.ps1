@@ -1,7 +1,8 @@
 param(
     [ValidateSet('Debug', 'Release')]
     [string]$Configuration = 'Release',
-    [switch]$SkipTests
+    [switch]$SkipTests,
+    [switch]$SkipNative
 )
 
 $ErrorActionPreference = 'Stop'
@@ -9,9 +10,13 @@ $repoRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $toolRoot = Join-Path $repoRoot '.tools\net48-reference'
 $referenceAssembly = Join-Path $toolRoot 'build\.NETFramework\v4.8\mscorlib.dll'
 $msbuild = 'C:\Windows\Microsoft.NET\Framework64\v4.0.30319\MSBuild.exe'
+$vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
 
 if (-not (Test-Path -LiteralPath $msbuild)) {
     throw '.NET Framework MSBuild was not found.'
+}
+if (-not $SkipNative -and -not (Test-Path -LiteralPath $vswhere)) {
+    throw 'Visual Studio C++ build tools were not found.'
 }
 
 if (-not (Test-Path -LiteralPath $referenceAssembly)) {
@@ -25,6 +30,17 @@ if (-not (Test-Path -LiteralPath $referenceAssembly)) {
     }
     Expand-Archive -LiteralPath $packagePath -DestinationPath $toolRoot
     Remove-Item -LiteralPath $packagePath -Force
+}
+
+if (-not $SkipNative) {
+    $nativeMsbuild = & $vswhere -latest -products * `
+        -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
+        -find 'MSBuild\**\Bin\MSBuild.exe' | Select-Object -First 1
+    if (-not $nativeMsbuild) { throw 'Visual Studio C++ MSBuild was not found.' }
+    $nativeProject = Join-Path $repoRoot 'native\DirectCompositionRenderer\DirectCompositionRenderer.vcxproj'
+    & $nativeMsbuild $nativeProject /t:Build /p:Configuration=$Configuration `
+        /p:Platform=x64 /m:1 /nodeReuse:false /nologo
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 }
 
 # The app and test projects share the same output directory. Legacy MSBuild can

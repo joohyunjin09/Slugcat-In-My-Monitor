@@ -40,7 +40,7 @@ Desktop windows / monitors / mouse
  original atlas + SpriteRenderer
                │
                ▼
-      transparent Win32 overlay
+ DirectComposition visual surfaces
 ```
 
 AI never writes chunk positions. Sit and sleep are also expressed as `VirtualInput` posture intents and interpreted by movement. Dragging is the explicit user interaction exception: the selected chunk follows the mouse while the other chunk and connection continue to simulate.
@@ -62,9 +62,11 @@ Window geometry refreshes at 0.25-second intervals rather than every render fram
 
 ## Rendering and input
 
-The overlay is one top-down 32-bit DIB whose bounds equal `SystemInformation.VirtualScreen`, including negative monitor coordinates. The HWND remains fixed at the virtual-desktop origin; only sprites move inside it, so procedural limbs and tail cannot cross a small pet-following window boundary. `WM_DISPLAYCHANGE`/`WM_DPICHANGED` rebuild the back buffer. `UpdateLayeredWindow` presents per-pixel alpha, while `WS_EX_TOOLWINDOW`, `WS_EX_NOACTIVATE`, no taskbar entry, and `WM_NCHITTEST` minimize desktop interference. Empty pixels return `HTTRANSPARENT`; body/head hit regions accept grab-and-throw input.
+The top-level HWND covers `SystemInformation.VirtualScreen`, including negative monitor coordinates, but uses `WS_EX_NOREDIRECTIONBITMAP` and does not own a full-desktop backing bitmap. Each active Slugcat is rendered into a small premultiplied-alpha bitmap and uploaded to its own `IDCompositionSurface`. A native Direct3D 11 bridge positions those surfaces as separate visuals and submits every pixel and position update in one DirectComposition `Commit`, preventing mixed old/new frames when several Slugcats move independently. `WM_DISPLAYCHANGE`/`WM_DPICHANGED` update the visual coordinate origin.
 
-The renderer caches decoded atlases, tint matrices, the back buffer, and pose arrays. Physics and procedural graphics remain at 40 Hz while the overlay timer requests interpolated frames at roughly display cadence.
+`WS_EX_TOOLWINDOW`, `WS_EX_NOACTIVATE`, no taskbar entry, and `WM_NCHITTEST` minimize desktop interference. Empty pixels return `HTTRANSPARENT`; body/head hit regions accept grab-and-throw input.
+
+The renderer caches decoded atlases, tint matrices, and one reusable composition bitmap per Slugcat. Physics and procedural graphics remain at 40 Hz while the overlay timer requests interpolated frames at the highest refresh rate among monitors currently occupied by Slugcats.
 
 ## Original character selection
 
@@ -72,4 +74,4 @@ Survivor (`White`), Monk (`Yellow`), Hunter (`Red`), and Gourmand use the shared
 
 ## Failure behavior
 
-Unsupported/corrupt Unity resources cause a procedural-rendering fallback rather than starting the game or extracting assets. `UpdateLayeredWindow` presentation failures get at most six exponential-backoff retries, with one back-buffer replacement after the third failure; logging is capped to the first and terminal failures. Other render/simulation exceptions pause animation after one log entry. In either paused case the tray's **Retry rendering** action creates a fresh back buffer and resumes, while the process remains available for retry or exit. Logs live under `%LOCALAPPDATA%\SlugcatInMyMonitor\errors.log`. Missing installations are resolved through an explicit folder picker.
+Unsupported/corrupt Unity resources cause a procedural-rendering fallback rather than starting the game or extracting assets. DirectComposition, Direct3D, GDI drawing, or simulation failures pause animation after one log entry. The tray's **Retry rendering** action recreates the DirectComposition device and surfaces, then resumes while the process remains available for retry or exit. Logs live under `%LOCALAPPDATA%\SlugcatInMyMonitor\errors.log`. Missing installations are resolved through an explicit folder picker.

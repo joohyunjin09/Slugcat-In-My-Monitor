@@ -29,6 +29,7 @@ $releaseRoot = Join-Path $repoRoot 'artifacts\Release'
 $requiredFiles = @(
     (Join-Path $releaseRoot 'SlugcatInMyMonitor.exe'),
     (Join-Path $releaseRoot 'SlugcatInMyMonitor.exe.config'),
+    (Join-Path $releaseRoot 'SlugcatInMyMonitor.DirectComposition.dll'),
     (Join-Path $repoRoot 'README.md'),
     (Join-Path $repoRoot 'LICENSE'),
     (Join-Path $repoRoot 'packaging\skins\README.txt')
@@ -45,6 +46,7 @@ New-Item -ItemType Directory -Force -Path (Join-Path $stagingRoot 'skins') | Out
 
 Copy-Item -LiteralPath (Join-Path $releaseRoot 'SlugcatInMyMonitor.exe') -Destination $stagingRoot
 Copy-Item -LiteralPath (Join-Path $releaseRoot 'SlugcatInMyMonitor.exe.config') -Destination $stagingRoot
+Copy-Item -LiteralPath (Join-Path $releaseRoot 'SlugcatInMyMonitor.DirectComposition.dll') -Destination $stagingRoot
 Copy-Item -LiteralPath (Join-Path $repoRoot 'README.md') -Destination $stagingRoot
 Copy-Item -LiteralPath (Join-Path $repoRoot 'LICENSE') -Destination $stagingRoot
 Copy-Item -LiteralPath (Join-Path $repoRoot 'packaging\skins\README.txt') `

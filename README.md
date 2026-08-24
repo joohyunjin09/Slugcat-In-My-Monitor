@@ -102,7 +102,9 @@ Windows ZIP을 내려받아 압축을 푼 뒤 `SlugcatInMyMonitor.exe`를 실행
 
 ## 개발
 
-PowerShell 5.1 이상에서 Release 빌드와 전체 테스트를 실행할 수 있습니다.
+PowerShell 5.1 이상과 Visual Studio 2022 C++ 데스크톱 빌드 도구에서 Release 빌드와
+전체 테스트를 실행할 수 있습니다. DirectComposition 브리지는 Windows SDK의
+Direct3D 11, DXGI, DirectComposition 라이브러리를 사용합니다.
 
 ```powershell
 .\build.ps1 -Configuration Release

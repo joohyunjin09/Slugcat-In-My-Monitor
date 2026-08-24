@@ -53,6 +53,7 @@ namespace RainWorldDesktopPet.Tests
             Run("Connection penetration cannot become an infinite desktop fall", LongFloorContactSurvivesConnectionPenetration);
             Run("Monitor floor corners survive post-connection penetration", MonitorCornerSurvivesConnectionPenetration);
             Run("Swept high-speed travel cannot tunnel through a small window", FastHorizontalSmallWindowDoesNotTunnel);
+            Run("Dragging passes through window walls", DraggingPassesThroughWindowWalls);
             Run("AI produces VirtualInput without moving physics directly", AiDoesNotMoveCreature);
             Run("Futile atlas metadata parses frame geometry", AtlasMetadataParses);
             Run("DMS part atlas overrides and restores original sprites", DmsPartAtlasOverrideRestoresBase);
@@ -504,6 +505,28 @@ namespace RainWorldDesktopPet.Tests
             True(chunk.ContactFloor, "impact-time X must detect the narrow window top");
             Near(topLeft.Y - chunk.Radius, chunk.Position.Y, 0.000001, "small-window landing y");
             Equal(91001, (int)chunk.SupportingSurfaceId, "small-window supporting HWND");
+        }
+
+        private static void DraggingPassesThroughWindowWalls()
+        {
+            MonitorInfo monitor = new MonitorInfo("DRAG-MONITOR",
+                new Rectangle(0, 0, 1200, 900), new Rectangle(0, 0, 1200, 860), true);
+            DesktopWindowSnapshot obstacle = Window(7301, new Rectangle(500, 100, 200, 650));
+            DesktopCollisionWorld world = CreateSyntheticWorld(
+                new[] { monitor }, new[] { obstacle });
+            Vec2 start = DesktopWorldTransform.ToSimulation(new Vec2(450.0, 300.0));
+            Vec2 target = DesktopWorldTransform.ToSimulation(new Vec2(780.0, 300.0));
+            Slugcat slugcat = new Slugcat(start);
+
+            True(slugcat.Grab(slugcat.BodyChunks[0].Position), "head chunk should be grabbed");
+            for (int tick = 0; tick < 12; tick++)
+                slugcat.Step(VirtualInput.Neutral, world, target, Vec2.Zero);
+
+            double rightWall = DesktopWorldTransform.ToSimulation(new Vec2(700.0, 300.0)).X;
+            True(slugcat.BodyChunks[0].Position.X > rightWall + slugcat.BodyChunks[0].Radius,
+                "grabbed chunk should cross the other window's right wall");
+            True(slugcat.BodyChunks[0].WallSurfaceId == 0,
+                "dragging should not retain a window wall contact");
         }
 
         private static void AiDoesNotMoveCreature()

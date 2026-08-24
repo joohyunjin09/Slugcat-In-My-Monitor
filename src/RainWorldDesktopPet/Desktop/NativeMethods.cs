@@ -6,20 +6,13 @@ namespace RainWorldDesktopPet.Desktop
 {
     internal static class NativeMethods
     {
-        internal const int GWL_EXSTYLE = -20;
-        internal const int WS_EX_LAYERED = 0x00080000;
-        internal const int WS_EX_TRANSPARENT = 0x00000020;
         internal const int WS_EX_TOOLWINDOW = 0x00000080;
         internal const int WS_EX_TOPMOST = 0x00000008;
+        internal const int WS_EX_TRANSPARENT = 0x00000020;
+        internal const int WS_EX_LAYERED = 0x00080000;
         internal const int WS_EX_NOACTIVATE = 0x08000000;
-        internal const int ULW_ALPHA = 0x00000002;
-        internal const byte AC_SRC_OVER = 0x00;
-        internal const byte AC_SRC_ALPHA = 0x01;
+        internal const int WS_EX_NOREDIRECTIONBITMAP = 0x00200000;
         internal const int WM_NCHITTEST = 0x0084;
-        internal const int WM_CANCELMODE = 0x001F;
-        internal const int WM_LBUTTONDOWN = 0x0201;
-        internal const int WM_LBUTTONUP = 0x0202;
-        internal const int WM_CAPTURECHANGED = 0x0215;
         internal const int WM_MOUSEMOVE = 0x0200;
         internal const int WM_DISPLAYCHANGE = 0x007E;
         internal const int WM_DPICHANGED = 0x02E0;
@@ -50,19 +43,6 @@ namespace RainWorldDesktopPet.Desktop
         }
 
         [StructLayout(LayoutKind.Sequential)]
-        internal struct Size
-        {
-            internal int Width;
-            internal int Height;
-
-            internal Size(int width, int height)
-            {
-                Width = width;
-                Height = height;
-            }
-        }
-
-        [StructLayout(LayoutKind.Sequential)]
         internal struct Rect
         {
             internal int Left;
@@ -72,38 +52,6 @@ namespace RainWorldDesktopPet.Desktop
 
             internal int Width { get { return Right - Left; } }
             internal int Height { get { return Bottom - Top; } }
-        }
-
-        [StructLayout(LayoutKind.Sequential, Pack = 1)]
-        internal struct BlendFunction
-        {
-            internal byte BlendOp;
-            internal byte BlendFlags;
-            internal byte SourceConstantAlpha;
-            internal byte AlphaFormat;
-        }
-
-        [StructLayout(LayoutKind.Sequential)]
-        internal struct BitmapInfoHeader
-        {
-            internal uint Size;
-            internal int Width;
-            internal int Height;
-            internal ushort Planes;
-            internal ushort BitCount;
-            internal uint Compression;
-            internal uint SizeImage;
-            internal int XPelsPerMeter;
-            internal int YPelsPerMeter;
-            internal uint ColorsUsed;
-            internal uint ColorsImportant;
-        }
-
-        [StructLayout(LayoutKind.Sequential)]
-        internal struct BitmapInfo
-        {
-            internal BitmapInfoHeader Header;
-            internal uint Colors;
         }
 
         [DllImport("user32.dll")]
@@ -157,9 +105,6 @@ namespace RainWorldDesktopPet.Desktop
         [DllImport("user32.dll")]
         internal static extern int ReleaseDC(IntPtr handle, IntPtr deviceContext);
 
-        [DllImport("gdi32.dll")]
-        internal static extern IntPtr CreateCompatibleDC(IntPtr deviceContext);
-
         [DllImport("gdi32.dll", CharSet = CharSet.Unicode)]
         internal static extern IntPtr CreateDC(string driver, string device,
             string output, IntPtr initializationData);
@@ -169,43 +114,7 @@ namespace RainWorldDesktopPet.Desktop
         internal static extern bool DeleteDC(IntPtr deviceContext);
 
         [DllImport("gdi32.dll")]
-        internal static extern IntPtr SelectObject(IntPtr deviceContext, IntPtr objectHandle);
-
-        [DllImport("gdi32.dll")]
-        internal static extern IntPtr CreateDIBSection(
-            IntPtr deviceContext,
-            ref BitmapInfo bitmapInfo,
-            uint usage,
-            out IntPtr bits,
-            IntPtr section,
-            uint offset);
-
-        [DllImport("gdi32.dll")]
-        [return: MarshalAs(UnmanagedType.Bool)]
-        internal static extern bool DeleteObject(IntPtr objectHandle);
-
-        [DllImport("gdi32.dll")]
         internal static extern int GetDeviceCaps(IntPtr deviceContext, int index);
-
-        [DllImport("user32.dll", SetLastError = true)]
-        [return: MarshalAs(UnmanagedType.Bool)]
-        internal static extern bool UpdateLayeredWindow(
-            IntPtr handle,
-            IntPtr destinationDeviceContext,
-            ref Point destination,
-            ref Size size,
-            IntPtr sourceDeviceContext,
-            ref Point source,
-            int colorKey,
-            ref BlendFunction blend,
-            int flags);
-
-        [DllImport("user32.dll")]
-        internal static extern IntPtr SetCapture(IntPtr handle);
-
-        [DllImport("user32.dll")]
-        [return: MarshalAs(UnmanagedType.Bool)]
-        internal static extern bool ReleaseCapture();
 
         [DllImport("user32.dll")]
         [return: MarshalAs(UnmanagedType.Bool)]

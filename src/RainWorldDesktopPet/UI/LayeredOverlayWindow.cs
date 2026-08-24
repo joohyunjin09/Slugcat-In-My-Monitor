@@ -2,8 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
-using System.Drawing.Imaging;
-using System.Runtime.InteropServices;
 using System.Windows.Forms;
 using RainWorldDesktopPet.Core;
 using RainWorldDesktopPet.Desktop;
@@ -44,14 +42,14 @@ namespace RainWorldDesktopPet.UI
         private readonly DesktopCollisionWorld collisionWorld =
             new DesktopCollisionWorld(new WindowEnumerator());
         private readonly Stopwatch surfaceRefreshClock = Stopwatch.StartNew();
-        private LayeredBackBuffer backBuffer;
+        private DirectCompositionHost compositionHost;
         private GameLoop gameLoop;
         private GameLoop grabbedGameLoop;
         private SettingsWindow settingsWindow;
         private SkinEditorWindow skinEditor;
-        private Rectangle overlayBounds;
-        private RenderSpace renderSpace;
+        private Rectangle virtualDesktopBounds;
         private bool mouseCaptured;
+        private bool leftButtonDown;
         private int renderErrorCount;
         private bool renderingEnabled;
         private bool renderingFrame;
@@ -72,10 +70,8 @@ namespace RainWorldDesktopPet.UI
             ShowInTaskbar = false;
             TopMost = true;
             StartPosition = FormStartPosition.Manual;
-            Rectangle virtualBounds = MonitorManager.GetVirtualBounds();
-            overlayBounds = new Rectangle(virtualBounds.Location, new Size(1, 1));
-            Bounds = overlayBounds;
-            renderSpace = new RenderSpace(overlayBounds);
+            virtualDesktopBounds = MonitorManager.GetVirtualBounds();
+            Bounds = virtualDesktopBounds;
             Text = "SlugcatInMyMonitor";
             applicationIcon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
             if (applicationIcon != null) Icon = applicationIcon;
@@ -174,8 +170,10 @@ namespace RainWorldDesktopPet.UI
             get
             {
                 CreateParams parameters = base.CreateParams;
-                parameters.ExStyle |= NativeMethods.WS_EX_LAYERED | NativeMethods.WS_EX_TOOLWINDOW |
-                                      NativeMethods.WS_EX_TOPMOST | NativeMethods.WS_EX_NOACTIVATE;
+                parameters.ExStyle |= NativeMethods.WS_EX_NOREDIRECTIONBITMAP |
+                                      NativeMethods.WS_EX_LAYERED | NativeMethods.WS_EX_TRANSPARENT |
+                                      NativeMethods.WS_EX_TOOLWINDOW | NativeMethods.WS_EX_TOPMOST |
+                                      NativeMethods.WS_EX_NOACTIVATE;
                 return parameters;
             }
         }
@@ -183,7 +181,8 @@ namespace RainWorldDesktopPet.UI
         protected override void OnHandleCreated(EventArgs e)
         {
             base.OnHandleCreated(e);
-            ConfigureInitialOverlay(false);
+            ConfigureVirtualDesktop();
+            compositionHost = new DirectCompositionHost(Handle, virtualDesktopBounds);
             collisionWorld.Refresh(Handle);
             surfaceRefreshClock.Restart();
             AddSlugcat(startVariant, startSkin);
@@ -199,7 +198,7 @@ namespace RainWorldDesktopPet.UI
             for (int i = 0; i < gameLoops.Count; i++) gameLoops[i].Dispose();
             gameLoops.Clear();
             gameLoop = null;
-            if (backBuffer != null) backBuffer.Dispose();
+            if (compositionHost != null) compositionHost.Dispose();
             trayIcon.Visible = false;
             trayIcon.Dispose();
             if (applicationIcon != null) applicationIcon.Dispose();
@@ -220,6 +219,7 @@ namespace RainWorldDesktopPet.UI
             renderingFrame = true;
             try
             {
+                PollDragInput();
                 RefreshCollisionWorld();
                 SlugcatPose[] poses = new SlugcatPose[gameLoops.Count];
                 for (int i = 0; i < gameLoops.Count; i++)
@@ -228,20 +228,22 @@ namespace RainWorldDesktopPet.UI
                     poses[i] = gameLoops[i].BuildPose();
                 }
                 UpdateRenderCadence(poses);
-                ConfigureRenderOverlay(CalculateRenderBounds(poses));
-
-                System.Drawing.Graphics graphics = backBuffer.Graphics;
-                graphics.CompositingMode = System.Drawing.Drawing2D.CompositingMode.SourceCopy;
-                graphics.Clear(Color.Transparent);
-                graphics.CompositingMode = System.Drawing.Drawing2D.CompositingMode.SourceOver;
                 for (int i = 0; i < gameLoops.Count; i++)
                 {
                     GameLoop loop = gameLoops[i];
-                    loop.Renderer.Render(graphics, poses[i], renderSpace,
-                        loop.DebugEnabled && ReferenceEquals(loop, gameLoop),
+                    bool debug = loop.DebugEnabled && ReferenceEquals(loop, gameLoop);
+                    Rectangle surfaceBounds = CalculateRenderBounds(poses[i], debug);
+                    DirectCompositionHost.CompositionSurface surface =
+                        compositionHost.PrepareSurface(i, surfaceBounds);
+                    System.Drawing.Graphics graphics = surface.Graphics;
+                    graphics.CompositingMode = System.Drawing.Drawing2D.CompositingMode.SourceCopy;
+                    graphics.Clear(Color.Transparent);
+                    graphics.CompositingMode = System.Drawing.Drawing2D.CompositingMode.SourceOver;
+                    loop.Renderer.Render(graphics, poses[i], new RenderSpace(surfaceBounds), debug,
                         loop.World, loop.Slugcat, loop.AI, loop.AssetStatus, loop.Appearance);
+                    compositionHost.Present(i);
                 }
-                backBuffer.Present(Handle, renderSpace.WorldOrigin);
+                compositionHost.Commit(gameLoops.Count);
                 for (int i = 0; i < gameLoops.Count; i++)
                     gameLoops[i].RecordRenderFrame(displayRefreshRate);
                 if (renderErrorCount != 0)
@@ -253,13 +255,6 @@ namespace RainWorldDesktopPet.UI
             }
             catch (Exception exception)
             {
-                LayeredPresentationException presentationException = exception as LayeredPresentationException;
-                if (presentationException != null)
-                {
-                    HandlePresentationFailure(presentationException);
-                    return;
-                }
-
                 // Simulation/atlas/GDI drawing failures are not assumed to be
                 // transient. Keep the tray alive and let the user explicitly
                 // retry, while recording this failure only once.
@@ -277,57 +272,11 @@ namespace RainWorldDesktopPet.UI
             }
         }
 
-        private void HandlePresentationFailure(LayeredPresentationException exception)
-        {
-            renderingEnabled = false;
-            renderErrorCount++;
-            if (renderErrorCount == 1)
-            {
-                Program.LogException(exception);
-                trayIcon.ShowBalloonTip(5000, "Slugcat rendering retry",
-                    exception.Message, ToolTipIcon.Warning);
-            }
-
-            if (renderErrorCount == 3)
-            {
-                try
-                {
-                    ReplaceBackBuffer();
-                }
-                catch (Exception replacementException)
-                {
-                    Program.LogException(replacementException);
-                    renderTimer.Stop();
-                    retryRenderItem.Enabled = true;
-                    RefreshSettingsWindow();
-                    trayIcon.ShowBalloonTip(5000, "Slugcat rendering paused",
-                        replacementException.Message + " Use Retry rendering from the tray menu.", ToolTipIcon.Error);
-                    return;
-                }
-            }
-
-            if (renderErrorCount >= 6)
-            {
-                Program.LogException(new InvalidOperationException(
-                    "Layered presentation failed six consecutive times; automatic retries stopped.", exception));
-                renderTimer.Stop();
-                retryRenderItem.Enabled = true;
-                RefreshSettingsWindow();
-                trayIcon.ShowBalloonTip(5000, "Slugcat rendering paused",
-                    "Display presentation kept failing. Use Retry rendering from the tray menu.", ToolTipIcon.Error);
-                return;
-            }
-
-            int delay = 250 << Math.Min(renderErrorCount - 1, 4);
-            renderTimer.Interval = Math.Min(delay, 4000);
-            renderTimer.Start();
-        }
-
         private void RetryRendering(object sender, EventArgs e)
         {
             try
             {
-                ReplaceBackBuffer();
+                RecreateCompositionHost();
                 renderErrorCount = 0;
                 retryRenderItem.Enabled = false;
                 displayRefreshRate = NativeMethods.GetPrimaryDisplayRefreshRate();
@@ -346,12 +295,11 @@ namespace RainWorldDesktopPet.UI
             }
         }
 
-        private void ReplaceBackBuffer()
+        private void RecreateCompositionHost()
         {
-            LayeredBackBuffer replacement = new LayeredBackBuffer(overlayBounds.Width, overlayBounds.Height);
-            LayeredBackBuffer previous = backBuffer;
-            backBuffer = replacement;
-            if (previous != null) previous.Dispose();
+            if (compositionHost != null) compositionHost.Dispose();
+            compositionHost = null;
+            compositionHost = new DirectCompositionHost(Handle, virtualDesktopBounds);
         }
 
         private void RefreshCollisionWorld()
@@ -393,46 +341,21 @@ namespace RainWorldDesktopPet.UI
             if (renderTimer.Interval != interval) renderTimer.Interval = interval;
         }
 
-        private void ConfigureInitialOverlay(bool replaceExistingBuffer)
+        private void ConfigureVirtualDesktop()
         {
             Rectangle virtualBounds = MonitorManager.GetVirtualBounds();
             if (virtualBounds.Width <= 0 || virtualBounds.Height <= 0)
                 throw new InvalidOperationException("Windows reported an empty virtual desktop.");
 
-            ConfigureRenderOverlay(new Rectangle(virtualBounds.Location, new Size(1, 1)),
-                replaceExistingBuffer);
+            virtualDesktopBounds = virtualBounds;
+            Bounds = virtualDesktopBounds;
+            if (compositionHost != null) compositionHost.SetDesktopBounds(virtualDesktopBounds);
         }
 
-        private void ConfigureRenderOverlay(Rectangle bounds)
+        private Rectangle CalculateRenderBounds(SlugcatPose pose, bool debug)
         {
-            ConfigureRenderOverlay(bounds, false);
-        }
-
-        private void ConfigureRenderOverlay(Rectangle bounds, bool replaceExistingBuffer)
-        {
-            bool sizeChanged = bounds.Size != overlayBounds.Size;
-            overlayBounds = bounds;
-            renderSpace = new RenderSpace(overlayBounds);
-            if (backBuffer == null)
-            {
-                backBuffer = new LayeredBackBuffer(overlayBounds.Width, overlayBounds.Height);
-            }
-            else if (replaceExistingBuffer || sizeChanged)
-            {
-                ReplaceBackBuffer();
-            }
-        }
-
-        private Rectangle CalculateRenderBounds(SlugcatPose[] poses)
-        {
-            Rectangle virtualBounds = MonitorManager.GetVirtualBounds();
-            if (gameLoop != null && gameLoop.DebugEnabled) return virtualBounds;
-            if (poses.Length == 0)
-                return new Rectangle(virtualBounds.Location, new Size(1, 1));
-
-            RectangleF content = poses[0].GraphicsBounds;
-            for (int i = 1; i < poses.Length; i++)
-                content = RectangleF.Union(content, poses[i].GraphicsBounds);
+            if (debug) return virtualDesktopBounds;
+            RectangleF content = pose.GraphicsBounds;
 
             int contentWidth = (int)Math.Ceiling(content.Width) + OverlayPadding * 2;
             int contentHeight = (int)Math.Ceiling(content.Height) + OverlayPadding * 2;
@@ -448,33 +371,10 @@ namespace RainWorldDesktopPet.UI
             return ((value + OverlaySizeQuantum - 1) / OverlaySizeQuantum) * OverlaySizeQuantum;
         }
 
-        protected override void WndProc(ref Message message)
+        private void PollDragInput()
         {
-            if (message.Msg == NativeMethods.WM_NCHITTEST && gameLoop != null)
-            {
-                Vec2 point = ScreenPointFromLParam(message.LParam);
-                message.Result = new IntPtr(mouseCaptured || FindSlugcatAt(point) != null
-                    ? NativeMethods.HTCLIENT : NativeMethods.HTTRANSPARENT);
-                return;
-            }
-            if (message.Msg == NativeMethods.WM_DISPLAYCHANGE || message.Msg == NativeMethods.WM_DPICHANGED)
-            {
-                try
-                {
-                    ConfigureInitialOverlay(true);
-                    displayRefreshRates.Clear();
-                    ApplyRenderCadence(NativeMethods.GetPrimaryDisplayRefreshRate());
-                }
-                catch (Exception exception)
-                {
-                    Program.LogException(exception);
-                    renderingEnabled = false;
-                    renderTimer.Stop();
-                    retryRenderItem.Enabled = true;
-                }
-                return;
-            }
-            if (message.Msg == NativeMethods.WM_LBUTTONDOWN && gameLoop != null)
+            bool currentlyDown = (NativeMethods.GetAsyncKeyState(NativeMethods.VK_LBUTTON) & 0x8000) != 0;
+            if (currentlyDown && !leftButtonDown && gameLoop != null)
             {
                 Vec2 point = CurrentCursorPoint();
                 GameLoop hit = FindSlugcatAt(point);
@@ -485,28 +385,35 @@ namespace RainWorldDesktopPet.UI
                     {
                         grabbedGameLoop = hit;
                         mouseCaptured = true;
-                        NativeMethods.SetCapture(Handle);
                     }
                 }
-                return;
             }
-            if (message.Msg == NativeMethods.WM_LBUTTONUP && gameLoop != null)
-            {
-                if (mouseCaptured)
-                {
-                    mouseCaptured = false;
-                    if (grabbedGameLoop != null) grabbedGameLoop.EndGrab();
-                    grabbedGameLoop = null;
-                    NativeMethods.ReleaseCapture();
-                }
-                return;
-            }
-            if ((message.Msg == NativeMethods.WM_CAPTURECHANGED || message.Msg == NativeMethods.WM_CANCELMODE) &&
-                gameLoop != null && mouseCaptured)
+            else if (!currentlyDown && leftButtonDown && mouseCaptured)
             {
                 mouseCaptured = false;
                 if (grabbedGameLoop != null) grabbedGameLoop.EndGrab();
                 grabbedGameLoop = null;
+            }
+            leftButtonDown = currentlyDown;
+        }
+
+        protected override void WndProc(ref Message message)
+        {
+            if (message.Msg == NativeMethods.WM_DISPLAYCHANGE || message.Msg == NativeMethods.WM_DPICHANGED)
+            {
+                try
+                {
+                    ConfigureVirtualDesktop();
+                    displayRefreshRates.Clear();
+                    ApplyRenderCadence(NativeMethods.GetPrimaryDisplayRefreshRate());
+                }
+                catch (Exception exception)
+                {
+                    Program.LogException(exception);
+                    renderingEnabled = false;
+                    renderTimer.Stop();
+                    retryRenderItem.Enabled = true;
+                }
                 return;
             }
             base.WndProc(ref message);
@@ -565,7 +472,6 @@ namespace RainWorldDesktopPet.UI
                 grabbedGameLoop.EndGrab();
                 grabbedGameLoop = null;
                 mouseCaptured = false;
-                NativeMethods.ReleaseCapture();
             }
             gameLoops.RemoveAt(index);
             removed.Dispose();
@@ -841,112 +747,5 @@ namespace RainWorldDesktopPet.UI
         internal void SettingsRetryRendering() { RetryRendering(null, EventArgs.Empty); }
         internal void SettingsExitApplication() { Close(); }
 
-        private static Vec2 ScreenPointFromLParam(IntPtr value)
-        {
-            long packed = value.ToInt64();
-            int x = (short)(packed & 0xffff);
-            int y = (short)((packed >> 16) & 0xffff);
-            return new Vec2(x, y);
-        }
-
-        private sealed class LayeredPresentationException : InvalidOperationException
-        {
-            public LayeredPresentationException(string message)
-                : base(message)
-            {
-            }
-        }
-
-        private sealed class LayeredBackBuffer : IDisposable
-        {
-            private readonly int width;
-            private readonly int height;
-            private readonly IntPtr screenDeviceContext;
-            private readonly IntPtr memoryDeviceContext;
-            private readonly IntPtr bitmapHandle;
-            private readonly IntPtr previousObject;
-            private readonly Bitmap bitmap;
-            private readonly System.Drawing.Graphics graphics;
-
-            public LayeredBackBuffer(int width, int height)
-            {
-                this.width = width;
-                this.height = height;
-                IntPtr acquiredScreen = IntPtr.Zero;
-                IntPtr acquiredMemory = IntPtr.Zero;
-                IntPtr acquiredBitmap = IntPtr.Zero;
-                IntPtr acquiredPrevious = IntPtr.Zero;
-                Bitmap acquiredManagedBitmap = null;
-                System.Drawing.Graphics acquiredGraphics = null;
-                try
-                {
-                    acquiredScreen = NativeMethods.GetDC(IntPtr.Zero);
-                    if (acquiredScreen == IntPtr.Zero) throw new InvalidOperationException("Could not acquire the screen device context.");
-                    acquiredMemory = NativeMethods.CreateCompatibleDC(acquiredScreen);
-                    if (acquiredMemory == IntPtr.Zero) throw new InvalidOperationException("Could not create the layered window device context.");
-                    NativeMethods.BitmapInfo info = new NativeMethods.BitmapInfo();
-                    info.Header.Size = (uint)Marshal.SizeOf(typeof(NativeMethods.BitmapInfoHeader));
-                    info.Header.Width = width;
-                    info.Header.Height = -height; // top-down DIB
-                    info.Header.Planes = 1;
-                    info.Header.BitCount = 32;
-                    info.Header.Compression = 0;
-                    IntPtr bits;
-                    acquiredBitmap = NativeMethods.CreateDIBSection(acquiredScreen, ref info, 0, out bits, IntPtr.Zero, 0);
-                    if (acquiredBitmap == IntPtr.Zero || bits == IntPtr.Zero)
-                        throw new InvalidOperationException("Could not allocate the layered window back buffer.");
-                    acquiredPrevious = NativeMethods.SelectObject(acquiredMemory, acquiredBitmap);
-                    acquiredManagedBitmap = new Bitmap(width, height, width * 4, PixelFormat.Format32bppPArgb, bits);
-                    acquiredGraphics = System.Drawing.Graphics.FromImage(acquiredManagedBitmap);
-                }
-                catch
-                {
-                    if (acquiredGraphics != null) acquiredGraphics.Dispose();
-                    if (acquiredManagedBitmap != null) acquiredManagedBitmap.Dispose();
-                    if (acquiredMemory != IntPtr.Zero && acquiredPrevious != IntPtr.Zero)
-                        NativeMethods.SelectObject(acquiredMemory, acquiredPrevious);
-                    if (acquiredBitmap != IntPtr.Zero) NativeMethods.DeleteObject(acquiredBitmap);
-                    if (acquiredMemory != IntPtr.Zero) NativeMethods.DeleteDC(acquiredMemory);
-                    if (acquiredScreen != IntPtr.Zero) NativeMethods.ReleaseDC(IntPtr.Zero, acquiredScreen);
-                    throw;
-                }
-
-                screenDeviceContext = acquiredScreen;
-                memoryDeviceContext = acquiredMemory;
-                bitmapHandle = acquiredBitmap;
-                previousObject = acquiredPrevious;
-                bitmap = acquiredManagedBitmap;
-                graphics = acquiredGraphics;
-            }
-
-            public System.Drawing.Graphics Graphics { get { return graphics; } }
-
-            public void Present(IntPtr windowHandle, Vec2 origin)
-            {
-                NativeMethods.Point destination = new NativeMethods.Point((int)origin.X, (int)origin.Y);
-                NativeMethods.Size size = new NativeMethods.Size(width, height);
-                NativeMethods.Point source = new NativeMethods.Point(0, 0);
-                NativeMethods.BlendFunction blend = new NativeMethods.BlendFunction();
-                blend.BlendOp = NativeMethods.AC_SRC_OVER;
-                blend.SourceConstantAlpha = 255;
-                blend.AlphaFormat = NativeMethods.AC_SRC_ALPHA;
-                if (!NativeMethods.UpdateLayeredWindow(windowHandle, screenDeviceContext, ref destination, ref size,
-                    memoryDeviceContext, ref source, 0, ref blend, NativeMethods.ULW_ALPHA))
-                {
-                    throw new LayeredPresentationException(
-                        "UpdateLayeredWindow failed: " + Marshal.GetLastWin32Error());
-                }
-            }
-
-            public void Dispose()
-            {
-                graphics.Dispose();
-                bitmap.Dispose();
-                NativeMethods.SelectObject(memoryDeviceContext, previousObject);
-                NativeMethods.DeleteObject(bitmapHandle);
-                NativeMethods.DeleteDC(memoryDeviceContext);
-                NativeMethods.ReleaseDC(IntPtr.Zero, screenDeviceContext);
-            }
-        }
     }
 }
