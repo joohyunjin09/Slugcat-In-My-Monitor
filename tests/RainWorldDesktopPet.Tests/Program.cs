@@ -6,6 +6,7 @@ using System.IO;
 using System.Linq;
 using System.Diagnostics;
 using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Threading;
 using RainWorldDesktopPet.AI;
 using RainWorldDesktopPet.Core;
@@ -126,6 +127,10 @@ namespace RainWorldDesktopPet.Tests
                 OverlappingSlugcatsShareCompositionUpload);
             Run("Composition surfaces grow without resize oscillation",
                 CompositionSurfacesOnlyGrow);
+            Run("GPU smoke command ABI matches the native renderer",
+                GpuSmokeCommandAbiMatchesNativeRenderer);
+            Run("Artificer smoke emits direct GPU effect commands",
+                ArtificerSmokeEmitsGpuEffectCommands);
             Run("Unused Stand and Walk hands retract like SlugcatHand", UnusedHandsRetract);
             Run("Crawl hands use original velocity-relative targets", CrawlHandsUseOriginalTargets);
             Run("SlugcatHand connection constraint prevents arm separation", ArmConstraintPreventsSeparation);
@@ -150,18 +155,6 @@ namespace RainWorldDesktopPet.Tests
             else
             {
                 Run("Local embedded original atlas loads without DMS", delegate { EmbeddedOriginalAtlasLoads(localInstallation); });
-                Run("Local FireSmoke uses the original noise textures", delegate
-                {
-                    OriginalFireSmokeAssetsLoad(localInstallation);
-                });
-                Run("Local FireSmoke GPU worker completes asynchronously", delegate
-                {
-                    OriginalFireSmokeGpuWorkerCompletes(localInstallation);
-                });
-                Run("Active Slugcats share one FireSmoke GPU worker", delegate
-                {
-                    ActiveSlugcatsShareFireSmokeGpu(localInstallation);
-                });
                 Run("Installed Workshop mods parse without loading their DLLs",
                     delegate { LocalWorkshopIntegrationsParse(localInstallation); });
             }
@@ -1886,54 +1879,6 @@ namespace RainWorldDesktopPet.Tests
                 "drop-through should push both chunks downward");
         }
 
-        private static void OriginalFireSmokeAssetsLoad(RainWorldInstallation installation)
-        {
-            string status;
-            using (FireSmokeShaderAssets assets = FireSmokeShaderAssets.TryLoad(installation,
-                out status))
-            {
-                True(assets != null, status);
-                double first = assets.SampleNoise(0.123, 0.456);
-                double second = assets.SampleNoise2(0.789, 0.234);
-                True(first >= 0.0 && first <= 1.0,
-                    "original Palettes/noise red channel is sampleable");
-                True(second >= 0.0 && second <= 1.0,
-                    "original Palettes/noise2 red channel is sampleable");
-            }
-        }
-
-        private static void OriginalFireSmokeGpuWorkerCompletes(RainWorldInstallation installation)
-        {
-            string assetStatus;
-            using (FireSmokeShaderAssets assets = FireSmokeShaderAssets.TryLoad(installation,
-                out assetStatus))
-            {
-                True(assets != null, assetStatus);
-                string gpuStatus;
-                using (FireSmokeGpuRenderer gpu = FireSmokeGpuRenderer.TryCreate(assets,
-                    out gpuStatus))
-                {
-                    True(gpu != null, gpuStatus);
-                    object owner = new object();
-                    gpu.Queue(owner, 0, 7, new Vec2(320.0, 240.0), 20.0, 128.0,
-                        Vec2.Zero, 1.0, 1920, 1080, 0.8);
-                    Stopwatch wait = Stopwatch.StartNew();
-                    FireSmokeGpuRenderer.CompletedMask completed = null;
-                    while (wait.ElapsedMilliseconds < 2000 &&
-                        !gpu.TryTakeCompleted(out completed)) Thread.Sleep(5);
-                    True(completed != null, "GPU worker should finish a FireSmoke mask");
-                    True(ReferenceEquals(owner, completed.Owner), "GPU result owner");
-                    Equal(0, completed.Layer, "GPU result layer");
-                    Equal(7, completed.Generation, "GPU result generation");
-                    True(completed.Pixels != null && completed.Pixels.Length ==
-                        FireSmokeGpuRenderer.RasterSize * FireSmokeGpuRenderer.RasterSize * 4,
-                        "GPU result pixel buffer");
-                    True(completed.Pixels.Where(delegate(byte value) { return value != 0; }).Any(),
-                        "GPU FireSmoke shader should produce visible original-mask pixels");
-                }
-            }
-        }
-
         private static void EmbeddedOriginalAtlasLoads(RainWorldInstallation installation)
         {
             RainWorldAssetLoader loader = new RainWorldAssetLoader(installation);
@@ -2365,42 +2310,38 @@ namespace RainWorldDesktopPet.Tests
             True(grown == retained, "smaller content should reuse the grown surface");
         }
 
-        private static void ActiveSlugcatsShareFireSmokeGpu(
-            RainWorldInstallation installation)
+        private static void GpuSmokeCommandAbiMatchesNativeRenderer()
         {
-            string firstStatus;
-            string secondStatus;
-            FireSmokeShaderAssets firstAssets = FireSmokeShaderAssets.TryLoad(
-                installation, out firstStatus);
-            FireSmokeShaderAssets secondAssets = FireSmokeShaderAssets.TryLoad(
-                installation, out secondStatus);
-            True(firstAssets != null, firstStatus);
-            True(secondAssets != null, secondStatus);
+            Equal(14 * sizeof(float),
+                Marshal.SizeOf(typeof(DirectCompositionHost.GpuSmokeEffect)),
+                "GPU smoke command byte size");
+        }
 
-            SpriteRenderer first = null;
-            SpriteRenderer second = null;
-            try
-            {
-                first = new SpriteRenderer(null, firstAssets);
-                firstAssets = null;
-                second = new SpriteRenderer(null, secondAssets);
-                secondAssets = null;
-                FieldInfo gpuField = typeof(SpriteRenderer).GetField("fireSmokeGpu",
-                    BindingFlags.Instance | BindingFlags.NonPublic);
-                True(gpuField != null, "SpriteRenderer FireSmoke GPU field");
-                object firstGpu = gpuField.GetValue(first);
-                object secondGpu = gpuField.GetValue(second);
-                True(firstGpu != null, first.FireSmokeGpuStatus);
-                True(ReferenceEquals(firstGpu, secondGpu),
-                    "active SpriteRenderers should share one D3D11 worker");
-            }
-            finally
-            {
-                if (second != null) second.Dispose();
-                else if (secondAssets != null) secondAssets.Dispose();
-                if (first != null) first.Dispose();
-                else if (firstAssets != null) firstAssets.Dispose();
-            }
+        private static void ArtificerSmokeEmitsGpuEffectCommands()
+        {
+            Slugcat slugcat = new Slugcat(new Vec2(100.0, 80.0));
+            AbilityEffect smoke = new AbilityEffect(AbilityEffectKind.Smoke,
+                new Vec2(100.0, 80.0), Vec2.Zero, 200, 1.0);
+            smoke.LastLife = 0.75;
+            smoke.Life = 0.75;
+            slugcat.AddEffect(smoke);
+            SlugcatPose pose = new SlugcatPose();
+            pose.CharacterRenderScale = 2.0;
+            pose.TimeStacker = 1.0;
+            DirectCompositionHost.GpuSmokeEffect[] commands =
+                new DirectCompositionHost.GpuSmokeEffect[4];
+            int count = 0;
+            using (SpriteRenderer renderer = new SpriteRenderer(null))
+                renderer.CollectGpuSmokeEffects(slugcat, pose,
+                    new RenderSpace(new Rectangle(50, 20, 400, 300)), commands,
+                    ref count);
+            Equal(1, count, "smoke command count");
+            Near(150.0, commands[0].CenterX, 0.0001, "smoke local X");
+            Near(140.0, commands[0].CenterY, 0.0001, "smoke local Y");
+            True(commands[0].BackSize > commands[0].FrontSize,
+                "back smoke quad should be larger than front smoke quad");
+            True(commands[0].BackAlpha > commands[0].FrontAlpha,
+                "back smoke layer should retain the original stronger alpha");
         }
 
         private static void TwoFortyHertzRenderCadence()

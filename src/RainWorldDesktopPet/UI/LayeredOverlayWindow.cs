@@ -38,6 +38,8 @@ namespace RainWorldDesktopPet.UI
         private readonly ToolStripMenuItem skinEditorItem;
         private readonly List<GameLoop> gameLoops = new List<GameLoop>();
         private readonly SlugcatPose[] poseBuffer = new SlugcatPose[MaximumSlugcats];
+        private readonly DirectCompositionHost.GpuSmokeEffect[] smokeEffectBuffer =
+            new DirectCompositionHost.GpuSmokeEffect[256];
         private readonly List<Rectangle> surfaceBoundsBuffer =
             new List<Rectangle>(MaximumSlugcats);
         private readonly CompositionBatchPlanner compositionBatchPlanner =
@@ -247,6 +249,7 @@ namespace RainWorldDesktopPet.UI
                 }
                 IList<CompositionBatch> batches = compositionBatchPlanner.Plan(
                     surfaceBoundsBuffer, OverlaySizeQuantum);
+                compositionHost.BeginEffectFrame();
                 for (int batchIndex = 0; batchIndex < batches.Count; batchIndex++)
                 {
                     CompositionBatch batch = batches[batchIndex];
@@ -257,6 +260,7 @@ namespace RainWorldDesktopPet.UI
                     graphics.Clear(Color.Transparent);
                     graphics.CompositingMode = System.Drawing.Drawing2D.CompositingMode.SourceOver;
                     RenderSpace renderSpace = new RenderSpace(surface.Bounds);
+                    int smokeEffectCount = 0;
                     for (int member = 0; member < batch.SurfaceIndices.Count; member++)
                     {
                         int loopIndex = batch.SurfaceIndices[member];
@@ -265,8 +269,13 @@ namespace RainWorldDesktopPet.UI
                         loop.Renderer.Render(graphics, poseBuffer[loopIndex], renderSpace, debug,
                             loop.World, loop.Slugcat, loop.AI, loop.AssetStatus,
                             loop.SelectedSlugcat);
+                        loop.Renderer.CollectGpuSmokeEffects(loop.Slugcat,
+                            poseBuffer[loopIndex], renderSpace, smokeEffectBuffer,
+                            ref smokeEffectCount);
                     }
                     compositionHost.Present(batchIndex);
+                    compositionHost.PresentEffects(batchIndex, smokeEffectBuffer,
+                        smokeEffectCount, surface.Bounds);
                 }
                 compositionHost.Commit(batches.Count);
                 for (int i = 0; i < gameLoops.Count; i++)

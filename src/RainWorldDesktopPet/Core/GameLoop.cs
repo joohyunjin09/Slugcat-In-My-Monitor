@@ -94,13 +94,7 @@ namespace RainWorldDesktopPet.Core
             Graphics = new SlugcatGraphics(Slugcat, requested, atlas);
             baseAssetStatus = AssetStatus;
             mouse.Sample(SimulationConstants.LogicStepSeconds);
-            string fireSmokeStatus;
-            FireSmokeShaderAssets fireSmoke = FireSmokeShaderAssets.TryLoad(installation,
-                out fireSmokeStatus);
-            Renderer = new SpriteRenderer(atlas, fireSmoke);
-            AssetStatus += " " + fireSmokeStatus;
-            if (!string.IsNullOrEmpty(Renderer.FireSmokeGpuStatus))
-                AssetStatus += " " + Renderer.FireSmokeGpuStatus;
+            Renderer = new SpriteRenderer(atlas);
 #if DEBUG
             workshopLog = new WorkshopLog(true);
 #else

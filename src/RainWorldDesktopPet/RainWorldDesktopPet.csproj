@@ -48,18 +48,6 @@
     <Reference Include="System.Windows.Forms" />
     <Reference Include="System.Web.Extensions" />
     <Reference Include="System.Xml" />
-    <Reference Include="SharpDX">
-      <HintPath>..\..\third_party\SharpDX\SharpDX.dll</HintPath>
-    </Reference>
-    <Reference Include="SharpDX.D3DCompiler">
-      <HintPath>..\..\third_party\SharpDX\SharpDX.D3DCompiler.dll</HintPath>
-    </Reference>
-    <Reference Include="SharpDX.Direct3D11">
-      <HintPath>..\..\third_party\SharpDX\SharpDX.Direct3D11.dll</HintPath>
-    </Reference>
-    <Reference Include="SharpDX.DXGI">
-      <HintPath>..\..\third_party\SharpDX\SharpDX.DXGI.dll</HintPath>
-    </Reference>
   </ItemGroup>
   <ItemGroup>
     <Compile Include="AI\AttentionSystem.cs" />
@@ -88,8 +76,6 @@
     <Compile Include="Graphics\BodyPart.cs" />
     <Compile Include="Graphics\CompositionBatchPlanner.cs" />
     <Compile Include="Graphics\DirectCompositionHost.cs" />
-    <Compile Include="Graphics\FireSmokeGpuPool.cs" />
-    <Compile Include="Graphics\FireSmokeGpuRenderer.cs" />
     <Compile Include="Graphics\Limb.cs" />
     <Compile Include="Graphics\ProceduralTail.cs" />
     <Compile Include="Graphics\ParityDiagnostics.cs" />
@@ -113,7 +99,6 @@
     <Compile Include="RainWorld\DxtDecoder.cs" />
     <Compile Include="RainWorld\DmsSpriteCatalog.cs" />
     <Compile Include="RainWorld\EmbeddedUnityAtlasProvider.cs" />
-    <Compile Include="RainWorld\FireSmokeShaderAssets.cs" />
     <Compile Include="RainWorld\RainWorldAssetLoader.cs" />
     <Compile Include="RainWorld\RainWorldAtlasLoader.cs" />
     <Compile Include="RainWorld\RainWorldInstallation.cs" />

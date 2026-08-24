@@ -11,7 +11,17 @@ namespace RainWorldDesktopPet.Graphics
         private readonly CompositionSurface[] surfaces = new CompositionSurface[MaximumSurfaces];
         private IntPtr nativeRenderer;
         private Rectangle desktopBounds;
+        private uint activeEffectMask;
         private bool disposed;
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct GpuSmokeEffect
+        {
+            public float CenterX, CenterY, Rotation, BackSize, FrontSize;
+            public float BackRed, BackGreen, BackBlue, BackAlpha;
+            public float FrontRed, FrontGreen, FrontBlue, FrontAlpha;
+            public float Seed;
+        }
 
         public DirectCompositionHost(IntPtr windowHandle, Rectangle desktopBounds)
         {
@@ -58,13 +68,35 @@ namespace RainWorldDesktopPet.Graphics
         public void ResetSurfaces()
         {
             if (disposed) return;
-            int result = NativeMethods.Commit(nativeRenderer, 0);
+            activeEffectMask = 0;
+            int result = NativeMethods.Commit(nativeRenderer, 0, 0);
             ThrowIfFailed(result, "Could not reset DirectComposition surfaces");
             for (int i = 0; i < surfaces.Length; i++)
             {
                 if (surfaces[i] != null) surfaces[i].Dispose();
                 surfaces[i] = null;
             }
+        }
+
+        public void BeginEffectFrame()
+        {
+            activeEffectMask = 0;
+        }
+
+        public void PresentEffects(int slot, GpuSmokeEffect[] effects, int count,
+            Rectangle bounds)
+        {
+            if (slot < 0 || slot >= MaximumSurfaces)
+                throw new ArgumentOutOfRangeException("slot");
+            if (effects == null) throw new ArgumentNullException("effects");
+            if (count < 0 || count > effects.Length)
+                throw new ArgumentOutOfRangeException("count");
+            if (count == 0) return;
+            int result = NativeMethods.PresentEffects(nativeRenderer, slot, effects,
+                (uint)count, (uint)bounds.Width, (uint)bounds.Height,
+                bounds.X - desktopBounds.X, bounds.Y - desktopBounds.Y);
+            ThrowIfFailed(result, "Could not present GPU effects");
+            activeEffectMask |= 1u << slot;
         }
 
         public void Present(int slot)
@@ -90,8 +122,9 @@ namespace RainWorldDesktopPet.Graphics
         public void Commit(int activeSurfaceCount)
         {
             uint activeMask = activeSurfaceCount <= 0 ? 0u : (1u << activeSurfaceCount) - 1u;
-            int result = NativeMethods.Commit(nativeRenderer, activeMask);
+            int result = NativeMethods.Commit(nativeRenderer, activeMask, activeEffectMask);
             ThrowIfFailed(result, "Could not commit the DirectComposition frame");
+            activeEffectMask = 0;
         }
 
         public void Dispose()
@@ -153,8 +186,14 @@ namespace RainWorldDesktopPet.Graphics
             internal static extern int Present(IntPtr renderer, int slot, IntPtr pixels,
                 uint width, uint height, uint stride, float x, float y);
 
+            [DllImport(Library, EntryPoint = "SlugcatDCompPresentEffects", CallingConvention = CallingConvention.StdCall)]
+            internal static extern int PresentEffects(IntPtr renderer, int slot,
+                [In] GpuSmokeEffect[] effects, uint count, uint width, uint height,
+                float x, float y);
+
             [DllImport(Library, EntryPoint = "SlugcatDCompCommit", CallingConvention = CallingConvention.StdCall)]
-            internal static extern int Commit(IntPtr renderer, uint activeMask);
+            internal static extern int Commit(IntPtr renderer, uint activeMask,
+                uint activeEffectMask);
 
             [DllImport(Library, EntryPoint = "SlugcatDCompDestroy", CallingConvention = CallingConvention.StdCall)]
             internal static extern void Destroy(IntPtr renderer);

@@ -1,16 +1,29 @@
 #include <windows.h>
-#include <d3d11.h>
+#include <d3d11_1.h>
+#include <d3dcompiler.h>
 #include <dcomp.h>
 #include <dxgi.h>
 #include <wrl/client.h>
 #include <array>
+#include <cmath>
+#include <cstring>
 #include <memory>
+#include <vector>
 
 using Microsoft::WRL::ComPtr;
 
 namespace
 {
     constexpr int MaximumSurfaces = 8;
+    constexpr UINT MaximumSmokeEffects = 256;
+
+    struct GpuSmokeEffect
+    {
+        float CenterX, CenterY, Rotation, BackSize, FrontSize;
+        float BackRed, BackGreen, BackBlue, BackAlpha;
+        float FrontRed, FrontGreen, FrontBlue, FrontAlpha;
+        float Seed;
+    };
 
     struct Surface
     {
@@ -21,14 +34,47 @@ namespace
         bool Active = false;
     };
 
+    struct EffectVertex
+    {
+        float X, Y, U, V;
+        float Red, Green, Blue, Alpha;
+        float Seed;
+    };
+
+    constexpr char EffectShader[] = R"(
+struct VertexInput { float2 position : POSITION; float2 uv : TEXCOORD0;
+    float4 color : COLOR0; float seed : TEXCOORD1; };
+struct PixelInput { float4 position : SV_POSITION; float2 uv : TEXCOORD0;
+    float4 color : COLOR0; float seed : TEXCOORD1; };
+PixelInput VSMain(VertexInput input) { PixelInput output;
+    output.position=float4(input.position,0,1); output.uv=input.uv;
+    output.color=input.color; output.seed=input.seed; return output; }
+float Hash(float2 value) { return frac(sin(dot(value,float2(12.9898,78.233)))*43758.5453); }
+float4 PSMain(PixelInput input) : SV_TARGET { float2 p=input.uv*2-1;
+    float radial=saturate(1-length(p));
+    float2 cell=floor(input.position.xy*.18+input.seed*float2(17,31));
+    float coarse=Hash(cell); float fine=Hash(cell*2.37+input.seed*13);
+    float curl=.5+.5*sin((p.x*4+p.y*3+input.seed)*3.14159265);
+    float density=saturate(radial*1.25+coarse*.32+fine*.18+curl*.12-.48);
+    density*=smoothstep(0,.22,radial); float alpha=density*input.color.a;
+    return float4(input.color.rgb*alpha,alpha); }
+)";
+
     struct Renderer
     {
         ComPtr<ID3D11Device> Device;
         ComPtr<ID3D11DeviceContext> Context;
+        ComPtr<ID3D11DeviceContext1> Context1;
         ComPtr<IDCompositionDevice> CompositionDevice;
         ComPtr<IDCompositionTarget> Target;
-        ComPtr<IDCompositionVisual> Root;
-        std::array<Surface, MaximumSurfaces> Surfaces;
+        ComPtr<IDCompositionVisual> Root, BaseRoot, EffectRoot;
+        std::array<Surface, MaximumSurfaces> Surfaces, EffectSurfaces;
+        ComPtr<ID3D11VertexShader> EffectVertexShader;
+        ComPtr<ID3D11PixelShader> EffectPixelShader;
+        ComPtr<ID3D11InputLayout> EffectInputLayout;
+        ComPtr<ID3D11Buffer> EffectVertexBuffer;
+        ComPtr<ID3D11BlendState> EffectBlendState;
+        HRESULT EffectStatus = E_FAIL;
 
         HRESULT Initialize(HWND window)
         {
@@ -36,147 +82,198 @@ namespace
 #if defined(_DEBUG)
             flags |= D3D11_CREATE_DEVICE_DEBUG;
 #endif
-            D3D_FEATURE_LEVEL featureLevel;
-            HRESULT result = D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr,
-                flags, nullptr, 0, D3D11_SDK_VERSION, &Device, &featureLevel, &Context);
-            if (FAILED(result))
-            {
-                result = D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_WARP, nullptr,
-                    D3D11_CREATE_DEVICE_BGRA_SUPPORT, nullptr, 0, D3D11_SDK_VERSION,
-                    &Device, &featureLevel, &Context);
-            }
-            if (FAILED(result)) return result;
-
-            ComPtr<IDXGIDevice> dxgiDevice;
-            result = Device.As(&dxgiDevice);
-            if (FAILED(result)) return result;
-            result = DCompositionCreateDevice(dxgiDevice.Get(), IID_PPV_ARGS(&CompositionDevice));
-            if (FAILED(result)) return result;
-            result = CompositionDevice->CreateTargetForHwnd(window, TRUE, &Target);
-            if (FAILED(result)) return result;
-            result = CompositionDevice->CreateVisual(&Root);
-            if (FAILED(result)) return result;
-            result = Target->SetRoot(Root.Get());
-            if (FAILED(result)) return result;
+            D3D_FEATURE_LEVEL level;
+            HRESULT hr = D3D11CreateDevice(nullptr,D3D_DRIVER_TYPE_HARDWARE,nullptr,
+                flags,nullptr,0,D3D11_SDK_VERSION,&Device,&level,&Context);
+            if (FAILED(hr)) hr = D3D11CreateDevice(nullptr,D3D_DRIVER_TYPE_WARP,
+                nullptr,D3D11_CREATE_DEVICE_BGRA_SUPPORT,nullptr,0,D3D11_SDK_VERSION,
+                &Device,&level,&Context);
+            if (FAILED(hr)) return hr;
+            Context.As(&Context1);
+            ComPtr<IDXGIDevice> dxgi;
+            if (FAILED(hr=Device.As(&dxgi))) return hr;
+            if (FAILED(hr=DCompositionCreateDevice(dxgi.Get(),IID_PPV_ARGS(&CompositionDevice)))) return hr;
+            if (FAILED(hr=CompositionDevice->CreateTargetForHwnd(window,TRUE,&Target))) return hr;
+            if (FAILED(hr=CompositionDevice->CreateVisual(&Root))) return hr;
+            if (FAILED(hr=CompositionDevice->CreateVisual(&BaseRoot))) return hr;
+            if (FAILED(hr=CompositionDevice->CreateVisual(&EffectRoot))) return hr;
+            if (FAILED(hr=Root->AddVisual(BaseRoot.Get(),FALSE,nullptr))) return hr;
+            if (FAILED(hr=Root->AddVisual(EffectRoot.Get(),TRUE,nullptr))) return hr;
+            if (FAILED(hr=Target->SetRoot(Root.Get()))) return hr;
+            EffectStatus = InitializeEffects();
             return CompositionDevice->Commit();
         }
 
-        HRESULT EnsureSurface(int slot, UINT width, UINT height)
+        HRESULT InitializeEffects()
         {
-            if (slot < 0 || slot >= MaximumSurfaces || width == 0 || height == 0)
-                return E_INVALIDARG;
-            Surface& surface = Surfaces[slot];
-            if (surface.CompositionSurface && surface.Width == width && surface.Height == height)
-                return S_OK;
-
-            if (surface.Visual)
-            {
-                Root->RemoveVisual(surface.Visual.Get());
-                surface.Visual.Reset();
-                surface.CompositionSurface.Reset();
-            }
-
-            HRESULT result = CompositionDevice->CreateSurface(width, height,
-                DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_ALPHA_MODE_PREMULTIPLIED,
-                &surface.CompositionSurface);
-            if (FAILED(result)) return result;
-            result = CompositionDevice->CreateVisual(&surface.Visual);
-            if (FAILED(result)) return result;
-            result = surface.Visual->SetContent(surface.CompositionSurface.Get());
-            if (FAILED(result)) return result;
-            result = Root->AddVisual(surface.Visual.Get(), TRUE, nullptr);
-            if (FAILED(result)) return result;
-            surface.Width = width;
-            surface.Height = height;
-            surface.Active = true;
-            return S_OK;
+            ComPtr<ID3DBlob> vs, ps, errors;
+            HRESULT hr = D3DCompile(EffectShader,sizeof(EffectShader)-1,nullptr,nullptr,
+                nullptr,"VSMain","vs_4_0",D3DCOMPILE_OPTIMIZATION_LEVEL3,0,&vs,&errors);
+            if (FAILED(hr)) return hr;
+            errors.Reset();
+            hr = D3DCompile(EffectShader,sizeof(EffectShader)-1,nullptr,nullptr,nullptr,
+                "PSMain","ps_4_0",D3DCOMPILE_OPTIMIZATION_LEVEL3,0,&ps,&errors);
+            if (FAILED(hr)) return hr;
+            if (FAILED(hr=Device->CreateVertexShader(vs->GetBufferPointer(),vs->GetBufferSize(),
+                nullptr,&EffectVertexShader))) return hr;
+            if (FAILED(hr=Device->CreatePixelShader(ps->GetBufferPointer(),ps->GetBufferSize(),
+                nullptr,&EffectPixelShader))) return hr;
+            D3D11_INPUT_ELEMENT_DESC elements[] = {
+                {"POSITION",0,DXGI_FORMAT_R32G32_FLOAT,0,0,D3D11_INPUT_PER_VERTEX_DATA,0},
+                {"TEXCOORD",0,DXGI_FORMAT_R32G32_FLOAT,0,8,D3D11_INPUT_PER_VERTEX_DATA,0},
+                {"COLOR",0,DXGI_FORMAT_R32G32B32A32_FLOAT,0,16,D3D11_INPUT_PER_VERTEX_DATA,0},
+                {"TEXCOORD",1,DXGI_FORMAT_R32_FLOAT,0,32,D3D11_INPUT_PER_VERTEX_DATA,0} };
+            if (FAILED(hr=Device->CreateInputLayout(elements,ARRAYSIZE(elements),
+                vs->GetBufferPointer(),vs->GetBufferSize(),&EffectInputLayout))) return hr;
+            D3D11_BUFFER_DESC buffer = {};
+            buffer.ByteWidth=MaximumSmokeEffects*12*sizeof(EffectVertex);
+            buffer.Usage=D3D11_USAGE_DYNAMIC; buffer.BindFlags=D3D11_BIND_VERTEX_BUFFER;
+            buffer.CPUAccessFlags=D3D11_CPU_ACCESS_WRITE;
+            if (FAILED(hr=Device->CreateBuffer(&buffer,nullptr,&EffectVertexBuffer))) return hr;
+            D3D11_BLEND_DESC blend = {};
+            auto& target=blend.RenderTarget[0]; target.BlendEnable=TRUE;
+            target.SrcBlend=D3D11_BLEND_ONE; target.DestBlend=D3D11_BLEND_INV_SRC_ALPHA;
+            target.BlendOp=D3D11_BLEND_OP_ADD; target.SrcBlendAlpha=D3D11_BLEND_ONE;
+            target.DestBlendAlpha=D3D11_BLEND_INV_SRC_ALPHA;
+            target.BlendOpAlpha=D3D11_BLEND_OP_ADD;
+            target.RenderTargetWriteMask=D3D11_COLOR_WRITE_ENABLE_ALL;
+            return Device->CreateBlendState(&blend,&EffectBlendState);
         }
 
-        HRESULT Present(int slot, const void* pixels, UINT width, UINT height,
-            UINT stride, float x, float y)
+        HRESULT EnsureSurface(std::array<Surface,MaximumSurfaces>& list,
+            IDCompositionVisual* parent,int slot,UINT width,UINT height)
         {
-            if (!pixels || stride < width * 4) return E_INVALIDARG;
-            HRESULT result = EnsureSurface(slot, width, height);
-            if (FAILED(result)) return result;
-            Surface& surface = Surfaces[slot];
-            RECT updateRectangle = { 0, 0, static_cast<LONG>(width), static_cast<LONG>(height) };
-            POINT updateOffset = {};
-            ComPtr<IDXGISurface> drawingSurface;
-            result = surface.CompositionSurface->BeginDraw(&updateRectangle,
-                IID_PPV_ARGS(&drawingSurface), &updateOffset);
-            if (FAILED(result)) return result;
-            ComPtr<ID3D11Texture2D> texture;
-            result = drawingSurface.As(&texture);
-            HRESULT uploadResult = result;
-            if (SUCCEEDED(result))
-            {
-                D3D11_BOX destination = {};
-                destination.left = static_cast<UINT>(updateOffset.x);
-                destination.top = static_cast<UINT>(updateOffset.y);
-                destination.right = destination.left + width;
-                destination.bottom = destination.top + height;
-                destination.front = 0;
-                destination.back = 1;
-                Context->UpdateSubresource(texture.Get(), 0, &destination, pixels, stride, 0);
-            }
-            HRESULT endDrawResult = surface.CompositionSurface->EndDraw();
-            if (FAILED(uploadResult)) return uploadResult;
-            if (FAILED(endDrawResult)) return endDrawResult;
-            result = surface.Visual->SetOffsetX(x);
-            if (FAILED(result)) return result;
-            result = surface.Visual->SetOffsetY(y);
-            if (FAILED(result)) return result;
-            result = surface.Visual->SetContent(surface.CompositionSurface.Get());
-            if (FAILED(result)) return result;
-            surface.Active = true;
-            return S_OK;
+            if (slot<0 || slot>=MaximumSurfaces || !width || !height) return E_INVALIDARG;
+            Surface& s=list[slot];
+            if (s.CompositionSurface && s.Width==width && s.Height==height) return S_OK;
+            if (s.Visual) { parent->RemoveVisual(s.Visual.Get()); s.Visual.Reset();
+                s.CompositionSurface.Reset(); }
+            HRESULT hr=CompositionDevice->CreateSurface(width,height,
+                DXGI_FORMAT_B8G8R8A8_UNORM,DXGI_ALPHA_MODE_PREMULTIPLIED,
+                &s.CompositionSurface);
+            if (FAILED(hr)) return hr;
+            if (FAILED(hr=CompositionDevice->CreateVisual(&s.Visual))) return hr;
+            if (FAILED(hr=s.Visual->SetContent(s.CompositionSurface.Get()))) return hr;
+            if (FAILED(hr=parent->AddVisual(s.Visual.Get(),TRUE,nullptr))) return hr;
+            s.Width=width; s.Height=height; s.Active=true; return S_OK;
         }
 
-        HRESULT Commit(UINT activeMask)
+        static HRESULT SetVisual(Surface& s,float x,float y)
         {
-            for (int index = 0; index < MaximumSurfaces; ++index)
-            {
-                Surface& surface = Surfaces[index];
-                bool active = (activeMask & (1u << index)) != 0;
-                if (surface.Visual && !active && surface.Active)
-                {
-                    HRESULT result = surface.Visual->SetContent(nullptr);
-                    if (FAILED(result)) return result;
-                }
-                surface.Active = active;
-            }
+            HRESULT hr=s.Visual->SetOffsetX(x); if (FAILED(hr)) return hr;
+            if (FAILED(hr=s.Visual->SetOffsetY(y))) return hr;
+            if (FAILED(hr=s.Visual->SetContent(s.CompositionSurface.Get()))) return hr;
+            s.Active=true; return S_OK;
+        }
+
+        HRESULT Present(int slot,const void* pixels,UINT width,UINT height,
+            UINT stride,float x,float y)
+        {
+            if (!pixels || stride<width*4) return E_INVALIDARG;
+            HRESULT hr=EnsureSurface(Surfaces,BaseRoot.Get(),slot,width,height);
+            if (FAILED(hr)) return hr;
+            Surface& s=Surfaces[slot]; RECT rect={0,0,(LONG)width,(LONG)height};
+            POINT offset={}; ComPtr<IDXGISurface> drawing;
+            if (FAILED(hr=s.CompositionSurface->BeginDraw(&rect,IID_PPV_ARGS(&drawing),&offset))) return hr;
+            ComPtr<ID3D11Texture2D> texture; HRESULT upload=drawing.As(&texture);
+            if (SUCCEEDED(upload)) { D3D11_BOX box={(UINT)offset.x,(UINT)offset.y,0,
+                (UINT)offset.x+width,(UINT)offset.y+height,1};
+                Context->UpdateSubresource(texture.Get(),0,&box,pixels,stride,0); }
+            HRESULT end=s.CompositionSurface->EndDraw();
+            if (FAILED(upload)) return upload; if (FAILED(end)) return end;
+            return SetVisual(s,x,y);
+        }
+
+        static void AddQuad(std::vector<EffectVertex>& out,float cx,float cy,
+            float size,float rotation,float r,float g,float b,float a,float seed,
+            UINT width,UINT height)
+        {
+            if (size<=.01f || a<=.001f) return;
+            float rad=rotation*.01745329252f,c=std::cos(rad),s=std::sin(rad),h=size*.5f;
+            const float local[4][2]={{-h,-h},{h,-h},{h,h},{-h,h}};
+            const float uv[4][2]={{0,0},{1,0},{1,1},{0,1}};
+            EffectVertex v[4]={};
+            for (int i=0;i<4;++i) { float px=cx+local[i][0]*c-local[i][1]*s;
+                float py=cy+local[i][0]*s+local[i][1]*c;
+                v[i]={px/width*2-1,1-py/height*2,uv[i][0],uv[i][1],r,g,b,a,seed}; }
+            const int indices[6]={0,1,2,0,2,3};
+            for (int i:indices) out.push_back(v[i]);
+        }
+
+        HRESULT PresentEffects(int slot,const GpuSmokeEffect* effects,UINT count,
+            UINT width,UINT height,float x,float y)
+        {
+            if (FAILED(EffectStatus)) return EffectStatus;
+            if (!effects || !count || count>MaximumSmokeEffects) return E_INVALIDARG;
+            HRESULT hr=EnsureSurface(EffectSurfaces,EffectRoot.Get(),slot,width,height);
+            if (FAILED(hr)) return hr;
+            Surface& s=EffectSurfaces[slot]; RECT rect={0,0,(LONG)width,(LONG)height};
+            POINT offset={}; ComPtr<IDXGISurface> drawing;
+            if (FAILED(hr=s.CompositionSurface->BeginDraw(&rect,IID_PPV_ARGS(&drawing),&offset))) return hr;
+            HRESULT draw=S_OK; ComPtr<ID3D11Texture2D> texture;
+            ComPtr<ID3D11RenderTargetView> target;
+            if (SUCCEEDED(draw=drawing.As(&texture)))
+                draw=Device->CreateRenderTargetView(texture.Get(),nullptr,&target);
+            std::vector<EffectVertex> vertices;
+            if (SUCCEEDED(draw)) { vertices.reserve(count*12);
+                for (UINT i=0;i<count;++i) { const auto& e=effects[i];
+                    AddQuad(vertices,e.CenterX,e.CenterY,e.BackSize,e.Rotation,e.BackRed,
+                        e.BackGreen,e.BackBlue,e.BackAlpha,e.Seed,width,height);
+                    AddQuad(vertices,e.CenterX,e.CenterY,e.FrontSize,e.Rotation,e.FrontRed,
+                        e.FrontGreen,e.FrontBlue,e.FrontAlpha,e.Seed+.37f,width,height); }
+                D3D11_MAPPED_SUBRESOURCE mapped={};
+                draw=Context->Map(EffectVertexBuffer.Get(),0,D3D11_MAP_WRITE_DISCARD,0,&mapped);
+                if (SUCCEEDED(draw)) { std::memcpy(mapped.pData,vertices.data(),
+                    vertices.size()*sizeof(EffectVertex)); Context->Unmap(EffectVertexBuffer.Get(),0); } }
+            if (SUCCEEDED(draw)) { const float clear[4]={0,0,0,0};
+                if (Context1) { D3D11_RECT area={offset.x,offset.y,offset.x+(LONG)width,
+                    offset.y+(LONG)height}; Context1->ClearView(target.Get(),clear,&area,1); }
+                else Context->ClearRenderTargetView(target.Get(),clear);
+                D3D11_VIEWPORT vp={(float)offset.x,(float)offset.y,(float)width,(float)height,0,1};
+                UINT stride=sizeof(EffectVertex),zero=0; const float factor[4]={0,0,0,0};
+                Context->OMSetRenderTargets(1,target.GetAddressOf(),nullptr);
+                Context->OMSetBlendState(EffectBlendState.Get(),factor,0xffffffff);
+                Context->RSSetViewports(1,&vp); Context->IASetInputLayout(EffectInputLayout.Get());
+                Context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+                Context->IASetVertexBuffers(0,1,EffectVertexBuffer.GetAddressOf(),&stride,&zero);
+                Context->VSSetShader(EffectVertexShader.Get(),nullptr,0);
+                Context->PSSetShader(EffectPixelShader.Get(),nullptr,0);
+                Context->Draw((UINT)vertices.size(),0); ID3D11RenderTargetView* none=nullptr;
+                Context->OMSetRenderTargets(1,&none,nullptr); }
+            HRESULT end=s.CompositionSurface->EndDraw();
+            if (FAILED(draw)) return draw; if (FAILED(end)) return end;
+            return SetVisual(s,x,y);
+        }
+
+        static HRESULT ApplyMask(std::array<Surface,MaximumSurfaces>& list,UINT mask)
+        {
+            for (int i=0;i<MaximumSurfaces;++i) { Surface& s=list[i];
+                bool active=(mask&(1u<<i))!=0; if (s.Visual && !active && s.Active) {
+                    HRESULT hr=s.Visual->SetContent(nullptr); if (FAILED(hr)) return hr; }
+                s.Active=active; } return S_OK;
+        }
+
+        HRESULT Commit(UINT activeMask,UINT effectMask)
+        {
+            HRESULT hr=ApplyMask(Surfaces,activeMask); if (FAILED(hr)) return hr;
+            if (FAILED(hr=ApplyMask(EffectSurfaces,effectMask))) return hr;
             return CompositionDevice->Commit();
         }
     };
 }
 
-extern "C" __declspec(dllexport) HRESULT __stdcall SlugcatDCompCreate(
-    HWND window, Renderer** renderer)
-{
-    if (!window || !renderer) return E_INVALIDARG;
-    *renderer = nullptr;
-    std::unique_ptr<Renderer> value(new (std::nothrow) Renderer());
-    if (!value) return E_OUTOFMEMORY;
-    HRESULT result = value->Initialize(window);
-    if (FAILED(result)) return result;
-    *renderer = value.release();
-    return S_OK;
-}
-
-extern "C" __declspec(dllexport) HRESULT __stdcall SlugcatDCompPresent(
-    Renderer* renderer, int slot, const void* pixels, UINT width, UINT height,
-    UINT stride, float x, float y)
-{
-    return renderer ? renderer->Present(slot, pixels, width, height, stride, x, y) : E_POINTER;
-}
-
-extern "C" __declspec(dllexport) HRESULT __stdcall SlugcatDCompCommit(
-    Renderer* renderer, UINT activeMask)
-{
-    return renderer ? renderer->Commit(activeMask) : E_POINTER;
-}
-
+extern "C" __declspec(dllexport) HRESULT __stdcall SlugcatDCompCreate(HWND window,Renderer** renderer)
+{ if (!window||!renderer) return E_INVALIDARG; *renderer=nullptr;
+  std::unique_ptr<Renderer> value(new(std::nothrow) Renderer()); if(!value)return E_OUTOFMEMORY;
+  HRESULT hr=value->Initialize(window); if(FAILED(hr))return hr; *renderer=value.release(); return S_OK; }
+extern "C" __declspec(dllexport) HRESULT __stdcall SlugcatDCompPresent(Renderer* r,int slot,
+    const void* pixels,UINT width,UINT height,UINT stride,float x,float y)
+{ return r?r->Present(slot,pixels,width,height,stride,x,y):E_POINTER; }
+extern "C" __declspec(dllexport) HRESULT __stdcall SlugcatDCompPresentEffects(Renderer* r,
+    int slot,const GpuSmokeEffect* effects,UINT count,UINT width,UINT height,float x,float y)
+{ return r?r->PresentEffects(slot,effects,count,width,height,x,y):E_POINTER; }
+extern "C" __declspec(dllexport) HRESULT __stdcall SlugcatDCompCommit(Renderer* r,
+    UINT activeMask,UINT effectMask)
+{ return r?r->Commit(activeMask,effectMask):E_POINTER; }
 extern "C" __declspec(dllexport) void __stdcall SlugcatDCompDestroy(Renderer* renderer)
-{
-    delete renderer;
-}
+{ delete renderer; }
