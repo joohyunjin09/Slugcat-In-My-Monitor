@@ -54,7 +54,7 @@ namespace RainWorldDesktopPet.UI
             catalog = new DmsSpriteCatalog(gameLoop.Installation);
             for (int i = 0; i < PartNames.Length; i++) partSelections[PartNames[i]] = "default";
 
-            Text = "Slugcat Appearance Editor";
+            Text = "Slugcat Skin Editor (Experimental)";
             FormBorderStyle = FormBorderStyle.Sizable;
             StartPosition = FormStartPosition.CenterScreen;
             ShowInTaskbar = true;
@@ -63,20 +63,33 @@ namespace RainWorldDesktopPet.UI
             Font = new Font("Segoe UI", 9.0f, FontStyle.Regular, GraphicsUnit.Point);
 
             TableLayoutPanel root = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(10),
-                ColumnCount = 3, RowCount = 2 };
+                ColumnCount = 3, RowCount = 3 };
             root.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 210));
             root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             root.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 360));
+            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 38));
             root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
             root.RowStyles.Add(new RowStyle(SizeType.Absolute, 48));
             Controls.Add(root);
+
+            Label experimentalNotice = new Label
+            {
+                Text = "Experimental: Skin customization is still under development. Presets and results may change.",
+                Dock = DockStyle.Fill,
+                BackColor = Color.FromArgb(255, 244, 204),
+                ForeColor = Color.FromArgb(95, 69, 0),
+                Padding = new Padding(10, 0, 10, 0),
+                TextAlign = ContentAlignment.MiddleLeft
+            };
+            root.SetColumnSpan(experimentalNotice, 3);
+            root.Controls.Add(experimentalNotice, 0, 0);
 
             GroupBox characterGroup = new GroupBox { Text = "Slugcat", Dock = DockStyle.Fill };
             characterList = new ListBox { Dock = DockStyle.Fill, IntegralHeight = false };
             for (int i = 0; i < Characters.Length; i++) characterList.Items.Add(Characters[i]);
             characterList.SelectedIndexChanged += CharacterChanged;
             characterGroup.Controls.Add(characterList);
-            root.Controls.Add(characterGroup, 0, 0);
+            root.Controls.Add(characterGroup, 0, 1);
 
             GroupBox partsGroup = new GroupBox { Text = "Appearance Parts", Dock = DockStyle.Fill };
             TableLayoutPanel parts = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(8),
@@ -107,7 +120,7 @@ namespace RainWorldDesktopPet.UI
             parts.SetColumnSpan(entireSetCheck, 3);
             parts.Controls.Add(entireSetCheck, 0, PartNames.Length);
             partsGroup.Controls.Add(parts);
-            root.Controls.Add(partsGroup, 1, 0);
+            root.Controls.Add(partsGroup, 1, 1);
 
             GroupBox previewGroup = new GroupBox { Text = "Preview", Dock = DockStyle.Fill };
             TableLayoutPanel previewLayout = new TableLayoutPanel { Dock = DockStyle.Fill,
@@ -121,7 +134,7 @@ namespace RainWorldDesktopPet.UI
             previewLayout.Controls.Add(previewPanel, 0, 0);
             previewLayout.Controls.Add(assetLabel, 0, 1);
             previewGroup.Controls.Add(previewLayout);
-            root.Controls.Add(previewGroup, 2, 0);
+            root.Controls.Add(previewGroup, 2, 1);
 
             FlowLayoutPanel actions = new FlowLayoutPanel { Dock = DockStyle.Fill,
                 FlowDirection = FlowDirection.RightToLeft, WrapContents = false,
@@ -134,7 +147,7 @@ namespace RainWorldDesktopPet.UI
             actions.Controls.Add(ActionButton("Copy", CopySetup));
             actions.Controls.Add(ActionButton("Reset", ResetAll));
             root.SetColumnSpan(actions, 3);
-            root.Controls.Add(actions, 0, 1);
+            root.Controls.Add(actions, 0, 2);
 
             StatusStrip status = new StatusStrip();
             statusLabel = new ToolStripStatusLabel { Spring = true, TextAlign = ContentAlignment.MiddleLeft };

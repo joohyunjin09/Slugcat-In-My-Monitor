@@ -97,7 +97,11 @@ namespace RainWorldDesktopPet.UI
             slugcatsGroup.Controls.Add(slugcatsLayout);
             root.Controls.Add(slugcatsGroup, 0, 0);
 
-            GroupBox appearanceGroup = new GroupBox { Text = "Selected Slugcat Appearance", Dock = DockStyle.Fill };
+            GroupBox appearanceGroup = new GroupBox
+            {
+                Text = "Selected Slugcat Appearance (Experimental)",
+                Dock = DockStyle.Fill
+            };
             TableLayoutPanel appearanceLayout = new TableLayoutPanel
             {
                 Dock = DockStyle.Fill,
@@ -115,11 +119,11 @@ namespace RainWorldDesktopPet.UI
             for (int i = 0; i < Variants.Length; i++) variantSelector.Items.Add(new VariantChoice(Variants[i]));
             variantSelector.SelectedIndexChanged += VariantChanged;
             appearanceLayout.Controls.Add(variantSelector, 1, 0);
-            appearanceLayout.Controls.Add(FieldLabel("Visual Skin"), 0, 1);
+            appearanceLayout.Controls.Add(FieldLabel("Visual Skin (Experimental)"), 0, 1);
             skinSelector = new ComboBox { Dock = DockStyle.Fill, DropDownStyle = ComboBoxStyle.DropDownList };
             skinSelector.SelectedIndexChanged += SkinChanged;
             appearanceLayout.Controls.Add(skinSelector, 1, 1);
-            Button editorButton = ActionButton("Open Slugcat Appearance Editor", delegate
+            Button editorButton = ActionButton("Open Experimental Skin Editor", delegate
             {
                 app.SettingsOpenAppearanceEditor();
             });

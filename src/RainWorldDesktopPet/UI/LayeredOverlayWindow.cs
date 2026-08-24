@@ -95,7 +95,7 @@ namespace RainWorldDesktopPet.UI
             retryRenderItem = new ToolStripMenuItem("Retry Rendering");
             retryRenderItem.Enabled = false;
             retryRenderItem.Click += RetryRendering;
-            skinEditorItem = new ToolStripMenuItem("Slugcat Appearance Editor");
+            skinEditorItem = new ToolStripMenuItem("Skin Editor (Experimental)");
             skinEditorItem.Click += ToggleSkinEditor;
             ToolStripMenuItem exitItem = new ToolStripMenuItem("Exit");
             exitItem.Click += delegate { Close(); };
@@ -104,7 +104,7 @@ namespace RainWorldDesktopPet.UI
             variantMenu.DropDownItems.Add(CreateVariantItem("Monk (Yellow)", SlugcatVariant.Monk, startVariant));
             variantMenu.DropDownItems.Add(CreateVariantItem("Hunter (Red)", SlugcatVariant.Hunter, startVariant));
             variantMenu.DropDownItems.Add(CreateVariantItem("Gourmand", SlugcatVariant.Gourmand, startVariant));
-            visualSkinMenu = new ToolStripMenuItem("Visual Skin");
+            visualSkinMenu = new ToolStripMenuItem("Visual Skin (Experimental)");
             visualSkinMenu.DropDownItems.Add(CreateSkinItem("Default", SlugcatSkin.Default, startSkin));
             visualSkinMenu.DropDownItems.Add(CreateSkinItem("Artificer", SlugcatSkin.Artificer, startSkin));
             visualSkinMenu.DropDownItems.Add(CreateSkinItem("Spearmaster", SlugcatSkin.Spearmaster, startSkin));
