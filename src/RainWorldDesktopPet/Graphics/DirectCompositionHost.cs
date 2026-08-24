@@ -29,14 +29,42 @@ namespace RainWorldDesktopPet.Graphics
         {
             if (slot < 0 || slot >= MaximumSurfaces) throw new ArgumentOutOfRangeException("slot");
             CompositionSurface surface = surfaces[slot];
-            if (surface == null || surface.Width != bounds.Width || surface.Height != bounds.Height)
+            Size currentSize = surface == null ? Size.Empty :
+                new Size(surface.Width, surface.Height);
+            Size reusableSize = SelectReusableSurfaceSize(currentSize, bounds.Size);
+            int width = reusableSize.Width;
+            int height = reusableSize.Height;
+            if (surface == null || surface.Width < width || surface.Height < height)
             {
                 if (surface != null) surface.Dispose();
-                surface = new CompositionSurface(bounds.Width, bounds.Height);
+                surface = new CompositionSurface(width, height);
                 surfaces[slot] = surface;
             }
-            surface.Bounds = bounds;
+            int centerX = bounds.Left + bounds.Width / 2;
+            int centerY = bounds.Top + bounds.Height / 2;
+            surface.Bounds = new Rectangle(centerX - surface.Width / 2,
+                centerY - surface.Height / 2, surface.Width, surface.Height);
             return surface;
+        }
+
+        public static Size SelectReusableSurfaceSize(Size current, Size required)
+        {
+            if (required.Width < 1 || required.Height < 1)
+                throw new ArgumentOutOfRangeException("required");
+            return new Size(Math.Max(current.Width, required.Width),
+                Math.Max(current.Height, required.Height));
+        }
+
+        public void ResetSurfaces()
+        {
+            if (disposed) return;
+            int result = NativeMethods.Commit(nativeRenderer, 0);
+            ThrowIfFailed(result, "Could not reset DirectComposition surfaces");
+            for (int i = 0; i < surfaces.Length; i++)
+            {
+                if (surfaces[i] != null) surfaces[i].Dispose();
+                surfaces[i] = null;
+            }
         }
 
         public void Present(int slot)

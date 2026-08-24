@@ -125,6 +125,8 @@ namespace RainWorldDesktopPet.Tests
             Run("Graphics bounds include procedural extremities", GraphicsBoundsIncludeExtremities);
             Run("Overlapping Slugcats share one bounded composition upload",
                 OverlappingSlugcatsShareCompositionUpload);
+            Run("Composition surfaces grow without resize oscillation",
+                CompositionSurfacesOnlyGrow);
             Run("Unused Stand and Walk hands retract like SlugcatHand", UnusedHandsRetract);
             Run("Crawl hands use original velocity-relative targets", CrawlHandsUseOriginalTargets);
             Run("SlugcatHand connection constraint prevents arm separation", ArmConstraintPreventsSeparation);
@@ -2418,7 +2420,8 @@ namespace RainWorldDesktopPet.Tests
                 new Rectangle(96, 0, 384, 384),
                 new Rectangle(144, 0, 384, 384)
             };
-            IList<CompositionBatch> combined = CompositionBatchPlanner.Plan(nearby, 128);
+            CompositionBatchPlanner planner = new CompositionBatchPlanner();
+            IList<CompositionBatch> combined = planner.Plan(nearby, 128);
             Equal(1, combined.Count, "nearby surface batch count");
             Equal(4, combined[0].SurfaceIndices.Count, "combined Slugcat count");
             long separateArea = nearby.Sum(delegate(Rectangle bounds)
@@ -2434,8 +2437,21 @@ namespace RainWorldDesktopPet.Tests
                 new Rectangle(0, 0, 384, 384),
                 new Rectangle(1200, 0, 384, 384)
             };
-            IList<CompositionBatch> separated = CompositionBatchPlanner.Plan(distant, 128);
+            IList<CompositionBatch> separated = planner.Plan(distant, 128);
             Equal(2, separated.Count, "distant surface batch count");
+        }
+
+        private static void CompositionSurfacesOnlyGrow()
+        {
+            Size initial = DirectCompositionHost.SelectReusableSurfaceSize(Size.Empty,
+                new Size(384, 384));
+            True(initial == new Size(384, 384), "initial surface size");
+            Size grown = DirectCompositionHost.SelectReusableSurfaceSize(initial,
+                new Size(512, 384));
+            True(grown == new Size(512, 384), "grown surface size");
+            Size retained = DirectCompositionHost.SelectReusableSurfaceSize(grown,
+                new Size(384, 384));
+            True(grown == retained, "smaller content should reuse the grown surface");
         }
 
         private static void ActiveSlugcatsShareFireSmokeGpu(

@@ -6,53 +6,63 @@ namespace RainWorldDesktopPet.Graphics
 {
     public sealed class CompositionBatch
     {
-        internal CompositionBatch(Rectangle bounds, int surfaceIndex)
+        internal CompositionBatch()
         {
-            Bounds = bounds;
-            SurfaceIndices = new List<int> { surfaceIndex };
+            SurfaceIndices = new List<int>(8);
         }
 
         public Rectangle Bounds { get; internal set; }
         public List<int> SurfaceIndices { get; private set; }
+
+        internal void Reset(Rectangle bounds, int surfaceIndex)
+        {
+            Bounds = bounds;
+            SurfaceIndices.Clear();
+            SurfaceIndices.Add(surfaceIndex);
+        }
     }
 
-    public static class CompositionBatchPlanner
+    public sealed class CompositionBatchPlanner
     {
-        public static IList<CompositionBatch> Plan(IList<Rectangle> surfaceBounds,
+        private readonly List<CompositionBatch> batches = new List<CompositionBatch>(8);
+        private readonly Stack<CompositionBatch> available = new Stack<CompositionBatch>(8);
+
+        public IList<CompositionBatch> Plan(IList<Rectangle> surfaceBounds,
             int sizeQuantum)
         {
             if (surfaceBounds == null) throw new ArgumentNullException("surfaceBounds");
             if (sizeQuantum < 1) throw new ArgumentOutOfRangeException("sizeQuantum");
 
-            List<CompositionBatch> batches = new List<CompositionBatch>(surfaceBounds.Count);
+            for (int i = 0; i < batches.Count; i++) available.Push(batches[i]);
+            batches.Clear();
             for (int i = 0; i < surfaceBounds.Count; i++)
-                batches.Add(new CompositionBatch(surfaceBounds[i], i));
+            {
+                CompositionBatch batch = available.Count == 0 ?
+                    new CompositionBatch() : available.Pop();
+                batch.Reset(surfaceBounds[i], i);
+                batches.Add(batch);
+            }
 
             while (TryMergeBestPair(batches, sizeQuantum)) { }
-            batches.Sort(delegate(CompositionBatch left, CompositionBatch right)
-            {
-                return left.SurfaceIndices[0].CompareTo(right.SurfaceIndices[0]);
-            });
             return batches;
         }
 
-        private static bool TryMergeBestPair(List<CompositionBatch> batches,
-            int sizeQuantum)
+        private bool TryMergeBestPair(List<CompositionBatch> values, int sizeQuantum)
         {
             int bestLeft = -1;
             int bestRight = -1;
             Rectangle bestBounds = Rectangle.Empty;
             long bestSaving = 0;
 
-            for (int left = 0; left < batches.Count; left++)
+            for (int left = 0; left < values.Count; left++)
             {
-                for (int right = left + 1; right < batches.Count; right++)
+                for (int right = left + 1; right < values.Count; right++)
                 {
-                    Rectangle union = Rectangle.Union(batches[left].Bounds,
-                        batches[right].Bounds);
+                    Rectangle union = Rectangle.Union(values[left].Bounds,
+                        values[right].Bounds);
                     Rectangle rounded = RoundAroundCenter(union, sizeQuantum);
-                    long separateArea = Area(batches[left].Bounds) +
-                        Area(batches[right].Bounds);
+                    long separateArea = Area(values[left].Bounds) +
+                        Area(values[right].Bounds);
                     long saving = separateArea - Area(rounded);
                     if (saving <= bestSaving) continue;
                     bestSaving = saving;
@@ -63,12 +73,13 @@ namespace RainWorldDesktopPet.Graphics
             }
 
             if (bestLeft < 0) return false;
-            CompositionBatch target = batches[bestLeft];
-            CompositionBatch source = batches[bestRight];
+            CompositionBatch target = values[bestLeft];
+            CompositionBatch source = values[bestRight];
             target.Bounds = bestBounds;
             target.SurfaceIndices.AddRange(source.SurfaceIndices);
             target.SurfaceIndices.Sort();
-            batches.RemoveAt(bestRight);
+            values.RemoveAt(bestRight);
+            available.Push(source);
             return true;
         }
 

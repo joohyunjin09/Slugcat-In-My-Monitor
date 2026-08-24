@@ -38,6 +38,11 @@ namespace RainWorldDesktopPet.UI
         private readonly ToolStripMenuItem removeItem;
         private readonly ToolStripMenuItem skinEditorItem;
         private readonly List<GameLoop> gameLoops = new List<GameLoop>();
+        private readonly SlugcatPose[] poseBuffer = new SlugcatPose[MaximumSlugcats];
+        private readonly List<Rectangle> surfaceBoundsBuffer =
+            new List<Rectangle>(MaximumSlugcats);
+        private readonly CompositionBatchPlanner compositionBatchPlanner =
+            new CompositionBatchPlanner();
         private readonly Dictionary<string, double> displayRefreshRates =
             new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
         private readonly DesktopCollisionWorld collisionWorld =
@@ -97,6 +102,7 @@ namespace RainWorldDesktopPet.UI
             {
                 for (int i = 0; i < gameLoops.Count; i++)
                     gameLoops[i].DebugEnabled = debugItem.Checked;
+                if (compositionHost != null) compositionHost.ResetSurfaces();
                 RefreshSettingsWindow();
             };
             pauseItem = new ToolStripMenuItem("Pause All Slugcats");
@@ -244,22 +250,21 @@ namespace RainWorldDesktopPet.UI
             {
                 PollDragInput();
                 RefreshCollisionWorld();
-                SlugcatPose[] poses = new SlugcatPose[gameLoops.Count];
                 for (int i = 0; i < gameLoops.Count; i++)
                 {
                     gameLoops[i].Advance(Handle);
-                    poses[i] = gameLoops[i].BuildPose();
+                    poseBuffer[i] = gameLoops[i].BuildPose();
                 }
-                UpdateRenderCadence(poses);
-                Rectangle[] surfaceBounds = new Rectangle[gameLoops.Count];
+                UpdateRenderCadence(poseBuffer, gameLoops.Count);
+                surfaceBoundsBuffer.Clear();
                 for (int i = 0; i < gameLoops.Count; i++)
                 {
                     bool debug = gameLoops[i].DebugEnabled &&
                         ReferenceEquals(gameLoops[i], gameLoop);
-                    surfaceBounds[i] = CalculateRenderBounds(poses[i], debug);
+                    surfaceBoundsBuffer.Add(CalculateRenderBounds(poseBuffer[i], debug));
                 }
-                IList<CompositionBatch> batches = CompositionBatchPlanner.Plan(
-                    surfaceBounds, OverlaySizeQuantum);
+                IList<CompositionBatch> batches = compositionBatchPlanner.Plan(
+                    surfaceBoundsBuffer, OverlaySizeQuantum);
                 for (int batchIndex = 0; batchIndex < batches.Count; batchIndex++)
                 {
                     CompositionBatch batch = batches[batchIndex];
@@ -269,13 +274,13 @@ namespace RainWorldDesktopPet.UI
                     graphics.CompositingMode = System.Drawing.Drawing2D.CompositingMode.SourceCopy;
                     graphics.Clear(Color.Transparent);
                     graphics.CompositingMode = System.Drawing.Drawing2D.CompositingMode.SourceOver;
-                    RenderSpace renderSpace = new RenderSpace(batch.Bounds);
+                    RenderSpace renderSpace = new RenderSpace(surface.Bounds);
                     for (int member = 0; member < batch.SurfaceIndices.Count; member++)
                     {
                         int loopIndex = batch.SurfaceIndices[member];
                         GameLoop loop = gameLoops[loopIndex];
                         bool debug = loop.DebugEnabled && ReferenceEquals(loop, gameLoop);
-                        loop.Renderer.Render(graphics, poses[loopIndex], renderSpace, debug,
+                        loop.Renderer.Render(graphics, poseBuffer[loopIndex], renderSpace, debug,
                             loop.World, loop.Slugcat, loop.AI, loop.AssetStatus,
                             loop.SelectedSlugcat);
                     }
@@ -354,10 +359,10 @@ namespace RainWorldDesktopPet.UI
             surfaceRefreshClock.Restart();
         }
 
-        private void UpdateRenderCadence(SlugcatPose[] poses)
+        private void UpdateRenderCadence(SlugcatPose[] poses, int poseCount)
         {
             double targetRefreshRate = 0.0;
-            for (int i = 0; i < poses.Length; i++)
+            for (int i = 0; i < poseCount; i++)
             {
                 string deviceName = poses[i].CurrentMonitorName;
                 double refreshRate;
@@ -445,6 +450,7 @@ namespace RainWorldDesktopPet.UI
                 try
                 {
                     ConfigureVirtualDesktop();
+                    if (compositionHost != null) compositionHost.ResetSurfaces();
                     displayRefreshRates.Clear();
                     ApplyRenderCadence(NativeMethods.GetPrimaryDisplayRefreshRate());
                 }
@@ -518,6 +524,7 @@ namespace RainWorldDesktopPet.UI
             }
             gameLoops.RemoveAt(index);
             removed.Dispose();
+            if (compositionHost != null) compositionHost.ResetSurfaces();
             SelectSlugcat(gameLoops[Math.Min(index, gameLoops.Count - 1)]);
         }
 
