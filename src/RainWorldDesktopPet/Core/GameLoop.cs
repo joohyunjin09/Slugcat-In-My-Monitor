@@ -17,6 +17,7 @@ namespace RainWorldDesktopPet.Core
         private readonly FixedTimeStep fixedTimeStep = new FixedTimeStep(SimulationConstants.LogicStepSeconds);
         private readonly MouseTracker mouse = new MouseTracker();
         private readonly MouseAttentionState mouseAttention = new MouseAttentionState();
+        private readonly bool managesWorldRefresh;
         private double lastTime;
         private double surfaceRefreshAccumulator;
         private long simulationTick;
@@ -45,10 +46,18 @@ namespace RainWorldDesktopPet.Core
 
         public GameLoop(IntPtr overlayHandle, RainWorldInstallation installation,
             SlugcatVariant variant, SlugcatSkin skin, int spawnIndex)
+            : this(overlayHandle, installation, variant, skin, spawnIndex, null)
+        {
+        }
+
+        internal GameLoop(IntPtr overlayHandle, RainWorldInstallation installation,
+            SlugcatVariant variant, SlugcatSkin skin, int spawnIndex,
+            DesktopCollisionWorld sharedWorld)
         {
             Installation = installation;
-            World = new DesktopCollisionWorld(new WindowEnumerator());
-            World.Refresh(overlayHandle);
+            managesWorldRefresh = sharedWorld == null;
+            World = sharedWorld ?? new DesktopCollisionWorld(new WindowEnumerator());
+            if (managesWorldRefresh) World.Refresh(overlayHandle);
             Point cursor = System.Windows.Forms.Cursor.Position;
             MonitorInfo monitor = MonitorManager.FindNearest(cursor);
             double spawnMargin = DesktopWorldTransform.ToDesktopLength(70.0);
@@ -173,13 +182,15 @@ namespace RainWorldDesktopPet.Core
                 return;
             }
 
-            surfaceRefreshAccumulator += elapsed;
-            if (surfaceRefreshAccumulator >= SimulationConstants.WindowRefreshSeconds)
+            if (managesWorldRefresh)
             {
-                surfaceRefreshAccumulator %= SimulationConstants.WindowRefreshSeconds;
-                World.Refresh(overlayHandle);
-                Vec2 surfaceDelta = Slugcat.ApplyMovingSurfaceDelta(World);
-                Graphics.ApplyMovingSurfaceDelta(surfaceDelta);
+                surfaceRefreshAccumulator += elapsed;
+                if (surfaceRefreshAccumulator >= SimulationConstants.WindowRefreshSeconds)
+                {
+                    surfaceRefreshAccumulator %= SimulationConstants.WindowRefreshSeconds;
+                    World.Refresh(overlayHandle);
+                    ApplyMovingSurfaceDelta();
+                }
             }
 
             fixedTimeStep.AddElapsed(elapsed);
@@ -216,6 +227,13 @@ namespace RainWorldDesktopPet.Core
             // catch-up Update, preventing a stalled desktop from spiralling.
             if (steps == 3) fixedTimeStep.Reset();
             simulationStepsLastFrame = steps;
+        }
+
+        public void ApplyMovingSurfaceDelta()
+        {
+            if (Paused) return;
+            Vec2 surfaceDelta = Slugcat.ApplyMovingSurfaceDelta(World);
+            Graphics.ApplyMovingSurfaceDelta(surfaceDelta);
         }
 
         public SlugcatPose BuildPose()

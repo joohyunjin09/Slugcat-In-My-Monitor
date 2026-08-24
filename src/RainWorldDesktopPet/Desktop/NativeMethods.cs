@@ -106,25 +106,9 @@ namespace RainWorldDesktopPet.Desktop
             internal uint Colors;
         }
 
-        [StructLayout(LayoutKind.Sequential)]
-        internal struct NativeMessage
-        {
-            internal IntPtr Handle;
-            internal uint Message;
-            internal IntPtr WParam;
-            internal IntPtr LParam;
-            internal uint Time;
-            internal Point Point;
-        }
-
         [DllImport("user32.dll")]
         [return: MarshalAs(UnmanagedType.Bool)]
         internal static extern bool EnumWindows(EnumWindowsProc callback, IntPtr parameter);
-
-        [DllImport("user32.dll")]
-        [return: MarshalAs(UnmanagedType.Bool)]
-        private static extern bool PeekMessage(out NativeMessage message, IntPtr handle,
-            uint minimumFilter, uint maximumFilter, uint removeMessage);
 
         [DllImport("user32.dll")]
         [return: MarshalAs(UnmanagedType.Bool)]
@@ -160,9 +144,6 @@ namespace RainWorldDesktopPet.Desktop
         [DllImport("dwmapi.dll")]
         internal static extern int DwmGetWindowAttribute(IntPtr handle, int attribute, out int value, int valueSize);
 
-        [DllImport("dwmapi.dll")]
-        internal static extern int DwmFlush();
-
         [DllImport("user32.dll")]
         [return: MarshalAs(UnmanagedType.Bool)]
         internal static extern bool GetCursorPos(out Point point);
@@ -178,6 +159,10 @@ namespace RainWorldDesktopPet.Desktop
 
         [DllImport("gdi32.dll")]
         internal static extern IntPtr CreateCompatibleDC(IntPtr deviceContext);
+
+        [DllImport("gdi32.dll", CharSet = CharSet.Unicode)]
+        internal static extern IntPtr CreateDC(string driver, string device,
+            string output, IntPtr initializationData);
 
         [DllImport("gdi32.dll")]
         [return: MarshalAs(UnmanagedType.Bool)]
@@ -247,12 +232,6 @@ namespace RainWorldDesktopPet.Desktop
             SetProcessDPIAware();
         }
 
-        internal static bool IsMessageQueueIdle()
-        {
-            NativeMessage message;
-            return !PeekMessage(out message, IntPtr.Zero, 0, 0, 0);
-        }
-
         internal static double GetPrimaryDisplayRefreshRate()
         {
             IntPtr deviceContext = GetDC(IntPtr.Zero);
@@ -265,6 +244,22 @@ namespace RainWorldDesktopPet.Desktop
             finally
             {
                 ReleaseDC(IntPtr.Zero, deviceContext);
+            }
+        }
+
+        internal static double GetDisplayRefreshRate(string deviceName)
+        {
+            if (string.IsNullOrEmpty(deviceName)) return GetPrimaryDisplayRefreshRate();
+            IntPtr deviceContext = CreateDC("DISPLAY", deviceName, null, IntPtr.Zero);
+            if (deviceContext == IntPtr.Zero) return 0.0;
+            try
+            {
+                int refresh = GetDeviceCaps(deviceContext, VREFRESH);
+                return refresh > 1 ? refresh : 0.0;
+            }
+            finally
+            {
+                DeleteDC(deviceContext);
             }
         }
     }

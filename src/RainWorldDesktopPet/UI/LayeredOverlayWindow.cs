@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Imaging;
 using System.Runtime.InteropServices;
@@ -7,6 +8,7 @@ using System.Windows.Forms;
 using RainWorldDesktopPet.Core;
 using RainWorldDesktopPet.Desktop;
 using RainWorldDesktopPet.Graphics;
+using RainWorldDesktopPet.Physics;
 using RainWorldDesktopPet.RainWorld;
 using RainWorldDesktopPet.Creature;
 
@@ -15,6 +17,12 @@ namespace RainWorldDesktopPet.UI
     public sealed class LayeredOverlayWindow : Form
     {
         private const int MaximumSlugcats = 8;
+        private const int DefaultRenderFramesPerSecond = 60;
+        private const int DefaultRenderIntervalMilliseconds =
+            (1000 + DefaultRenderFramesPerSecond - 1) / DefaultRenderFramesPerSecond;
+        private const int MinimumOverlaySize = 384;
+        private const int OverlaySizeQuantum = 128;
+        private const int OverlayPadding = 24;
         private readonly RainWorldInstallation installation;
         private readonly SlugcatVariant startVariant;
         private readonly SlugcatSkin startSkin;
@@ -31,6 +39,11 @@ namespace RainWorldDesktopPet.UI
         private readonly ToolStripMenuItem spawnItem;
         private readonly ToolStripMenuItem removeItem;
         private readonly List<GameLoop> gameLoops = new List<GameLoop>();
+        private readonly Dictionary<string, double> displayRefreshRates =
+            new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
+        private readonly DesktopCollisionWorld collisionWorld =
+            new DesktopCollisionWorld(new WindowEnumerator());
+        private readonly Stopwatch surfaceRefreshClock = Stopwatch.StartNew();
         private LayeredBackBuffer backBuffer;
         private GameLoop gameLoop;
         private GameLoop grabbedGameLoop;
@@ -59,7 +72,8 @@ namespace RainWorldDesktopPet.UI
             ShowInTaskbar = false;
             TopMost = true;
             StartPosition = FormStartPosition.Manual;
-            overlayBounds = MonitorManager.GetVirtualBounds();
+            Rectangle virtualBounds = MonitorManager.GetVirtualBounds();
+            overlayBounds = new Rectangle(virtualBounds.Location, new Size(1, 1));
             Bounds = overlayBounds;
             renderSpace = new RenderSpace(overlayBounds);
             Text = "SlugcatInMyMonitor";
@@ -67,9 +81,9 @@ namespace RainWorldDesktopPet.UI
             if (applicationIcon != null) Icon = applicationIcon;
 
             renderTimer = new Timer();
-            // This timer is only an error-retry/fallback wakeup. Normal frames
-            // are paced by DWM composition from Application.Idle.
-            renderTimer.Interval = 250;
+            // Start conservatively, then follow the refresh rate of the
+            // monitor(s) occupied by active Slugcats after the first frame.
+            renderTimer.Interval = DefaultRenderIntervalMilliseconds;
             renderTimer.Tick += RenderTimerTick;
 
             ContextMenuStrip menu = new ContextMenuStrip();
@@ -147,8 +161,9 @@ namespace RainWorldDesktopPet.UI
             {
                 gameLoop.DebugEnabled = startDebug;
                 displayRefreshRate = NativeMethods.GetPrimaryDisplayRefreshRate();
+                ApplyRenderCadence(displayRefreshRate);
                 renderingEnabled = true;
-                Application.Idle += ApplicationIdle;
+                renderTimer.Start();
             };
         }
 
@@ -168,7 +183,9 @@ namespace RainWorldDesktopPet.UI
         protected override void OnHandleCreated(EventArgs e)
         {
             base.OnHandleCreated(e);
-            ConfigureVirtualDesktopOverlay(false);
+            ConfigureInitialOverlay(false);
+            collisionWorld.Refresh(Handle);
+            surfaceRefreshClock.Restart();
             AddSlugcat(startVariant, startSkin);
             RefreshSkinAvailability();
         }
@@ -176,7 +193,6 @@ namespace RainWorldDesktopPet.UI
         protected override void OnHandleDestroyed(EventArgs e)
         {
             renderingEnabled = false;
-            Application.Idle -= ApplicationIdle;
             renderTimer.Stop();
             if (settingsWindow != null && !settingsWindow.IsDisposed) settingsWindow.Close();
             if (skinEditor != null && !skinEditor.IsDisposed) skinEditor.Close();
@@ -192,27 +208,10 @@ namespace RainWorldDesktopPet.UI
 
         private void RenderTimerTick(object sender, EventArgs e)
         {
-            renderTimer.Stop();
-            renderingEnabled = true;
+            // A disabled renderer with an active timer is waiting for an
+            // automatic presentation retry.
+            if (!renderingEnabled) renderingEnabled = true;
             RenderFrame();
-        }
-
-        private void ApplicationIdle(object sender, EventArgs e)
-        {
-            while (renderingEnabled && NativeMethods.IsMessageQueueIdle())
-            {
-                RenderFrame();
-                if (!renderingEnabled) break;
-                // DwmFlush waits for the next compositor frame, allowing the
-                // draw loop to follow 60/120/144/165/240 Hz displays without
-                // advancing the fixed 40 Hz simulation at that rate.
-                if (NativeMethods.DwmFlush() != 0)
-                {
-                    renderTimer.Interval = 1;
-                    renderTimer.Start();
-                    break;
-                }
-            }
         }
 
         private void RenderFrame()
@@ -221,6 +220,16 @@ namespace RainWorldDesktopPet.UI
             renderingFrame = true;
             try
             {
+                RefreshCollisionWorld();
+                SlugcatPose[] poses = new SlugcatPose[gameLoops.Count];
+                for (int i = 0; i < gameLoops.Count; i++)
+                {
+                    gameLoops[i].Advance(Handle);
+                    poses[i] = gameLoops[i].BuildPose();
+                }
+                UpdateRenderCadence(poses);
+                ConfigureRenderOverlay(CalculateRenderBounds(poses));
+
                 System.Drawing.Graphics graphics = backBuffer.Graphics;
                 graphics.CompositingMode = System.Drawing.Drawing2D.CompositingMode.SourceCopy;
                 graphics.Clear(Color.Transparent);
@@ -228,9 +237,7 @@ namespace RainWorldDesktopPet.UI
                 for (int i = 0; i < gameLoops.Count; i++)
                 {
                     GameLoop loop = gameLoops[i];
-                    loop.Advance(Handle);
-                    SlugcatPose pose = loop.BuildPose();
-                    loop.Renderer.Render(graphics, pose, renderSpace,
+                    loop.Renderer.Render(graphics, poses[i], renderSpace,
                         loop.DebugEnabled && ReferenceEquals(loop, gameLoop),
                         loop.World, loop.Slugcat, loop.AI, loop.AssetStatus, loop.Appearance);
                 }
@@ -325,6 +332,8 @@ namespace RainWorldDesktopPet.UI
                 retryRenderItem.Enabled = false;
                 displayRefreshRate = NativeMethods.GetPrimaryDisplayRefreshRate();
                 renderingEnabled = true;
+                ApplyRenderCadence(displayRefreshRate);
+                renderTimer.Start();
                 RefreshSettingsWindow();
                 RenderFrame();
             }
@@ -345,24 +354,98 @@ namespace RainWorldDesktopPet.UI
             if (previous != null) previous.Dispose();
         }
 
-        private void ConfigureVirtualDesktopOverlay(bool replaceExistingBuffer)
+        private void RefreshCollisionWorld()
+        {
+            if (surfaceRefreshClock.Elapsed.TotalSeconds <
+                SimulationConstants.WindowRefreshSeconds) return;
+
+            collisionWorld.Refresh(Handle);
+            for (int i = 0; i < gameLoops.Count; i++)
+                gameLoops[i].ApplyMovingSurfaceDelta();
+            surfaceRefreshClock.Restart();
+        }
+
+        private void UpdateRenderCadence(SlugcatPose[] poses)
+        {
+            double targetRefreshRate = 0.0;
+            for (int i = 0; i < poses.Length; i++)
+            {
+                string deviceName = poses[i].CurrentMonitorName;
+                double refreshRate;
+                if (!displayRefreshRates.TryGetValue(deviceName, out refreshRate))
+                {
+                    refreshRate = NativeMethods.GetDisplayRefreshRate(deviceName);
+                    displayRefreshRates[deviceName] = refreshRate;
+                }
+                if (refreshRate > targetRefreshRate) targetRefreshRate = refreshRate;
+            }
+
+            if (targetRefreshRate <= 1.0)
+                targetRefreshRate = NativeMethods.GetPrimaryDisplayRefreshRate();
+            ApplyRenderCadence(targetRefreshRate);
+        }
+
+        private void ApplyRenderCadence(double refreshRate)
+        {
+            if (refreshRate <= 1.0) refreshRate = DefaultRenderFramesPerSecond;
+            displayRefreshRate = refreshRate;
+            int interval = Math.Max(1, (int)Math.Round(1000.0 / refreshRate));
+            if (renderTimer.Interval != interval) renderTimer.Interval = interval;
+        }
+
+        private void ConfigureInitialOverlay(bool replaceExistingBuffer)
         {
             Rectangle virtualBounds = MonitorManager.GetVirtualBounds();
             if (virtualBounds.Width <= 0 || virtualBounds.Height <= 0)
                 throw new InvalidOperationException("Windows reported an empty virtual desktop.");
 
-            bool changed = virtualBounds != overlayBounds;
-            overlayBounds = virtualBounds;
+            ConfigureRenderOverlay(new Rectangle(virtualBounds.Location, new Size(1, 1)),
+                replaceExistingBuffer);
+        }
+
+        private void ConfigureRenderOverlay(Rectangle bounds)
+        {
+            ConfigureRenderOverlay(bounds, false);
+        }
+
+        private void ConfigureRenderOverlay(Rectangle bounds, bool replaceExistingBuffer)
+        {
+            bool sizeChanged = bounds.Size != overlayBounds.Size;
+            overlayBounds = bounds;
             renderSpace = new RenderSpace(overlayBounds);
-            Bounds = overlayBounds;
             if (backBuffer == null)
             {
                 backBuffer = new LayeredBackBuffer(overlayBounds.Width, overlayBounds.Height);
             }
-            else if (replaceExistingBuffer || changed)
+            else if (replaceExistingBuffer || sizeChanged)
             {
                 ReplaceBackBuffer();
             }
+        }
+
+        private Rectangle CalculateRenderBounds(SlugcatPose[] poses)
+        {
+            Rectangle virtualBounds = MonitorManager.GetVirtualBounds();
+            if (gameLoop != null && gameLoop.DebugEnabled) return virtualBounds;
+            if (poses.Length == 0)
+                return new Rectangle(virtualBounds.Location, new Size(1, 1));
+
+            RectangleF content = poses[0].GraphicsBounds;
+            for (int i = 1; i < poses.Length; i++)
+                content = RectangleF.Union(content, poses[i].GraphicsBounds);
+
+            int contentWidth = (int)Math.Ceiling(content.Width) + OverlayPadding * 2;
+            int contentHeight = (int)Math.Ceiling(content.Height) + OverlayPadding * 2;
+            int width = RoundOverlaySize(Math.Max(MinimumOverlaySize, contentWidth));
+            int height = RoundOverlaySize(Math.Max(MinimumOverlaySize, contentHeight));
+            int centerX = (int)Math.Round(content.Left + content.Width * 0.5f);
+            int centerY = (int)Math.Round(content.Top + content.Height * 0.5f);
+            return new Rectangle(centerX - width / 2, centerY - height / 2, width, height);
+        }
+
+        private static int RoundOverlaySize(int value)
+        {
+            return ((value + OverlaySizeQuantum - 1) / OverlaySizeQuantum) * OverlaySizeQuantum;
         }
 
         protected override void WndProc(ref Message message)
@@ -378,8 +461,9 @@ namespace RainWorldDesktopPet.UI
             {
                 try
                 {
-                    ConfigureVirtualDesktopOverlay(true);
-                    displayRefreshRate = NativeMethods.GetPrimaryDisplayRefreshRate();
+                    ConfigureInitialOverlay(true);
+                    displayRefreshRates.Clear();
+                    ApplyRenderCadence(NativeMethods.GetPrimaryDisplayRefreshRate());
                 }
                 catch (Exception exception)
                 {
@@ -438,7 +522,8 @@ namespace RainWorldDesktopPet.UI
         private void AddSlugcat(SlugcatVariant variant, SlugcatSkin skin)
         {
             if (gameLoops.Count >= MaximumSlugcats) return;
-            GameLoop added = new GameLoop(Handle, installation, variant, skin, gameLoops.Count);
+            GameLoop added = new GameLoop(Handle, installation, variant, skin,
+                gameLoops.Count, collisionWorld);
             added.DebugEnabled = debugItem.Checked;
             added.Paused = pauseItem.Checked;
             gameLoops.Add(added);
