@@ -16,11 +16,16 @@ namespace RainWorldDesktopPet.Audio
         private double nextCandidateTime;
         private double playbackStartTime = double.NegativeInfinity;
         private double playbackEndTime = double.NegativeInfinity;
+        private double animationStartTime = double.NegativeInfinity;
+        private double animationEndTime = double.NegativeInfinity;
+        private double blinkEndTime = double.NegativeInfinity;
+        private double spearmasterTailSwitchTime = double.NegativeInfinity;
         private double lastMeowEndTime = double.NegativeInfinity;
         private DesktopBehavior previousBehavior;
         private bool previousMouseAttention;
         private bool previousGrabbed;
         private bool shortMeow;
+        private bool fadeStarted;
         private string currentSlugcatId;
         private MeowSoundVariation currentVariation;
 
@@ -42,6 +47,15 @@ namespace RainWorldDesktopPet.Audio
             double mouseDistance, bool mouseAttention, bool grabbed, bool conscious)
         {
             if (!IsAvailable) return;
+            if (currentVariation != null && !fadeStarted &&
+                now >= playbackEndTime - 0.075)
+            {
+                // The original room mixer lets the voice release naturally.
+                // MCI needs an explicit short release to avoid the click/noise
+                // caused by stopping a waveform on an arbitrary sample.
+                audio.FadeOut(75);
+                fadeStarted = true;
+            }
             if (currentVariation != null && now >= playbackEndTime)
             {
                 audio.Stop();
@@ -96,9 +110,18 @@ namespace RainWorldDesktopPet.Audio
             currentVariation = variation;
             currentSlugcatId = slugcatId;
             shortMeow = isShort;
+            fadeStarted = false;
             playbackStartTime = now;
             playbackEndTime = now + Math.Max(0.08,
                 variation.DurationSeconds / Math.Max(0.1f, variation.PlaybackPitch));
+            // DoMeowAnim queues LookAtPoint and Blink after 33 ms. LookAtNothing
+            // runs 160/260 ms later, while Player.Blink(9/11) remains active
+            // for its own original 40 Hz tick count.
+            animationStartTime = now + 0.033;
+            animationEndTime = animationStartTime + (isShort ? 0.160 : 0.260);
+            blinkEndTime = animationStartTime +
+                (isShort ? 9.0 : 11.0) * SimulationConstants.LogicStepSeconds;
+            spearmasterTailSwitchTime = now + 0.080 + random.NextDouble() * 0.060;
             nextCandidateTime = playbackEndTime + MinimumCooldownSeconds;
             log.Info("PushToMeow", "Playing " + slugcatId + " " + (isShort ? "short" : "long") +
                 " variation " + variation.AssetName + " (" +
@@ -135,12 +158,17 @@ namespace RainWorldDesktopPet.Audio
             pose.MeowIsShort = shortMeow;
             pose.MeowAsset = currentVariation.AssetName;
 
-            // Push To Meow's DoMeowAnim waits 33 ms, looks almost straight up and
-            // calls Player.Blink(9/11). Keep that pose for the decoded clip length
-            // so long Workshop clips cannot outlive their desktop animation.
-            if (now - playbackStartTime >= 0.033)
+            // DoMeowAnim waits 33 ms before LookAtPoint. The face resolver
+            // turns that look vector into the original three-pixel upward
+            // Face sprite offset for both normal and Crawl poses.
+            if (now >= animationStartTime && now < animationEndTime)
             {
                 pose.LookDirection = new Vec2(0.0, -1.0);
+            }
+            // Blink(9/11) is intentionally independent of LookAtNothing. It
+            // selects FaceB (closed eyes) for the remaining original ticks.
+            if (now >= animationStartTime && now < blinkEndTime)
+            {
                 pose.Blink = true;
             }
 
@@ -149,13 +177,23 @@ namespace RainWorldDesktopPet.Audio
             if (string.Equals(currentSlugcatId, "Spear", StringComparison.OrdinalIgnoreCase) &&
                 pose.Tail != null)
             {
-                double envelope = 1.0 - progress;
+                double elapsed = Math.Max(0.0, now - playbackStartTime);
+                double lead = MathUtil.Clamp01(elapsed / Math.Max(0.001,
+                    spearmasterTailSwitchTime - playbackStartTime));
+                double returnDuration = Math.Max(0.001, animationEndTime - spearmasterTailSwitchTime);
+                double returnPhase = MathUtil.Clamp01((elapsed - spearmasterTailSwitchTime) /
+                    returnDuration);
                 for (int index = 0; index < pose.Tail.Length; index++)
                 {
-                    double weight = (index + 1.0) / pose.Tail.Length;
-                    double phase = progress * Math.PI * 5.0 + index * 0.55;
-                    pose.Tail[index] += new Vec2(Math.Sin(phase) * 2.2 * weight * envelope,
-                        Math.Cos(phase) * 1.2 * weight * envelope);
+                    // Push To Meow gives each tail segment one upward impulse,
+                    // then a delayed downward impulse at 80--140 ms. Render it
+                    // as a two-stage displacement rather than a perpetual sine.
+                    double segment = (index - 1.0) * 1.5;
+                    double vertical = lead * (-segment * 2.25) +
+                        returnPhase * (segment * 2.0);
+                    double horizontal = -pose.Facing * (index + 1.0) /
+                        Math.Max(1.0, pose.Tail.Length) * 1.2 * (1.0 - returnPhase);
+                    pose.Tail[index] += new Vec2(horizontal, vertical);
                 }
             }
         }

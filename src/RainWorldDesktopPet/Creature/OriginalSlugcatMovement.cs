@@ -324,7 +324,11 @@ namespace RainWorldDesktopPet.Creature
             {
                 chest.Velocity.Y = -owner.SelectedSlugcat.Movement.StandingJumpChest * factor;
                 hips.Velocity.Y = -owner.SelectedSlugcat.Movement.StandingJumpHips * factor;
-                jumpBoost = owner.SelectedSlugcat.Id == SlugcatId.Rivulet ? 14.0 : 8.0;
+                // Player.Jump keeps the normal eight-tick boost for every
+                // character. Rivulet's fourteen-tick value belongs solely to
+                // corridor climbing; applying it to an ordinary floor jump
+                // made its already-taller 6/5 launch rise far too high.
+                jumpBoost = 8.0;
             }
             state.AerobicLevel = MathUtil.Clamp01(state.AerobicLevel + 0.75 / 9.0);
             state.Animation = AnimationIndex.None;
@@ -572,12 +576,10 @@ namespace RainWorldDesktopPet.Creature
             if (input.X != 0) state.Facing = input.X;
             if (state.BodyMode == BodyModeIndex.WallClimb)
             {
-                chest.Velocity.Y = MathUtil.MoveTowards(chest.Velocity.Y,
-                    -2.1 * movement.PoleClimbSpeedFactor,
-                    0.9 * movement.PoleClimbSpeedFactor);
-                hips.Velocity.Y = MathUtil.MoveTowards(hips.Velocity.Y,
-                    -1.8 * movement.PoleClimbSpeedFactor,
-                    0.8 * movement.PoleClimbSpeedFactor);
+                // This is Player's wall *slide*, not pole climbing. Gravity
+                // remains active in the original code and only a wall jump
+                // may add upward velocity. Driving these chunks upward here
+                // turned Rivulet's pole multiplier into a wall-climb exploit.
                 chest.Velocity.X *= 0.5;
                 hips.Velocity.X *= 0.5;
                 return;

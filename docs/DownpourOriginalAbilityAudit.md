@@ -22,7 +22,7 @@
 - `Fire_Spear_Explode`: volume `.3 + random*.3`, pitch `.5 + random*2`
 - parry에만 `ShockWave(200,.2,6,false)` 추가
 
-`ExplosionSmoke`는 lifeTime 170-400, rad `.6-1.5`, rotation/rotVel, 목표점 drift, 두 `FireSmoke` sprite layer를 사용한다. `Futile_White`의 16px quad에 맞춰 world radius에는 scale의 8배를 적용한다. `Spark`는 4-frame 위치 history, gravity `.4-.9`, terrain bounce `.5`를 사용한다. 이 수명식과 layer를 `AbilityEffect`/`SpriteRenderer` adapter가 보존한다. GDI에는 원본 smoke/light shader가 없으므로 shader 부분만 radial gradient adapter다.
+`ExplosionSmoke`는 lifeTime 170-400, rad `.6-1.5`, rotation/rotVel, 목표점 drift, 두 `FireSmoke` sprite layer를 사용한다. `Futile_White`의 16px quad에 맞춰 world radius에는 scale의 8배를 적용한다. `Spark`는 4-frame 위치 history, gravity `.4-.9`, terrain bounce `.5`를 사용한다. 특히 원본 생성자는 `Random.Range(0, 4)`의 0을 허용하며, 그 Spark는 추가된 프레임에는 보이고 다음 `Update`에서 소멸한다. 살아 있는 Spark의 `TriangleMesh` alpha는 줄지 않고 마지막 10%에서만 trail 길이가 줄어든다. 이 수명식과 layer를 `AbilityEffect`/`SpriteRenderer` adapter가 보존한다. 연기는 설치된 원본 `Futile/FireSmoke` fragment 식(`dist`, `noise` 세 번, `noise2` 감산, `.35` discard)을 CPU로 그대로 실행하고, 원본 `Palettes/noise`·`noise2` Texture2D를 직접 읽는다. 데스크톱 런타임에는 원작의 RainCycle writer가 없으므로 `RoomCamera`가 설정하는 원본 기본 `_RAIN` 값 `.5`를 사용한다.
 
 이 분기에는 `Room.ScreenMovement`가 없다. 따라서 폭발 점프에 임의 카메라 흔들림을 추가하지 않는다. 원작 room object graph가 필요한 `InGameNoise(8000)`과 주변 creature/weapon parry 반사는 데스크톱에 대상이 없으므로 실행하지 않는다.
 

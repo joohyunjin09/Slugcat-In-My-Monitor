@@ -240,28 +240,27 @@ namespace RainWorldDesktopPet.AI
             {
                 case SpearmasterActionState.Idle:
                     spear.SetActionState(spearmasterState, spearmasterTarget);
-                    Behavior = DesktopBehavior.Idle;
                     if (spearmasterStateTicks >= spearmasterIdleDuration)
                     {
                         spearmasterMoveDuration = 25 + random.Next(0, 25);
                         ChangeSpearmasterState(SpearmasterActionState.Moving);
                     }
-                    return true;
+                    // The action scheduler must not replace the normal
+                    // utility input while it has nothing to do. The previous
+                    // neutral return here caused Spearmaster to stand frozen.
+                    return false;
 
                 case SpearmasterActionState.Moving:
                     spear.SetActionState(spearmasterState, spearmasterTarget);
-                    Behavior = DesktopBehavior.Walk;
-                    input = new VirtualInput(desiredDirection, 0, false, false);
                     if (spearmasterStateTicks >= spearmasterMoveDuration)
                         ChangeSpearmasterState(SpearmasterActionState.PreparingSpear);
-                    return true;
+                    return false;
 
                 case SpearmasterActionState.PreparingSpear:
                     spear.SetActionState(spearmasterState, spearmasterTarget);
-                    Behavior = DesktopBehavior.MakeSpear;
                     if (spearmasterStateTicks >= 14)
                         ChangeSpearmasterState(SpearmasterActionState.PullingSpear);
-                    return true;
+                    return false;
 
                 case SpearmasterActionState.PullingSpear:
                     spear.SetActionState(spearmasterState, spearmasterTarget);
@@ -276,25 +275,23 @@ namespace RainWorldDesktopPet.AI
 
                 case SpearmasterActionState.HoldingSpear:
                     spear.SetActionState(spearmasterState, spearmasterTarget);
-                    Behavior = DesktopBehavior.MakeSpear;
                     if (spear.HeldSpear == null)
                     {
                         spearmasterRecoveryDuration = 90 + random.Next(0, 80);
                         ChangeSpearmasterState(SpearmasterActionState.Recovering);
-                        return true;
+                        return false;
                     }
-                    if (!hasTarget) return true;
+                    // Holding a spear is a normal mobile state. Only a valid
+                    // click-attention target temporarily takes control for an
+                    // aim/throw sequence; no target must not pin the pet.
+                    if (!hasTarget) return false;
                     if (targetDistance < 80.0)
                     {
-                        input = new VirtualInput(slugcat.Center.X < spearmasterTarget.X
-                            ? -1 : 1, 0, false, false);
-                        return true;
+                        return false;
                     }
                     if (targetDistance > 450.0)
                     {
-                        input = new VirtualInput(slugcat.Center.X < spearmasterTarget.X
-                            ? 1 : -1, 0, false, false);
-                        return true;
+                        return false;
                     }
                     if (spearmasterStateTicks >= spearmasterHoldDuration)
                     {
@@ -338,13 +335,12 @@ namespace RainWorldDesktopPet.AI
 
                 case SpearmasterActionState.Recovering:
                     spear.SetActionState(spearmasterState, spearmasterTarget);
-                    Behavior = DesktopBehavior.Idle;
                     if (spearmasterStateTicks >= spearmasterRecoveryDuration)
                     {
                         spearmasterIdleDuration = 55 + random.Next(0, 85);
                         ChangeSpearmasterState(SpearmasterActionState.Idle);
                     }
-                    return true;
+                    return false;
             }
             return false;
         }

@@ -93,7 +93,13 @@ namespace RainWorldDesktopPet.Core
             AssetStatus += " Audio: " + Audio.Status + ".";
             baseAssetStatus = AssetStatus;
             mouse.Sample(SimulationConstants.LogicStepSeconds);
-            Renderer = new SpriteRenderer(atlas);
+            string fireSmokeStatus;
+            FireSmokeShaderAssets fireSmoke = FireSmokeShaderAssets.TryLoad(installation,
+                out fireSmokeStatus);
+            Renderer = new SpriteRenderer(atlas, fireSmoke);
+            AssetStatus += " " + fireSmokeStatus;
+            if (!string.IsNullOrEmpty(Renderer.FireSmokeGpuStatus))
+                AssetStatus += " " + Renderer.FireSmokeGpuStatus;
 #if DEBUG
             workshopLog = new WorkshopLog(true);
 #else

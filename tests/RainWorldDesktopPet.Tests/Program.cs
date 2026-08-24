@@ -5,6 +5,7 @@ using System.Drawing.Imaging;
 using System.IO;
 using System.Linq;
 using System.Diagnostics;
+using System.Threading;
 using RainWorldDesktopPet.AI;
 using RainWorldDesktopPet.Core;
 using RainWorldDesktopPet.Creature;
@@ -73,7 +74,7 @@ namespace RainWorldDesktopPet.Tests
             Run("Rain World locator validates an explicit installation", LocatorValidatesExplicitPath);
             Run("Required autonomous behavior states are present", RequiredBehaviorsExist);
             Run("Jump and DropDown utility states are reachable", UtilityActionsAreReachable);
-            Run("Wall contact reaches ClimbWindow through VirtualInput", WallContactReachesClimbMovement);
+            Run("Wall contact reaches gravity-driven WallClimb through VirtualInput", WallContactReachesClimbMovement);
             Run("WallClimb hands use alternating wall targets", WallClimbHandsTargetTheWall);
             Run("Sleep curl pulls both hands to the original target", SleepCurlHandsShareOriginalTarget);
             Run("Moving window walls carry a climbing Slugcat", MovingWindowWallCarriesClimber);
@@ -135,6 +136,8 @@ namespace RainWorldDesktopPet.Tests
             Run("PlayerGraphics arm reflection matches y-up signed distance",
                 ArmScaleReflectionMatchesFutileCoordinates);
             Run("Skin face and head families follow PlayerGraphics branches", SkinFaceFamiliesMatchPlayerGraphics);
+            Run("Push To Meow lifts and closes faces while standing and crawling",
+                PushToMeowFaceAnimationUsesOriginalFaceStates);
             Run("Every visual profile remains valid through movement and stun states", AllVisualProfilesRemainStableAcrossStates);
             AbilityParityReplayTests.Register(Run);
 
@@ -144,6 +147,14 @@ namespace RainWorldDesktopPet.Tests
             else
             {
                 Run("Local embedded original atlas loads without DMS", delegate { EmbeddedOriginalAtlasLoads(localInstallation); });
+                Run("Local FireSmoke uses the original noise textures", delegate
+                {
+                    OriginalFireSmokeAssetsLoad(localInstallation);
+                });
+                Run("Local FireSmoke GPU worker completes asynchronously", delegate
+                {
+                    OriginalFireSmokeGpuWorkerCompletes(localInstallation);
+                });
                 Run("Installed Workshop mods parse without loading their DLLs",
                     delegate { LocalWorkshopIntegrationsParse(localInstallation); });
             }
@@ -1108,8 +1119,8 @@ namespace RainWorldDesktopPet.Tests
             slugcat.Movement.ApplyInput(input, world);
             True(slugcat.State.BodyMode == BodyModeIndex.WallClimb,
                 "movement must interpret climb VirtualInput without direct AI movement");
-            True(slugcat.BodyChunks[0].Velocity.Y < 0.0 && slugcat.BodyChunks[1].Velocity.Y < 0.0,
-                "wall climb should produce upward screen-space velocity");
+            True(slugcat.BodyChunks[0].Velocity.Y >= 0.0 && slugcat.BodyChunks[1].Velocity.Y >= 0.0,
+                "wall slide must not inject upward screen-space velocity");
         }
 
         private static void OriginalFaceFrameSelection()
@@ -1897,6 +1908,54 @@ namespace RainWorldDesktopPet.Tests
                 "drop-through should push both chunks downward");
         }
 
+        private static void OriginalFireSmokeAssetsLoad(RainWorldInstallation installation)
+        {
+            string status;
+            using (FireSmokeShaderAssets assets = FireSmokeShaderAssets.TryLoad(installation,
+                out status))
+            {
+                True(assets != null, status);
+                double first = assets.SampleNoise(0.123, 0.456);
+                double second = assets.SampleNoise2(0.789, 0.234);
+                True(first >= 0.0 && first <= 1.0,
+                    "original Palettes/noise red channel is sampleable");
+                True(second >= 0.0 && second <= 1.0,
+                    "original Palettes/noise2 red channel is sampleable");
+            }
+        }
+
+        private static void OriginalFireSmokeGpuWorkerCompletes(RainWorldInstallation installation)
+        {
+            string assetStatus;
+            using (FireSmokeShaderAssets assets = FireSmokeShaderAssets.TryLoad(installation,
+                out assetStatus))
+            {
+                True(assets != null, assetStatus);
+                string gpuStatus;
+                using (FireSmokeGpuRenderer gpu = FireSmokeGpuRenderer.TryCreate(assets,
+                    out gpuStatus))
+                {
+                    True(gpu != null, gpuStatus);
+                    object owner = new object();
+                    gpu.Queue(owner, 0, 7, new Vec2(320.0, 240.0), 20.0, 128.0,
+                        Vec2.Zero, 1.0, 1920, 1080, 0.8);
+                    Stopwatch wait = Stopwatch.StartNew();
+                    FireSmokeGpuRenderer.CompletedMask completed = null;
+                    while (wait.ElapsedMilliseconds < 2000 &&
+                        !gpu.TryTakeCompleted(out completed)) Thread.Sleep(5);
+                    True(completed != null, "GPU worker should finish a FireSmoke mask");
+                    True(ReferenceEquals(owner, completed.Owner), "GPU result owner");
+                    Equal(0, completed.Layer, "GPU result layer");
+                    Equal(7, completed.Generation, "GPU result generation");
+                    True(completed.Pixels != null && completed.Pixels.Length ==
+                        FireSmokeGpuRenderer.RasterSize * FireSmokeGpuRenderer.RasterSize * 4,
+                        "GPU result pixel buffer");
+                    True(completed.Pixels.Where(delegate(byte value) { return value != 0; }).Any(),
+                        "GPU FireSmoke shader should produce visible original-mask pixels");
+                }
+            }
+        }
+
         private static void EmbeddedOriginalAtlasLoads(RainWorldInstallation installation)
         {
             RainWorldAssetLoader loader = new RainWorldAssetLoader(installation);
@@ -2134,6 +2193,41 @@ namespace RainWorldDesktopPet.Tests
                 "Saint head uses HeadB in every movement state");
             True(state.FaceElement.StartsWith("FaceB", StringComparison.Ordinal),
                 "Saint normal face uses the closed-eye FaceB family");
+        }
+
+        private static void PushToMeowFaceAnimationUsesOriginalFaceStates()
+        {
+            SlugcatPose pose = new SlugcatPose();
+            pose.SelectedSlugcat = SlugcatId.White;
+            pose.CurrentSkin = SlugcatSkin.Default;
+            pose.Conscious = true;
+            pose.Animation = AnimationIndex.None;
+            pose.BodyMode = BodyModeIndex.Stand;
+            pose.Chest = new Vec2(100.0, 130.0);
+            pose.Hips = new Vec2(100.0, 150.0);
+            pose.Head = new Vec2(100.0, 100.0);
+            pose.Facing = 1;
+
+            OriginalFaceState standingNormal = SpriteRenderer.ResolveOriginalFaceState(pose);
+            pose.LookDirection = Vec2.Up;
+            pose.Blink = true;
+            OriginalFaceState standingMeow = SpriteRenderer.ResolveOriginalFaceState(pose);
+            True(standingMeow.FaceElement.StartsWith("FaceB", StringComparison.Ordinal),
+                "standing meow should select the closed-eye FaceB sprite");
+            Near(standingNormal.FacePosition.Y - 3.0, standingMeow.FacePosition.Y,
+                0.0001, "standing meow should raise the face by the original look offset");
+
+            pose.BodyMode = BodyModeIndex.Crawl;
+            pose.LookDirection = Vec2.Zero;
+            pose.Blink = false;
+            OriginalFaceState crawlNormal = SpriteRenderer.ResolveOriginalFaceState(pose);
+            pose.LookDirection = Vec2.Up;
+            pose.Blink = true;
+            OriginalFaceState crawlMeow = SpriteRenderer.ResolveOriginalFaceState(pose);
+            True(crawlNormal.FaceElement == "FaceA4", "normal crawl face sprite");
+            True(crawlMeow.FaceElement == "FaceB4", "crawl meow closed-eye face sprite");
+            Near(crawlNormal.FacePosition.Y - 3.0, crawlMeow.FacePosition.Y,
+                0.0001, "crawl meow should preserve the original upward face offset");
         }
 
         private static void AllVisualProfilesRemainStableAcrossStates()
@@ -2779,6 +2873,16 @@ namespace RainWorldDesktopPet.Tests
                 "original lethal result becomes maximum impact stun");
             True(high.LastTerrainImpact.DesktopResult == DesktopPetImpactResult.MaximumStun,
                 "desktop impact result is MaximumStun");
+            SoundEvent[] highSounds = high.DrainSoundEvents();
+            bool emittedHardImpact = false;
+            for (int index = 0; index < highSounds.Length; index++)
+            {
+                emittedHardImpact |= highSounds[index].Id == "Slugcat_Terrain_Impact_Hard";
+                True(highSounds[index].Id != "UI_Slugcat_Stunned_Init",
+                    "lethal-speed safety impact does not queue the death-like stun-init audio");
+            }
+            True(emittedHardImpact,
+                "lethal-speed safety impact retains the normal hard collision audio");
         }
 
         private static void TerrainFirstContactUsesDirection()

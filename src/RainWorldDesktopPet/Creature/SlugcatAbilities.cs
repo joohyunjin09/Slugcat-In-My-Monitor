@@ -22,7 +22,11 @@ namespace RainWorldDesktopPet.Creature
     public sealed class AbilityEffect
     {
         private readonly Random random;
-        private BodyChunk collisionChunk;
+        // ExplosionSmoke and Spark are CosmeticSprites in the original DLL.
+        // The first port allocated a full BodyChunk for every cosmetic effect,
+        // doubling the object count of each Artificer jump (and paying desktop
+        // terrain resolution for every particle). Keep only the original
+        // cosmetic state and integrate the lightweight visual trajectory.
 
         public AbilityEffect(AbilityEffectKind kind, Vec2 position, Vec2 velocity,
             int lifetime, double radius)
@@ -101,7 +105,6 @@ namespace RainWorldDesktopPet.Creature
             // ExplosionSmoke getToPos has y=-100..400 in Rain World's y-up
             // coordinates. This project uses desktop y-down coordinates.
             effect.TargetPosition = target;
-            effect.collisionChunk = new BodyChunk(0, effect.Position, 1.0, 0.01);
             return effect;
         }
 
@@ -127,7 +130,10 @@ namespace RainWorldDesktopPet.Creature
             if (source.NextDouble() < 0.1)
                 lifeTime = source.Next(standardLifeTime,
                     Math.Max(standardLifeTime + 1, exceptionalLifeTime));
-            lifeTime = Math.Max(1, lifeTime);
+            // Spark uses Random.Range(0, standardLifeTime) in the original.
+            // A zero result is a valid one-frame cosmetic: it is drawn after
+            // Room.AddObject, then destroyed by its first Update. Do not turn
+            // that quarter of a 4-tick burst into extra visible trails.
             AbilityEffect effect = new AbilityEffect(AbilityEffectKind.Spark,
                 initialPosition, velocity, lifeTime, 1.0);
             // Spark stores lastPos before offsetting pos along velocity. Its
@@ -136,7 +142,6 @@ namespace RainWorldDesktopPet.Creature
             effect.PreviousPreviousPosition = position;
             effect.PreviousPreviousPreviousPosition = position;
             effect.Gravity = gravity;
-            effect.collisionChunk = new BodyChunk(0, effect.Position, 1.0, 0.01);
             return effect;
         }
 
@@ -198,20 +203,12 @@ namespace RainWorldDesktopPet.Creature
 
         private void IntegrateWithTerrain(DesktopCollisionWorld world, double bounce)
         {
-            if (collisionChunk == null || world == null)
-            {
-                Position += Velocity;
-                return;
-            }
-            collisionChunk.Position = Position;
-            collisionChunk.LastPosition = LastPosition;
-            collisionChunk.Velocity = Velocity;
-            collisionChunk.BeginTick();
-            collisionChunk.LastPosition = LastPosition;
-            collisionChunk.Position = Position + Velocity;
-            world.Resolve(collisionChunk, world.CurrentSnapshot, 0, 1.0, bounce);
-            Position = collisionChunk.Position;
-            Velocity = collisionChunk.Velocity;
+            // Original cosmetics ray-trace only to avoid entering solid room
+            // tiles. Desktop surfaces are presentation terrain rather than
+            // gameplay tiles, so no physics BodyChunk is required here.
+            // This retains the exact smoke/spark count and motion equations
+            // while removing the port-only allocation and collision workload.
+            Position += Velocity;
         }
     }
 

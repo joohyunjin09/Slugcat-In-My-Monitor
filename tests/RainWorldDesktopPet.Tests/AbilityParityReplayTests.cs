@@ -96,6 +96,8 @@ namespace RainWorldDesktopPet.Tests
                 GourmandExhaustionReplay);
             run("Local sounds.txt maps ability SoundIDs and PLAYALL metadata",
                 LocalAbilitySoundCatalog);
+            run("Death and game-over SoundIDs are suppressed before playback",
+                DeathSoundsAreSuppressed);
             run("Installed UnityFS jump family decodes and queues without blocking",
                 LocalUnityFsAudioPlayback);
             run("Sound setting defaults ON, persists, and gates future events",
@@ -300,6 +302,22 @@ namespace RainWorldDesktopPet.Tests
             for (int i = 9; i < 19; i++)
                 True(slugcat.AbilityEffects[i].Kind == AbilityEffectKind.Spark,
                     "Spark creation order " + i);
+
+            bool foundZeroLifetimeSpark = false;
+            Random sparkRandom = new Random(923);
+            for (int i = 0; i < 64; i++)
+            {
+                AbilityEffect spark = AbilityEffect.CreateSpark(Vec2.Zero, Vec2.Right,
+                    4, 18, sparkRandom);
+                if (spark.InitialLifetime != 0) continue;
+                foundZeroLifetimeSpark = true;
+                spark.Step();
+                True(!spark.IsAlive,
+                    "zero-lifetime original Spark expires on its first update");
+                break;
+            }
+            True(foundZeroLifetimeSpark,
+                "original Random.Range(0, 4) branch produces a zero-lifetime Spark");
 
             AbilityEffect light = AbilityEffect.CreateExplosionLight(Vec2.Zero,
                 160.0, 1.0, 3);
@@ -603,8 +621,8 @@ namespace RainWorldDesktopPet.Tests
                 new[] { new VirtualInput(0, 0, true, false) });
             Near(-6.0, jump[0].ChestVelocity.Y, 0.000001, "Rivulet standing chest jump");
             Near(-5.0, jump[0].HipsVelocity.Y, 0.000001, "Rivulet standing hips jump");
-            Near(14.0, jumper.Movement.JumpBoost, 0.000001,
-                "Rivulet jumpBoost from Player.Jump");
+            Near(8.0, jumper.Movement.JumpBoost, 0.000001,
+                "Rivulet Player.Jump uses the shared eight-tick boost");
         }
 
         private static void MovementMomentumTrajectories()
@@ -883,6 +901,27 @@ namespace RainWorldDesktopPet.Tests
             }
         }
 
+        private static void DeathSoundsAreSuppressed()
+        {
+            RainWorldInstallation installation = new RainWorldLocator().Locate(null);
+            if (installation == null) return;
+            using (RainWorldAudioEngine audio = new RainWorldAudioEngine(installation))
+            {
+                string[] ids =
+                {
+                    "Slugcat_Terrain_Impact_Death", "UI_Slugcat_Die",
+                    "HUD_Game_Over_Prompt"
+                };
+                for (int i = 0; i < ids.Length; i++)
+                {
+                    audio.Play(new SoundEvent(ids[i], Vec2.Zero, 1.0, 1.0, 0),
+                        Vec2.Zero, i + 1, 100.0);
+                    True(audio.LastEvent == "suppressed death sound: " + ids[i],
+                        ids[i] + " never enters audio playback");
+                }
+            }
+        }
+
         private static string CheckInstalledEvent(RainWorldAudioEngine audio, string id,
             long tick)
         {
@@ -890,6 +929,10 @@ namespace RainWorldDesktopPet.Tests
             audio.Play(new SoundEvent(id, Vec2.Zero, 0.01, 1.0, 0),
                 Vec2.Zero, tick, 100.0);
             enqueue.Stop();
+            if (audio.LastEvent.StartsWith("suppressed death sound:",
+                StringComparison.OrdinalIgnoreCase) ||
+                audio.LastEvent.StartsWith("silent sound:",
+                StringComparison.OrdinalIgnoreCase)) return null;
             Stopwatch deadline = Stopwatch.StartNew();
             while (deadline.ElapsedMilliseconds < 3000 &&
                 !audio.LastEvent.StartsWith("playback started: " + id,

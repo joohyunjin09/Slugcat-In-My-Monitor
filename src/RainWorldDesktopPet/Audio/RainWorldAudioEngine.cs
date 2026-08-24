@@ -321,6 +321,20 @@ namespace RainWorldDesktopPet.Audio
         private IDictionary<string, RainWorldSoundDefinition> soundDefinitions =
             new Dictionary<string, RainWorldSoundDefinition>(StringComparer.OrdinalIgnoreCase);
         private readonly Random random = new Random(0x50A0D);
+        // A few Steam installations leave these Spearmaster WAVs as zero-byte
+        // streaming placeholders, while the matching UnityFS entries are also
+        // unavailable. Preserve the original sounds.txt event and volume, but
+        // use an installed grab-beam variant only for that storage failure.
+        private static readonly Dictionary<string, string> unavailableClipFallbacks =
+            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                // jump2 is present in every supported sound bank (unlike the
+                // zero-byte placeholders) and stays subdued by the original
+                // SM_Spear_* /vol=0.25 definition.
+                { "smSpearPull", "jump2" },
+                { "smSpearPull2", "jump2" },
+                { "smSpearGrab", "jump2" }
+            };
         private UnityFsBundleReader soundBundle;
         private Thread audioWorker;
         private volatile bool stopping;
@@ -546,8 +560,12 @@ private void PlayClip(RainWorldSoundClipDefinition definition, SoundEvent sound,
     double clipPitch = MathUtil.Lerp(definition.MinimumPitch,
         definition.MaximumPitch, random.NextDouble()) * sound.Pitch;
 
-    UnityAudioClipInfo clipInfo;
-    if (soundBundle != null && TryResolveClip(clip, out clipInfo))
+    UnityAudioClipInfo clipInfo = null;
+    bool hasUnityClip = soundBundle != null && TryResolveClip(clip, out clipInfo);
+    string fallbackClip = null;
+    bool useUnavailableFallback = unavailableClipFallbacks.TryGetValue(clip,
+        out fallbackClip);
+    if (hasUnityClip)
     {
         PcmCacheEntry cached;
         string reason;
@@ -567,10 +585,41 @@ private void PlayClip(RainWorldSoundClipDefinition definition, SoundEvent sound,
             return;
         }
     }
+    // A Unity AudioClip name may exist yet carry no stream data. Treat a
+    // failed decode exactly like a missing placeholder and try the known-good
+    // installed fallback before reporting this event unavailable.
+    if (useUnavailableFallback && soundBundle != null &&
+        TryResolveClip(fallbackClip, out clipInfo))
+    {
+        PcmCacheEntry cached;
+        string reason;
+        if (TryGetCachedPcm(clipInfo, out cached, out reason))
+        {
+            LogDiagnostic("[Audio] Missing/empty " + clip + "; using installed " +
+                fallbackClip + " fallback for " + sound.Id);
+            QueueClip(new QueuedClip
+            {
+                Clip = clipInfo,
+                ClipName = clipInfo.Name,
+                Sound = sound,
+                Volume = clipVolume,
+                Pitch = clipPitch,
+                Pan = pan,
+                Loop = loop
+            });
+            return;
+        }
+    }
 
     string path;
-    if (TryResolveLooseClip(clip, out path))
+    bool hasLooseClip = TryResolveLooseClip(clip, out path);
+    if (!hasLooseClip && useUnavailableFallback)
+        hasLooseClip = TryResolveLooseClip(fallbackClip, out path);
+    if (hasLooseClip)
     {
+        if (useUnavailableFallback)
+            LogDiagnostic("[Audio] Missing " + clip + "; using installed " + fallbackClip +
+                " fallback for " + sound.Id);
         QueueClip(new QueuedClip
         {
             LoosePath = path,
@@ -866,15 +915,23 @@ private static string ClipFamilyName(string name)
 
         // RainWorldAudioEngine 클래스 내부 필드 영역에 추가합니다.
 // 슬러그캣 사망 / 게임 오버 계열 사운드는 오디오 엔진 단계에서 완전히 차단합니다.
-private static readonly HashSet<string> suppressedDeathSoundIds =
-    new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-    {
-        "Slugcat_Death",
-        "Player_Death",
-        "Game_Over",
-        "GameOver",
-        "HUD_Game_Over"
-    };
+        private static readonly HashSet<string> suppressedDeathSoundIds =
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                "Slugcat_Death",
+                "Player_Death",
+                // Player.TerrainImpact and Player.Die use these real SoundIDs
+                // in the installed DLL. They were missing from the original
+                // desktop-pet filter, so a hard wall/floor impact could still
+                // leak a game-over cue.
+                "Slugcat_Terrain_Impact_Death",
+                "UI_Slugcat_Die",
+                "Game_Over",
+                "GameOver",
+                "HUD_Game_Over",
+                "HUD_Game_Over_Prompt",
+                "UI_Multiplayer_Game_Over"
+            };
 
     private static bool IsSuppressedDeathSound(string soundId)
     {
@@ -902,6 +959,14 @@ private static readonly HashSet<string> suppressedDeathSoundIds =
             return true;
 
         if (normalized.IndexOf("Player_Death",
+            StringComparison.OrdinalIgnoreCase) >= 0)
+            return true;
+
+        if (normalized.IndexOf("Terrain_Impact_Death",
+            StringComparison.OrdinalIgnoreCase) >= 0)
+            return true;
+
+        if (normalized.IndexOf("UI_Slugcat_Die",
             StringComparison.OrdinalIgnoreCase) >= 0)
             return true;
 
