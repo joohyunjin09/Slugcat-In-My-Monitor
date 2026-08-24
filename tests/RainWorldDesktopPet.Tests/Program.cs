@@ -279,6 +279,24 @@ namespace RainWorldDesktopPet.Tests
                         }
                     }
                 }
+
+                List<RainWorldMod> removedPush = workshop.Mods.Where(mod =>
+                    string.Equals(mod.Id, "pushtomeow", StringComparison.OrdinalIgnoreCase)).ToList();
+                foreach (RainWorldMod mod in removedPush) workshop.Mods.Remove(mod);
+                PushToMeowLibrary absentPush = new PushToMeowLibrary(workshop, log, 24680);
+                True(!absentPush.IsInstalled && !absentPush.IsAvailable,
+                    "missing Push To Meow must leave automatic meowing disabled");
+                foreach (RainWorldMod mod in removedPush) workshop.Mods.Add(mod);
+
+                List<RainWorldMod> removedDms = workshop.Mods.Where(mod =>
+                    string.Equals(mod.Id, "dressmyslugcat", StringComparison.OrdinalIgnoreCase)).ToList();
+                foreach (RainWorldMod mod in removedDms) workshop.Mods.Remove(mod);
+                using (DmsSkinCatalog absentDms = new DmsSkinCatalog(workshop, log))
+                {
+                    True(!absentDms.IsFrameworkInstalled && absentDms.Skins.Count == 0,
+                        "missing Dress My Slugcat must leave the base appearance available");
+                }
+                foreach (RainWorldMod mod in removedDms) workshop.Mods.Add(mod);
             }
         }
 
