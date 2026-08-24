@@ -15,7 +15,7 @@ if ($Version -ne 'continuous' -and -not $Version.StartsWith('v')) {
 
 $repoRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $packageRoot = Join-Path $repoRoot 'artifacts\package'
-$packageName = "Slugcat-In-My-Monitor-$Version-win-x64"
+$packageName = "SlugcatInMyMonitor-$Version-win-x64"
 $stagingRoot = Join-Path $packageRoot $packageName
 $archivePath = Join-Path $packageRoot ($packageName + '.zip')
 $checksumPath = $archivePath + '.sha256'
@@ -27,8 +27,8 @@ if (-not $SkipBuild) {
 
 $releaseRoot = Join-Path $repoRoot 'artifacts\Release'
 $requiredFiles = @(
-    (Join-Path $releaseRoot 'RainWorldDesktopPet.exe'),
-    (Join-Path $releaseRoot 'RainWorldDesktopPet.exe.config'),
+    (Join-Path $releaseRoot 'SlugcatInMyMonitor.exe'),
+    (Join-Path $releaseRoot 'SlugcatInMyMonitor.exe.config'),
     (Join-Path $repoRoot 'README.md'),
     (Join-Path $repoRoot 'LICENSE'),
     (Join-Path $repoRoot 'packaging\skins\README.txt')
@@ -43,8 +43,8 @@ if (Test-Path -LiteralPath $stagingRoot) {
 }
 New-Item -ItemType Directory -Force -Path (Join-Path $stagingRoot 'skins') | Out-Null
 
-Copy-Item -LiteralPath (Join-Path $releaseRoot 'RainWorldDesktopPet.exe') -Destination $stagingRoot
-Copy-Item -LiteralPath (Join-Path $releaseRoot 'RainWorldDesktopPet.exe.config') -Destination $stagingRoot
+Copy-Item -LiteralPath (Join-Path $releaseRoot 'SlugcatInMyMonitor.exe') -Destination $stagingRoot
+Copy-Item -LiteralPath (Join-Path $releaseRoot 'SlugcatInMyMonitor.exe.config') -Destination $stagingRoot
 Copy-Item -LiteralPath (Join-Path $repoRoot 'README.md') -Destination $stagingRoot
 Copy-Item -LiteralPath (Join-Path $repoRoot 'LICENSE') -Destination $stagingRoot
 Copy-Item -LiteralPath (Join-Path $repoRoot 'packaging\skins\README.txt') `

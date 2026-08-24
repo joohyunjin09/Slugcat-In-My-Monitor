@@ -64,7 +64,7 @@ namespace RainWorldDesktopPet.UI
             overlayBounds = MonitorManager.GetVirtualBounds();
             Bounds = overlayBounds;
             renderSpace = new RenderSpace(overlayBounds);
-            Text = "Slugcat in My Monitor";
+            Text = "SlugcatInMyMonitor";
 
             renderTimer = new Timer();
             // This timer is only an error-retry/fallback wakeup. Normal frames
@@ -129,7 +129,7 @@ namespace RainWorldDesktopPet.UI
 
             trayIcon = new NotifyIcon();
             trayIcon.Icon = SystemIcons.Application;
-            trayIcon.Text = "Slugcat in My Monitor";
+            trayIcon.Text = "SlugcatInMyMonitor";
             trayIcon.ContextMenuStrip = menu;
             trayIcon.Visible = true;
 
@@ -539,7 +539,7 @@ namespace RainWorldDesktopPet.UI
             slugcatsMenu.Text = "Slugcats (" + gameLoops.Count + ")";
             spawnItem.Enabled = gameLoops.Count < MaximumSlugcats;
             removeItem.Enabled = gameLoops.Count > 1;
-            trayIcon.Text = "Slugcat in My Monitor · " + gameLoops.Count + " active";
+            trayIcon.Text = "SlugcatInMyMonitor · " + gameLoops.Count + " active";
         }
 
         private void ToggleSkinEditor(object sender, EventArgs e)
