@@ -8,6 +8,7 @@ using RainWorldDesktopPet.Desktop;
 using RainWorldDesktopPet.Graphics;
 using RainWorldDesktopPet.Physics;
 using RainWorldDesktopPet.RainWorld;
+using RainWorldDesktopPet.Audio;
 
 namespace RainWorldDesktopPet.Core
 {
@@ -32,19 +33,14 @@ namespace RainWorldDesktopPet.Core
         private Vec2 lastVisibleCenter;
         private bool hasVisibleCenter;
 
-        public GameLoop(IntPtr overlayHandle, RainWorldInstallation installation, SlugcatVariant variant)
-            : this(overlayHandle, installation, variant, SlugcatSkin.Default)
+        public GameLoop(IntPtr overlayHandle, RainWorldInstallation installation,
+            SlugcatId selectedSlugcat)
+            : this(overlayHandle, installation, selectedSlugcat, 0)
         {
         }
 
         public GameLoop(IntPtr overlayHandle, RainWorldInstallation installation,
-            SlugcatVariant variant, SlugcatSkin skin)
-            : this(overlayHandle, installation, variant, skin, 0)
-        {
-        }
-
-        public GameLoop(IntPtr overlayHandle, RainWorldInstallation installation,
-            SlugcatVariant variant, SlugcatSkin skin, int spawnIndex)
+            SlugcatId selectedSlugcat, int spawnIndex)
         {
             Installation = installation;
             World = new DesktopCollisionWorld(new WindowEnumerator());
@@ -66,7 +62,7 @@ namespace RainWorldDesktopPet.Core
             Vec2 spawn = DesktopWorldTransform.ToSimulation(new Vec2(spawnX,
                 monitor.WorkArea.Bottom - DesktopWorldTransform.ToDesktopLength(
                     SimulationConstants.HipsChunkRadius + 2.0)));
-            Slugcat = new Slugcat(spawn, variant);
+            Slugcat = new Slugcat(spawn, selectedSlugcat);
             lastVisibleCenter = Slugcat.Center;
             hasVisibleCenter = true;
             AI = new DesktopPetAI(Environment.TickCount);
@@ -75,14 +71,15 @@ namespace RainWorldDesktopPet.Core
             RainWorldAssetLoader assetLoader = new RainWorldAssetLoader(installation);
             atlas = assetLoader.TryLoadPlayerAtlas();
             AssetStatus = assetLoader.Status;
-            SlugcatVisualProfile requested = SlugcatVisualProfiles.Get(skin);
+            SlugcatGraphicsProfile requested = Slugcat.SelectedSlugcat.Graphics;
             string missing;
             if (!requested.IsAvailable(atlas, out missing))
             {
-                requested = SlugcatVisualProfiles.Default;
-                AssetStatus += " Requested skin is unavailable (missing " + missing + "); Default is active.";
+                AssetStatus += " Selected Slugcat uses procedural fallback for missing " + missing + ".";
             }
             Graphics = new SlugcatGraphics(Slugcat, requested, atlas);
+            Audio = new RainWorldAudioEngine(installation);
+            AssetStatus += " Audio: " + Audio.Status + ".";
             mouse.Sample(SimulationConstants.LogicStepSeconds);
             Renderer = new SpriteRenderer(atlas);
         }
@@ -92,17 +89,19 @@ namespace RainWorldDesktopPet.Core
         public readonly DesktopPetAI AI;
         public readonly SlugcatGraphics Graphics;
         public readonly SpriteRenderer Renderer;
+        public readonly RainWorldAudioEngine Audio;
         public readonly RainWorldInstallation Installation;
         public string AssetStatus { get; private set; }
         public bool DebugEnabled { get; set; }
         public bool Paused { get; set; }
-        public SlugcatAppearance Appearance { get { return Slugcat.Appearance; } }
-        public SlugcatSkin Skin { get { return Graphics.VisualProfile.Skin; } }
+        public SlugcatProfile SelectedSlugcat { get { return Slugcat.SelectedSlugcat; } }
         public double Interpolation { get { return fixedTimeStep.Alpha; } }
         public long SimulationTick { get { return simulationTick; } }
         public double RenderFramesPerSecond { get { return renderFramesPerSecond; } }
         public double MonitorRefreshRate { get { return monitorRefreshRate; } }
         public MouseAttentionState MouseAttention { get { return mouseAttention; } }
+        public SlugcatAppearance Appearance { get { return Slugcat.Appearance; } }
+        public SlugcatSkin Skin { get { return Graphics.VisualProfile.Skin; } }
         public int OffscreenRecoveryCount { get; private set; }
 
         public bool TryGetAtlasSprite(string name, bool original, out AtlasSprite sprite)
@@ -146,6 +145,7 @@ namespace RainWorldDesktopPet.Core
         {
             if (disposed) return;
             disposed = true;
+            Audio.Dispose();
             Renderer.Dispose();
         }
 
@@ -201,6 +201,9 @@ namespace RainWorldDesktopPet.Core
                     : AI.Step(Slugcat, World, mouse, mouseAttention);
                 Slugcat.Step(input, World, mouse.Position, mouse.Velocity);
                 RecoverFromDesktopEscape();
+                SoundEvent[] sounds = Slugcat.DrainSoundEvents();
+                for (int soundIndex = 0; soundIndex < sounds.Length; soundIndex++)
+                    Audio.Play(sounds[soundIndex], Slugcat.Center, simulationTick, 500.0);
                 if (!Slugcat.State.Conscious || Slugcat.State.Dead ||
                     Slugcat.State.StunCounter > 0)
                     mouseAttention.Suppress(now, mouse.Position, Graphics.Head.Position);
@@ -221,6 +224,7 @@ namespace RainWorldDesktopPet.Core
         public SlugcatPose BuildPose()
         {
             SlugcatPose pose = Graphics.BuildPose(Interpolation, AI.Attention, simulationTick);
+            pose.AudioProfileDebug += " | " + Audio.Status + " | last=" + Audio.LastEvent;
             pose.LogicTicksPerSecond = SimulationConstants.LogicTicksPerSecond;
             pose.LogicStepSeconds = fixedTimeStep.StepSeconds;
             pose.AccumulatorSeconds = fixedTimeStep.AccumulatorSeconds;
@@ -320,12 +324,6 @@ namespace RainWorldDesktopPet.Core
                 offscreenTicks = 0;
                 return;
             }
-
-            // A throw through the top of a monitor is a temporary ceiling
-            // excursion, not a lost pet. Keep simulating the original upward
-            // momentum and gravity so the Slugcat naturally falls back into
-            // the same monitor. Horizontal and lower-screen escapes still use
-            // the normal timed/hard recovery below.
             if (DesktopRecovery.IsAboveMonitorCeiling(Slugcat.Center, monitors))
             {
                 offscreenTicks = 0;
@@ -351,9 +349,20 @@ namespace RainWorldDesktopPet.Core
             OffscreenRecoveryCount++;
         }
 
+        public void SetSelectedSlugcat(SlugcatId id)
+        {
+            SlugcatProfile next = SlugcatProfiles.Get(id);
+            // No frame can observe mixed physics/graphics: switch the model,
+            // clear incompatible ability state, then rebuild graphics before
+            // the next fixed update or render.
+            Slugcat.SetSelectedSlugcat(id);
+            Graphics.SetGraphicsProfile(next.Graphics, atlas);
+        }
+
         public void SetVariant(SlugcatVariant variant)
         {
             Slugcat.SetVariant(variant);
+            Graphics.SetVisualProfile(SlugcatVisualProfiles.Default, atlas);
         }
 
         public bool CanUseSkin(SlugcatSkin skin, out string reason)
@@ -368,7 +377,16 @@ namespace RainWorldDesktopPet.Core
         {
             string reason;
             if (!CanUseSkin(skin, out reason)) return false;
-            Graphics.SetVisualProfile(SlugcatVisualProfiles.Get(skin), atlas);
+            switch (skin)
+            {
+                case SlugcatSkin.Artificer: SetSelectedSlugcat(SlugcatId.Artificer); break;
+                case SlugcatSkin.Spearmaster: SetSelectedSlugcat(SlugcatId.Spearmaster); break;
+                case SlugcatSkin.Rivulet: SetSelectedSlugcat(SlugcatId.Rivulet); break;
+                case SlugcatSkin.Saint: SetSelectedSlugcat(SlugcatId.Saint); break;
+                default:
+                    Graphics.SetVisualProfile(SlugcatVisualProfiles.Default, atlas);
+                    break;
+            }
             return true;
         }
     }

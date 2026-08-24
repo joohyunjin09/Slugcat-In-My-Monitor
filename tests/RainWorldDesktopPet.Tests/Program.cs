@@ -120,6 +120,7 @@ namespace RainWorldDesktopPet.Tests
             Run("Spearmaster uses its original tail profile and speckle mapping", SpearmasterTailProfileAndSpeckles);
             Run("Skin face and head families follow PlayerGraphics branches", SkinFaceFamiliesMatchPlayerGraphics);
             Run("Every visual profile remains valid through movement and stun states", AllVisualProfilesRemainStableAcrossStates);
+            AbilityParityReplayTests.Register(Run);
 
             RainWorldInstallation localInstallation = new RainWorldLocator().Locate(null);
             if (localInstallation == null)
@@ -2368,9 +2369,9 @@ namespace RainWorldDesktopPet.Tests
             Slugcat hunter = CreateAirSlugcat(SlugcatVariant.Hunter, out world);
             for (int tick = 0; tick < 12; tick++)
                 hunter.Step(new VirtualInput(1, 0, false, false), world, Vec2.Zero, Vec2.Zero);
-            Near(3.6, hunter.BodyChunks[0].Velocity.X, 0.000001,
-                "Player dynamicRunSpeed is 3.6 in ordinary air for Hunter too");
-            True(hunter.BodyChunks[0].Velocity.X < 3.6 * hunter.Appearance.RunSpeedFactor,
+            Near(4.0, hunter.BodyChunks[0].Velocity.X, 0.000001,
+                "Player UpdateBodyMode dynamicRunSpeed is 4 in ordinary air for Hunter too");
+            True(hunter.BodyChunks[0].Velocity.X < 4.0 * hunter.Appearance.RunSpeedFactor,
                 "ground runspeedFac must not leak into air control");
         }
 
@@ -2656,7 +2657,7 @@ namespace RainWorldDesktopPet.Tests
 
         private static double ExpectedOriginalAirInput(double velocity, int direction)
         {
-            const double speed = 3.6;
+            const double speed = 4.0;
             double amount = 2.4 * SimulationConstants.SurfaceFriction;
             if (direction < 0)
             {

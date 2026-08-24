@@ -33,36 +33,30 @@ namespace RainWorldDesktopPet.Graphics
         public readonly double RootRadius;
     }
 
-    public sealed class SlugcatVisualProfile
+    public enum SlugcatGraphicsExtensionKind
     {
-        internal SlugcatVisualProfile(
-            SlugcatSkin skin,
-            string displayName,
-            string originalSlugcatId,
-            Color bodyColor,
-            Color eyeColor,
-            bool usesVariantBodyColor,
-            bool usesVariantBodyProportions,
-            string bodyElement,
-            string hipsElement,
-            string headFamily,
-            double bodyScale,
-            double hipsScale,
-            double headScale,
-            double armShoulderScale,
-            SlugcatTailProfile tail,
-            int baseSpriteCount,
-            int extraSpriteCount,
-            string[] extensionNames,
+        None,
+        ArtificerScar,
+        SpearmasterSpeckles,
+        RivuletGills
+    }
+
+    public class SlugcatGraphicsProfile
+    {
+        internal SlugcatGraphicsProfile(SlugcatId id, string displayName,
+            string originalSlugcatId, Color bodyColor, Color eyeColor,
+            string bodyElement, string hipsElement, string headFamily,
+            double bodyScale, double hipsScale, double headScale,
+            double armShoulderScale, SlugcatTailProfile tail,
+            int baseSpriteCount, int extraSpriteCount,
+            SlugcatGraphicsExtensionKind extensionKind, string[] extensionNames,
             string[] requiredElements)
         {
-            Skin = skin;
+            Id = id;
             DisplayName = displayName;
             OriginalSlugcatId = originalSlugcatId;
             BodyColor = bodyColor;
             EyeColor = eyeColor;
-            UsesVariantBodyColor = usesVariantBodyColor;
-            UsesVariantBodyProportions = usesVariantBodyProportions;
             BodyElement = bodyElement;
             HipsElement = hipsElement;
             HeadFamily = headFamily;
@@ -73,17 +67,16 @@ namespace RainWorldDesktopPet.Graphics
             Tail = tail;
             BaseSpriteCount = baseSpriteCount;
             ExtraSpriteCount = extraSpriteCount;
+            ExtensionKind = extensionKind;
             ExtensionNames = extensionNames ?? new string[0];
             RequiredElements = requiredElements ?? new string[0];
         }
 
-        public readonly SlugcatSkin Skin;
+        public readonly SlugcatId Id;
         public readonly string DisplayName;
         public readonly string OriginalSlugcatId;
         public readonly Color BodyColor;
         public readonly Color EyeColor;
-        public readonly bool UsesVariantBodyColor;
-        public readonly bool UsesVariantBodyProportions;
         public readonly string BodyElement;
         public readonly string HipsElement;
         public readonly string HeadFamily;
@@ -94,47 +87,21 @@ namespace RainWorldDesktopPet.Graphics
         public readonly SlugcatTailProfile Tail;
         public readonly int BaseSpriteCount;
         public readonly int ExtraSpriteCount;
+        public readonly SlugcatGraphicsExtensionKind ExtensionKind;
         public readonly string[] ExtensionNames;
         public readonly string[] RequiredElements;
 
-        public Color ResolveBodyColor(SlugcatAppearance appearance)
-        {
-            return UsesVariantBodyColor && appearance != null ? appearance.BodyColor : BodyColor;
-        }
-
-        public string ResolveOriginalSlugcatId(SlugcatAppearance appearance)
-        {
-            if (Skin != SlugcatSkin.Default || appearance == null) return OriginalSlugcatId;
-            switch (appearance.Variant)
-            {
-                case SlugcatVariant.Monk: return "Yellow";
-                case SlugcatVariant.Hunter: return "Red";
-                case SlugcatVariant.Gourmand: return "Gourmand";
-                default: return "White";
-            }
-        }
-
-        public double ResolveBodyScale(SlugcatAppearance appearance)
-        {
-            return UsesVariantBodyProportions && appearance != null ? appearance.BodyWidthScale : BodyScale;
-        }
-
-        public double ResolveHipsScale(SlugcatAppearance appearance)
-        {
-            return UsesVariantBodyProportions && appearance != null ? appearance.HipsWidthScale : HipsScale;
-        }
-
         public string ResolveFaceFamily(bool blink, double faceScaleX)
         {
-            if (Skin == SlugcatSkin.Saint || blink) return "FaceB";
-            if (Skin == SlugcatSkin.Artificer) return faceScaleX < 0.0 ? "FaceD" : "FaceC";
+            if (Id == SlugcatId.Saint || blink) return "FaceB";
+            if (Id == SlugcatId.Artificer) return faceScaleX < 0.0 ? "FaceD" : "FaceC";
             return "FaceA";
         }
 
         public bool IsAvailable(RainWorldAtlasSet atlas, out string missingElement)
         {
             missingElement = null;
-            if (Skin == SlugcatSkin.Default) return true;
+            if (Id == SlugcatId.Default || Id == SlugcatId.Gourmand) return true;
             if (atlas == null)
             {
                 missingElement = "local Downpour atlas";
@@ -154,41 +121,37 @@ namespace RainWorldDesktopPet.Graphics
             }
             for (int i = 0; i < 18; i++)
             {
-                string name = HeadFamily + i;
-                if (!atlas.TryGet(name, out ignored))
+                if (!atlas.TryGet(HeadFamily + i, out ignored))
                 {
-                    missingElement = name;
+                    missingElement = HeadFamily + i;
                     return false;
                 }
             }
             for (int i = 0; i < 13; i++)
             {
-                string name = "PlayerArm" + i;
-                if (!atlas.TryGet(name, out ignored))
+                if (!atlas.TryGet("PlayerArm" + i, out ignored))
                 {
-                    missingElement = name;
+                    missingElement = "PlayerArm" + i;
                     return false;
                 }
             }
             for (int i = 0; i < 7; i++)
             {
-                string name = "LegsA" + i;
-                if (!atlas.TryGet(name, out ignored))
+                if (!atlas.TryGet("LegsA" + i, out ignored))
                 {
-                    missingElement = name;
+                    missingElement = "LegsA" + i;
                     return false;
                 }
             }
             for (int i = 0; i < 6; i++)
             {
-                string name = "LegsACrawling" + i;
-                if (!atlas.TryGet(name, out ignored))
+                if (!atlas.TryGet("LegsACrawling" + i, out ignored))
                 {
-                    missingElement = name;
+                    missingElement = "LegsACrawling" + i;
                     return false;
                 }
             }
-            string[] faceFamilies = Skin == SlugcatSkin.Artificer
+            string[] faceFamilies = Id == SlugcatId.Artificer
                 ? new string[] { "FaceB", "FaceC", "FaceD" }
                 : new string[] { "FaceA", "FaceB" };
             for (int family = 0; family < faceFamilies.Length; family++)
@@ -215,7 +178,7 @@ namespace RainWorldDesktopPet.Graphics
         }
     }
 
-    public static class SlugcatVisualProfiles
+    public static class SlugcatGraphicsProfiles
     {
         private static readonly SlugcatTailProfile DefaultTail = new SlugcatTailProfile(
             "DefaultTail", new double[] { 6.0, 4.0, 2.5, 1.0 },
@@ -224,34 +187,134 @@ namespace RainWorldDesktopPet.Graphics
             "SpearmasterTail", new double[] { 8.0, 6.0, 4.0, 2.0 },
             new double[] { 4.0, 7.0, 7.0, 7.0 }, 8.0);
 
-        public static readonly SlugcatVisualProfile Default = new SlugcatVisualProfile(
-            SlugcatSkin.Default, "Default", "White", Color.White, Color.FromArgb(16, 16, 16),
-            true, true, "BodyA", "HipsA", "HeadA", 1.0, 1.0, 1.0, 1.0,
-            DefaultTail, 12, 0, new string[0], new string[0]);
+        public static readonly SlugcatGraphicsProfile Default = new SlugcatGraphicsProfile(
+            SlugcatId.Default, "Default", "White", Color.White, Color.FromArgb(16, 16, 16),
+            "BodyA", "HipsA", "HeadA", 1.0, 1.0, 1.0, 1.0, DefaultTail, 12, 0,
+            SlugcatGraphicsExtensionKind.None, new string[0], new string[0]);
 
-        public static readonly SlugcatVisualProfile Artificer = new SlugcatVisualProfile(
-            SlugcatSkin.Artificer, "Artificer", "Artificer", Color.FromArgb(112, 35, 60), Color.White,
-            false, false, "BodyA", "HipsA", "HeadA", 1.0, 1.0, 1.0, 1.0,
-            DefaultTail, 12, 1, new string[] { "ArtificerScar" },
+        internal static readonly SlugcatGraphicsProfile LegacyMonk = new SlugcatGraphicsProfile(
+            SlugcatId.Default, "Monk", "Yellow", Color.FromArgb(255, 255, 115),
+            Color.FromArgb(16, 16, 16), "BodyA", "HipsA", "HeadA", 1.0, 1.0,
+            1.0, 1.0, DefaultTail, 12, 0, SlugcatGraphicsExtensionKind.None,
+            new string[0], new string[0]);
+
+        internal static readonly SlugcatGraphicsProfile LegacyHunter = new SlugcatGraphicsProfile(
+            SlugcatId.Default, "Hunter", "Red", Color.FromArgb(255, 115, 115),
+            Color.FromArgb(16, 16, 16), "BodyA", "HipsA", "HeadA", 1.0, 1.0,
+            1.0, 1.0, DefaultTail, 12, 0, SlugcatGraphicsExtensionKind.None,
+            new string[0], new string[0]);
+
+        // Gourmand uses the same atlas family as White, but PlayerGraphics
+        // applies the original 1.4/1.6 torso/hips silhouette.
+        public static readonly SlugcatGraphicsProfile Gourmand = new SlugcatGraphicsProfile(
+            SlugcatId.Gourmand, "Gourmand", "Gourmand", Color.FromArgb(240, 193, 151),
+            Color.FromArgb(16, 16, 16), "BodyA", "HipsA", "HeadA", 1.4, 1.6, 1.0, 1.0,
+            DefaultTail, 12, 0, SlugcatGraphicsExtensionKind.None, new string[0], new string[0]);
+
+        public static readonly SlugcatGraphicsProfile Artificer = new SlugcatGraphicsProfile(
+            SlugcatId.Artificer, "Artificer", "Artificer", Color.FromArgb(112, 35, 60), Color.White,
+            "BodyA", "HipsA", "HeadA", 1.0, 1.0, 1.0, 1.0, DefaultTail, 12, 1,
+            SlugcatGraphicsExtensionKind.ArtificerScar, new string[] { "ArtificerScar" },
             new string[] { "BodyA", "HipsA", "HeadA0", "FaceB0", "FaceC0", "FaceD0", "FaceStunned", "FaceDead", "MushroomA" });
 
-        public static readonly SlugcatVisualProfile Spearmaster = new SlugcatVisualProfile(
-            SlugcatSkin.Spearmaster, "Spearmaster", "Spear", Color.FromArgb(79, 46, 105), Color.White,
-            false, false, "BodyA", "HipsA", "HeadA", 0.76, 0.76, 0.85, 0.6,
-            SpearmasterTail, 12, 19, new string[] { "TailSpeckles", "CosmeticPearl(inactive)" },
+        public static readonly SlugcatGraphicsProfile Spearmaster = new SlugcatGraphicsProfile(
+            SlugcatId.Spearmaster, "Spearmaster", "Spear", Color.FromArgb(79, 46, 105), Color.White,
+            "BodyA", "HipsA", "HeadA", 0.76, 0.76, 0.85, 0.6, SpearmasterTail, 12, 19,
+            SlugcatGraphicsExtensionKind.SpearmasterSpeckles,
+            new string[] { "TailSpeckles", "CosmeticPearl(inactive)" },
             new string[] { "BodyA", "HipsA", "HeadA0", "FaceA0", "FaceB0", "FaceStunned", "FaceDead", "tinyStar", "BioSpear1", "JetFishEyeA", "BodyPearl" });
 
-        public static readonly SlugcatVisualProfile Rivulet = new SlugcatVisualProfile(
-            SlugcatSkin.Rivulet, "Rivulet", "Rivulet", Color.FromArgb(145, 204, 240), Color.FromArgb(16, 16, 16),
-            false, false, "BodyA", "HipsA", "HeadA", 1.0, 1.0, 1.0, 1.0,
-            DefaultTail, 12, 12, new string[] { "AxolotlGills" },
+        public static readonly SlugcatGraphicsProfile Rivulet = new SlugcatGraphicsProfile(
+            SlugcatId.Rivulet, "Rivulet", "Rivulet", Color.FromArgb(145, 204, 240), Color.FromArgb(16, 16, 16),
+            "BodyA", "HipsA", "HeadA", 1.0, 1.0, 1.0, 1.0, DefaultTail, 12, 12,
+            SlugcatGraphicsExtensionKind.RivuletGills, new string[] { "AxolotlGills" },
             new string[] { "BodyA", "HipsA", "HeadA0", "FaceA0", "FaceB0", "FaceStunned", "FaceDead", "LizardScaleA3", "LizardScaleB3" });
 
-        public static readonly SlugcatVisualProfile Saint = new SlugcatVisualProfile(
-            SlugcatSkin.Saint, "Saint", "Saint", Color.FromArgb(170, 241, 86), Color.FromArgb(16, 16, 16),
-            false, false, "BodyA", "HipsA", "HeadB", 1.0, 1.0, 1.0, 1.0,
-            DefaultTail, 12, 0, new string[] { "Tongue(inactive: gameplay state absent)", "Ascension(inactive)" },
+        public static readonly SlugcatGraphicsProfile Saint = new SlugcatGraphicsProfile(
+            SlugcatId.Saint, "Saint", "Saint", Color.FromArgb(170, 241, 86), Color.FromArgb(16, 16, 16),
+            "BodyA", "HipsA", "HeadB", 1.0, 1.0, 1.0, 1.0, DefaultTail, 12, 0,
+            SlugcatGraphicsExtensionKind.None, new string[] { "Tongue", "Ascension(inactive)" },
             new string[] { "BodyA", "HipsA", "HeadB0", "FaceB0", "FaceStunned", "FaceDead" });
+
+        private static readonly SlugcatGraphicsProfile[] all =
+        {
+            Default, Gourmand, Artificer, Spearmaster, Rivulet, Saint
+        };
+
+        public static IList<SlugcatGraphicsProfile> All { get { return all; } }
+
+        public static SlugcatGraphicsProfile Get(SlugcatId id)
+        {
+            for (int i = 0; i < all.Length; i++) if (all[i].Id == id) return all[i];
+            return Default;
+        }
+    }
+
+    // Compatibility facade for callers that used the earlier graphics-only
+    // selector. Runtime selection itself is now SlugcatId.
+    public sealed class SlugcatVisualProfile : SlugcatGraphicsProfile
+    {
+        internal SlugcatVisualProfile(SlugcatSkin skin, SlugcatGraphicsProfile source,
+            bool usesVariantBodyColor, bool usesVariantBodyProportions)
+            : base(source.Id, source.DisplayName, source.OriginalSlugcatId,
+                source.BodyColor, source.EyeColor, source.BodyElement,
+                source.HipsElement, source.HeadFamily, source.BodyScale,
+                source.HipsScale, source.HeadScale, source.ArmShoulderScale,
+                source.Tail, source.BaseSpriteCount, source.ExtraSpriteCount,
+                source.ExtensionKind, source.ExtensionNames, source.RequiredElements)
+        {
+            Skin = skin;
+            UsesVariantBodyColor = usesVariantBodyColor;
+            UsesVariantBodyProportions = usesVariantBodyProportions;
+        }
+
+        public readonly SlugcatSkin Skin;
+        public readonly bool UsesVariantBodyColor;
+        public readonly bool UsesVariantBodyProportions;
+
+        public Color ResolveBodyColor(SlugcatAppearance appearance)
+        {
+            return UsesVariantBodyColor && appearance != null
+                ? appearance.BodyColor : BodyColor;
+        }
+
+        public string ResolveOriginalSlugcatId(SlugcatAppearance appearance)
+        {
+            if (Skin != SlugcatSkin.Default || appearance == null) return OriginalSlugcatId;
+            switch (appearance.Variant)
+            {
+                case SlugcatVariant.Monk: return "Yellow";
+                case SlugcatVariant.Hunter: return "Red";
+                case SlugcatVariant.Gourmand: return "Gourmand";
+                default: return "White";
+            }
+        }
+
+        public double ResolveBodyScale(SlugcatAppearance appearance)
+        {
+            return UsesVariantBodyProportions && appearance != null
+                ? appearance.BodyWidthScale : BodyScale;
+        }
+
+        public double ResolveHipsScale(SlugcatAppearance appearance)
+        {
+            return UsesVariantBodyProportions && appearance != null
+                ? appearance.HipsWidthScale : HipsScale;
+        }
+    }
+
+    public static class SlugcatVisualProfiles
+    {
+        public static readonly SlugcatVisualProfile Default = new SlugcatVisualProfile(
+            SlugcatSkin.Default, SlugcatGraphicsProfiles.Default, true, true);
+        public static readonly SlugcatVisualProfile Artificer = new SlugcatVisualProfile(
+            SlugcatSkin.Artificer, SlugcatGraphicsProfiles.Artificer, false, false);
+        public static readonly SlugcatVisualProfile Spearmaster = new SlugcatVisualProfile(
+            SlugcatSkin.Spearmaster, SlugcatGraphicsProfiles.Spearmaster, false, false);
+        public static readonly SlugcatVisualProfile Rivulet = new SlugcatVisualProfile(
+            SlugcatSkin.Rivulet, SlugcatGraphicsProfiles.Rivulet, false, false);
+        public static readonly SlugcatVisualProfile Saint = new SlugcatVisualProfile(
+            SlugcatSkin.Saint, SlugcatGraphicsProfiles.Saint, false, false);
 
         private static readonly SlugcatVisualProfile[] all =
         {
@@ -262,8 +325,16 @@ namespace RainWorldDesktopPet.Graphics
 
         public static SlugcatVisualProfile Get(SlugcatSkin skin)
         {
+            for (int i = 0; i < all.Length; i++) if (all[i].Skin == skin) return all[i];
+            return Default;
+        }
+
+        internal static SlugcatVisualProfile FromGraphics(SlugcatGraphicsProfile profile)
+        {
+            if (profile == null) return Default;
             for (int i = 0; i < all.Length; i++)
-                if (all[i].Skin == skin) return all[i];
+                if (all[i].Id == profile.Id && all[i].OriginalSlugcatId == profile.OriginalSlugcatId)
+                    return all[i];
             return Default;
         }
     }

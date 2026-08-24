@@ -20,19 +20,17 @@ namespace RainWorldDesktopPet.UI
         private const int SelectNextHotKeyId = 0x5346;
         private const int MaximumSlugcats = 8;
         private readonly RainWorldInstallation installation;
-        private readonly SlugcatVariant startVariant;
-        private readonly SlugcatSkin startSkin;
+        private readonly SlugcatId startSlugcat;
         private readonly Timer renderTimer;
         private readonly NotifyIcon trayIcon;
-        private readonly ToolStripMenuItem variantMenu;
-        private readonly ToolStripMenuItem visualSkinMenu;
+        private readonly ToolStripMenuItem slugcatMenu;
         private readonly ToolStripMenuItem debugItem;
         private readonly ToolStripMenuItem retryRenderItem;
-        private readonly ToolStripMenuItem skinEditorItem;
         private readonly ToolStripMenuItem pauseItem;
-        private readonly ToolStripMenuItem slugcatsMenu;
+        private readonly ToolStripMenuItem activeSlugcatsMenu;
         private readonly ToolStripMenuItem spawnItem;
         private readonly ToolStripMenuItem removeItem;
+        private readonly ToolStripMenuItem skinEditorItem;
         private readonly List<GameLoop> gameLoops = new List<GameLoop>();
         private LayeredBackBuffer backBuffer;
         private GameLoop gameLoop;
@@ -46,17 +44,11 @@ namespace RainWorldDesktopPet.UI
         private bool renderingFrame;
         private double displayRefreshRate;
 
-        public LayeredOverlayWindow(RainWorldInstallation installation, bool startDebug, SlugcatVariant startVariant)
-            : this(installation, startDebug, startVariant, SlugcatSkin.Default)
-        {
-        }
-
         public LayeredOverlayWindow(RainWorldInstallation installation, bool startDebug,
-            SlugcatVariant startVariant, SlugcatSkin startSkin)
+            SlugcatId startSlugcat)
         {
             this.installation = installation;
-            this.startVariant = startVariant;
-            this.startSkin = startSkin;
+            this.startSlugcat = startSlugcat;
             FormBorderStyle = FormBorderStyle.None;
             ShowInTaskbar = false;
             TopMost = true;
@@ -64,7 +56,7 @@ namespace RainWorldDesktopPet.UI
             overlayBounds = MonitorManager.GetVirtualBounds();
             Bounds = overlayBounds;
             renderSpace = new RenderSpace(overlayBounds);
-            Text = "SlugcatInMyMonitor";
+            Text = "Slugcat in My Monitor";
 
             renderTimer = new Timer();
             // This timer is only an error-retry/fallback wakeup. Normal frames
@@ -91,35 +83,30 @@ namespace RainWorldDesktopPet.UI
             retryRenderItem = new ToolStripMenuItem("Retry rendering");
             retryRenderItem.Enabled = false;
             retryRenderItem.Click += RetryRendering;
-            skinEditorItem = new ToolStripMenuItem("Skin editor (F2)");
-            skinEditorItem.Click += ToggleSkinEditor;
             ToolStripMenuItem exitItem = new ToolStripMenuItem("Exit");
             exitItem.Click += delegate { Close(); };
-            variantMenu = new ToolStripMenuItem("Player physics / base colour");
-            variantMenu.DropDownItems.Add(CreateVariantItem("Survivor (white)", SlugcatVariant.Survivor, startVariant));
-            variantMenu.DropDownItems.Add(CreateVariantItem("Monk (yellow)", SlugcatVariant.Monk, startVariant));
-            variantMenu.DropDownItems.Add(CreateVariantItem("Hunter (red)", SlugcatVariant.Hunter, startVariant));
-            variantMenu.DropDownItems.Add(CreateVariantItem("Gourmand", SlugcatVariant.Gourmand, startVariant));
-            visualSkinMenu = new ToolStripMenuItem("Slugcat skin");
-            visualSkinMenu.DropDownItems.Add(CreateSkinItem("Default", SlugcatSkin.Default, startSkin));
-            visualSkinMenu.DropDownItems.Add(CreateSkinItem("Artificer / 기술병", SlugcatSkin.Artificer, startSkin));
-            visualSkinMenu.DropDownItems.Add(CreateSkinItem("Spearmaster / 창술가", SlugcatSkin.Spearmaster, startSkin));
-            visualSkinMenu.DropDownItems.Add(CreateSkinItem("Rivulet / 물살이", SlugcatSkin.Rivulet, startSkin));
-            visualSkinMenu.DropDownItems.Add(CreateSkinItem("Saint / 성자", SlugcatSkin.Saint, startSkin));
-            slugcatsMenu = new ToolStripMenuItem("Slugcats");
+            slugcatMenu = new ToolStripMenuItem("Slugcat");
+            slugcatMenu.DropDownItems.Add(CreateSlugcatItem("Default", SlugcatId.Default, startSlugcat));
+            slugcatMenu.DropDownItems.Add(CreateSlugcatItem("Gourmand / 먹보", SlugcatId.Gourmand, startSlugcat));
+            slugcatMenu.DropDownItems.Add(CreateSlugcatItem("Artificer / 기술병", SlugcatId.Artificer, startSlugcat));
+            slugcatMenu.DropDownItems.Add(CreateSlugcatItem("Spearmaster / 창술가", SlugcatId.Spearmaster, startSlugcat));
+            slugcatMenu.DropDownItems.Add(CreateSlugcatItem("Rivulet / 물살이", SlugcatId.Rivulet, startSlugcat));
+            slugcatMenu.DropDownItems.Add(CreateSlugcatItem("Saint / 성자", SlugcatId.Saint, startSlugcat));
+            activeSlugcatsMenu = new ToolStripMenuItem("Slugcats");
             spawnItem = new ToolStripMenuItem("Spawn slugcat (F3)");
             spawnItem.Click += SpawnSlugcat;
             ToolStripMenuItem nextItem = new ToolStripMenuItem("Select next slugcat (F4)");
             nextItem.Click += SelectNextSlugcat;
             removeItem = new ToolStripMenuItem("Remove selected slugcat");
             removeItem.Click += RemoveSelectedSlugcat;
-            slugcatsMenu.DropDownItems.Add(spawnItem);
-            slugcatsMenu.DropDownItems.Add(nextItem);
-            slugcatsMenu.DropDownItems.Add(removeItem);
-            slugcatsMenu.DropDownItems.Add(new ToolStripSeparator());
-            menu.Items.Add(slugcatsMenu);
-            menu.Items.Add(variantMenu);
-            menu.Items.Add(visualSkinMenu);
+            activeSlugcatsMenu.DropDownItems.Add(spawnItem);
+            activeSlugcatsMenu.DropDownItems.Add(nextItem);
+            activeSlugcatsMenu.DropDownItems.Add(removeItem);
+            activeSlugcatsMenu.DropDownItems.Add(new ToolStripSeparator());
+            skinEditorItem = new ToolStripMenuItem("Skin editor (F2)");
+            skinEditorItem.Click += ToggleSkinEditor;
+            menu.Items.Add(activeSlugcatsMenu);
+            menu.Items.Add(slugcatMenu);
             menu.Items.Add(skinEditorItem);
             menu.Items.Add(debugItem);
             menu.Items.Add(pauseItem);
@@ -129,7 +116,7 @@ namespace RainWorldDesktopPet.UI
 
             trayIcon = new NotifyIcon();
             trayIcon.Icon = SystemIcons.Application;
-            trayIcon.Text = "SlugcatInMyMonitor";
+            trayIcon.Text = "Slugcat in My Monitor";
             trayIcon.ContextMenuStrip = menu;
             trayIcon.Visible = true;
 
@@ -159,8 +146,7 @@ namespace RainWorldDesktopPet.UI
         {
             base.OnHandleCreated(e);
             ConfigureVirtualDesktopOverlay(false);
-            AddSlugcat(startVariant, startSkin);
-            RefreshSkinAvailability();
+            AddSlugcat(startSlugcat);
             NativeMethods.RegisterHotKey(Handle, HotKeyId, NativeMethods.MOD_NOREPEAT, NativeMethods.VK_F1);
             NativeMethods.RegisterHotKey(Handle, SkinEditorHotKeyId,
                 NativeMethods.MOD_NOREPEAT, NativeMethods.VK_F2);
@@ -231,7 +217,7 @@ namespace RainWorldDesktopPet.UI
                     SlugcatPose pose = loop.BuildPose();
                     loop.Renderer.Render(graphics, pose, renderSpace,
                         loop.DebugEnabled && ReferenceEquals(loop, gameLoop),
-                        loop.World, loop.Slugcat, loop.AI, loop.AssetStatus, loop.Appearance);
+                        loop.World, loop.Slugcat, loop.AI, loop.AssetStatus, loop.SelectedSlugcat);
                 }
                 backBuffer.Present(Handle, renderSpace.WorldOrigin);
                 for (int i = 0; i < gameLoops.Count; i++)
@@ -420,7 +406,8 @@ namespace RainWorldDesktopPet.UI
             }
             if (message.Msg == NativeMethods.WM_HOTKEY && message.WParam.ToInt32() == HotKeyId && gameLoop != null)
             {
-                debugItem.Checked = !debugItem.Checked;
+                gameLoop.DebugEnabled = !gameLoop.DebugEnabled;
+                debugItem.Checked = gameLoop.DebugEnabled;
                 return;
             }
             if (message.Msg == NativeMethods.WM_HOTKEY &&
@@ -451,10 +438,10 @@ namespace RainWorldDesktopPet.UI
             return null;
         }
 
-        private void AddSlugcat(SlugcatVariant variant, SlugcatSkin skin)
+        private void AddSlugcat(SlugcatId id)
         {
             if (gameLoops.Count >= MaximumSlugcats) return;
-            GameLoop added = new GameLoop(Handle, installation, variant, skin, gameLoops.Count);
+            GameLoop added = new GameLoop(Handle, installation, id, gameLoops.Count);
             added.DebugEnabled = debugItem.Checked;
             added.Paused = pauseItem.Checked;
             gameLoops.Add(added);
@@ -469,9 +456,10 @@ namespace RainWorldDesktopPet.UI
                     "Up to " + MaximumSlugcats + " slugcats can be active.", ToolTipIcon.Info);
                 return;
             }
-            SlugcatVariant variant = gameLoop == null ? startVariant : gameLoop.Appearance.Variant;
-            SlugcatSkin skin = gameLoop == null ? startSkin : gameLoop.Skin;
-            try { AddSlugcat(variant, skin); }
+            try
+            {
+                AddSlugcat(gameLoop == null ? startSlugcat : gameLoop.SelectedSlugcat.Id);
+            }
             catch (Exception exception)
             {
                 Program.LogException(exception);
@@ -505,38 +493,43 @@ namespace RainWorldDesktopPet.UI
 
         private void SelectSlugcat(GameLoop selected)
         {
-            if (selected == null || ReferenceEquals(gameLoop, selected))
-            {
-                RefreshSlugcatMenu();
-                return;
-            }
-            if (skinEditor != null && !skinEditor.IsDisposed) skinEditor.Close();
+            if (selected == null) return;
+            if (!ReferenceEquals(gameLoop, selected) && skinEditor != null && !skinEditor.IsDisposed)
+                skinEditor.Close();
             gameLoop = selected;
-            RefreshAppearanceMenus();
-            RefreshSlugcatMenu();
+            RefreshSlugcatSelectionMenu();
+            RefreshActiveSlugcatsMenu();
         }
 
-        private void RefreshSlugcatMenu()
+        private void RefreshSlugcatSelectionMenu()
         {
-            while (slugcatsMenu.DropDownItems.Count > 4)
-                slugcatsMenu.DropDownItems.RemoveAt(4);
+            if (gameLoop == null) return;
+            for (int i = 0; i < slugcatMenu.DropDownItems.Count; i++)
+            {
+                ToolStripMenuItem item = slugcatMenu.DropDownItems[i] as ToolStripMenuItem;
+                if (item != null) item.Checked = (SlugcatId)item.Tag == gameLoop.SelectedSlugcat.Id;
+            }
+        }
+
+        private void RefreshActiveSlugcatsMenu()
+        {
+            while (activeSlugcatsMenu.DropDownItems.Count > 4)
+                activeSlugcatsMenu.DropDownItems.RemoveAt(4);
             for (int i = 0; i < gameLoops.Count; i++)
             {
                 GameLoop loop = gameLoops[i];
-                ToolStripMenuItem item = new ToolStripMenuItem("Slugcat " + (i + 1) + " · " +
-                    (loop.Skin == SlugcatSkin.Default
-                        ? loop.Appearance.Variant.ToString()
-                        : loop.Skin.ToString()));
+                ToolStripMenuItem item = new ToolStripMenuItem(
+                    "Slugcat " + (i + 1) + " · " + loop.SelectedSlugcat.DisplayName);
                 item.Tag = loop;
                 item.Checked = ReferenceEquals(loop, gameLoop);
-                item.Click += delegate(object sender, EventArgs args)
+                item.Click += delegate(object itemSender, EventArgs args)
                 {
-                    ToolStripMenuItem clicked = sender as ToolStripMenuItem;
+                    ToolStripMenuItem clicked = itemSender as ToolStripMenuItem;
                     if (clicked != null) SelectSlugcat(clicked.Tag as GameLoop);
                 };
-                slugcatsMenu.DropDownItems.Add(item);
+                activeSlugcatsMenu.DropDownItems.Add(item);
             }
-            slugcatsMenu.Text = "Slugcats (" + gameLoops.Count + ")";
+            activeSlugcatsMenu.Text = "Slugcats (" + gameLoops.Count + ")";
             spawnItem.Enabled = gameLoops.Count < MaximumSlugcats;
             removeItem.Enabled = gameLoops.Count > 1;
             trayIcon.Text = "SlugcatInMyMonitor · " + gameLoops.Count + " active";
@@ -549,14 +542,14 @@ namespace RainWorldDesktopPet.UI
                 skinEditor.Close();
                 return;
             }
-
             try
             {
-                skinEditor = new SkinEditorWindow(gameLoop, RefreshAppearanceMenus);
-                skinEditor.FormClosed += delegate
+                skinEditor = new SkinEditorWindow(gameLoop, delegate
                 {
-                    skinEditor = null;
-                };
+                    RefreshSlugcatSelectionMenu();
+                    RefreshActiveSlugcatsMenu();
+                });
+                skinEditor.FormClosed += delegate { skinEditor = null; };
                 skinEditor.Show();
                 skinEditor.Activate();
             }
@@ -575,87 +568,27 @@ namespace RainWorldDesktopPet.UI
             return NativeMethods.GetCursorPos(out point) ? new Vec2(point.X, point.Y) : Vec2.Zero;
         }
 
-        private ToolStripMenuItem CreateVariantItem(string label, SlugcatVariant variant, SlugcatVariant selected)
+        private ToolStripMenuItem CreateSlugcatItem(string label, SlugcatId id, SlugcatId selected)
         {
             ToolStripMenuItem item = new ToolStripMenuItem(label);
-            item.Tag = variant;
-            item.Checked = variant == selected;
-            item.Click += VariantItemClick;
+            item.Tag = id;
+            item.Checked = id == selected;
+            item.Click += SlugcatItemClick;
             return item;
         }
 
-        private void VariantItemClick(object sender, EventArgs e)
+        private void SlugcatItemClick(object sender, EventArgs e)
         {
             ToolStripMenuItem selected = sender as ToolStripMenuItem;
             if (selected == null) return;
-            for (int i = 0; i < variantMenu.DropDownItems.Count; i++)
+            for (int i = 0; i < slugcatMenu.DropDownItems.Count; i++)
             {
-                ToolStripMenuItem item = variantMenu.DropDownItems[i] as ToolStripMenuItem;
+                ToolStripMenuItem item = slugcatMenu.DropDownItems[i] as ToolStripMenuItem;
                 if (item != null) item.Checked = ReferenceEquals(item, selected);
             }
-            if (gameLoop != null) gameLoop.SetVariant((SlugcatVariant)selected.Tag);
-            RefreshSlugcatMenu();
+            if (gameLoop != null) gameLoop.SetSelectedSlugcat((SlugcatId)selected.Tag);
+            RefreshActiveSlugcatsMenu();
             if (skinEditor != null && !skinEditor.IsDisposed) skinEditor.RefreshFromGame();
-        }
-
-        private ToolStripMenuItem CreateSkinItem(string label, SlugcatSkin skin,
-            SlugcatSkin selected)
-        {
-            ToolStripMenuItem item = new ToolStripMenuItem(label);
-            item.Tag = skin;
-            item.Checked = skin == selected;
-            item.Click += SkinItemClick;
-            return item;
-        }
-
-        private void SkinItemClick(object sender, EventArgs e)
-        {
-            ToolStripMenuItem selected = sender as ToolStripMenuItem;
-            if (selected == null || gameLoop == null) return;
-            SlugcatSkin skin = (SlugcatSkin)selected.Tag;
-            if (!gameLoop.SetSkin(skin))
-            {
-                string reason;
-                gameLoop.CanUseSkin(skin, out reason);
-                trayIcon.ShowBalloonTip(4000, "Downpour skin unavailable",
-                    reason, ToolTipIcon.Warning);
-                return;
-            }
-            for (int i = 0; i < visualSkinMenu.DropDownItems.Count; i++)
-            {
-                ToolStripMenuItem item = visualSkinMenu.DropDownItems[i] as ToolStripMenuItem;
-                if (item != null) item.Checked = ReferenceEquals(item, selected);
-            }
-            RefreshSlugcatMenu();
-            if (skinEditor != null && !skinEditor.IsDisposed) skinEditor.RefreshFromGame();
-        }
-
-        private void RefreshAppearanceMenus()
-        {
-            if (gameLoop == null) return;
-            for (int i = 0; i < variantMenu.DropDownItems.Count; i++)
-            {
-                ToolStripMenuItem item = variantMenu.DropDownItems[i] as ToolStripMenuItem;
-                if (item != null) item.Checked = (SlugcatVariant)item.Tag == gameLoop.Appearance.Variant;
-            }
-            RefreshSkinAvailability();
-            RefreshSlugcatMenu();
-            if (skinEditor != null && !skinEditor.IsDisposed) skinEditor.RefreshFromGame();
-        }
-
-        private void RefreshSkinAvailability()
-        {
-            if (gameLoop == null) return;
-            for (int i = 0; i < visualSkinMenu.DropDownItems.Count; i++)
-            {
-                ToolStripMenuItem item = visualSkinMenu.DropDownItems[i] as ToolStripMenuItem;
-                if (item == null) continue;
-                string reason;
-                SlugcatSkin skin = (SlugcatSkin)item.Tag;
-                item.Enabled = gameLoop.CanUseSkin(skin, out reason);
-                item.ToolTipText = reason ?? "Local Rain World PlayerGraphics assets available";
-                item.Checked = skin == gameLoop.Skin;
-            }
         }
 
         private static Vec2 ScreenPointFromLParam(IntPtr value)

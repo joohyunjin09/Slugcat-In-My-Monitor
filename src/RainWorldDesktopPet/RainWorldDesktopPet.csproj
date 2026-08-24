@@ -59,6 +59,7 @@
     <Compile Include="Core\SimulationConstants.cs" />
     <Compile Include="Core\Vec2.cs" />
     <Compile Include="Creature\Slugcat.cs" />
+    <Compile Include="Creature\SlugcatAbilities.cs" />
     <Compile Include="Creature\SlugcatMovement.cs" />
     <Compile Include="Creature\SlugcatState.cs" />
     <Compile Include="Creature\SlugcatVariant.cs" />
@@ -83,6 +84,8 @@
     <Compile Include="Physics\BodyChunkConnection.cs" />
     <Compile Include="Physics\DesktopCollisionSnapshot.cs" />
     <Compile Include="Physics\DesktopCollisionWorld.cs" />
+    <Compile Include="Physics\DesktopSpear.cs" />
+    <Compile Include="Physics\DesktopRope.cs" />
     <Compile Include="Physics\TerrainImpactData.cs" />
     <Compile Include="Physics\TailSegment.cs" />
     <Compile Include="Program.cs" />
@@ -96,8 +99,11 @@
     <Compile Include="RainWorld\RainWorldInstallation.cs" />
     <Compile Include="RainWorld\RainWorldLocator.cs" />
     <Compile Include="RainWorld\UnitySerializedFileReader.cs" />
+    <Compile Include="RainWorld\UnityFsBundleReader.cs" />
     <Compile Include="UI\LayeredOverlayWindow.cs" />
     <Compile Include="UI\SkinEditorWindow.cs" />
+    <Compile Include="Audio\SoundEvent.cs" />
+    <Compile Include="Audio\RainWorldAudioEngine.cs" />
   </ItemGroup>
   <ItemGroup>
     <None Include="App.config" />

@@ -20,7 +20,42 @@ namespace RainWorldDesktopPet.AI
         ClimbWindow,
         DropDown,
         BalanceNearEdge,
-        ObserveWindow
+        ObserveWindow,
+        ExplosiveJump,
+        MakeSpear,
+        ThrowSpear,
+        TongueSwing,
+        GourmandRoll
+    }
+
+    public enum PlatformTransitionMode
+    {
+        None,
+        StandardJump,
+        ExplosiveJump,
+        TongueSwing
+    }
+
+    public sealed class PlatformTransitionPlan
+    {
+        public PlatformTransitionMode Mode;
+        public long SourceSurfaceId;
+        public long TargetSurfaceId;
+        public Vec2 TargetPoint;
+        public double HorizontalDistance;
+        public double VerticalDistance;
+        public bool IsValid;
+
+        public void Clear()
+        {
+            Mode = PlatformTransitionMode.None;
+            SourceSurfaceId = 0;
+            TargetSurfaceId = 0;
+            TargetPoint = Vec2.Zero;
+            HorizontalDistance = 0.0;
+            VerticalDistance = 0.0;
+            IsValid = false;
+        }
     }
 
     public sealed class DesktopPetAI
@@ -44,6 +79,7 @@ namespace RainWorldDesktopPet.AI
             random = new Random(seed);
             Attention = new AttentionSystem();
             Behavior = DesktopBehavior.Idle;
+            TransitionPlan = new PlatformTransitionPlan();
         }
 
         public DesktopBehavior Behavior { get; private set; }
@@ -52,6 +88,7 @@ namespace RainWorldDesktopPet.AI
         public AttentionKind OriginalAttentionKind { get { return originalAttentionKind; } }
         public Vec2 OriginalAttentionTarget { get { return originalAttentionTarget; } }
         public bool MouseAttentionActive { get; private set; }
+        public PlatformTransitionPlan TransitionPlan { get; private set; }
 
         public VirtualInput Step(Slugcat slugcat, DesktopCollisionWorld world, MouseTracker mouse)
         {
@@ -72,13 +109,118 @@ namespace RainWorldDesktopPet.AI
             if (--evaluationCountdown <= 0)
             {
                 evaluationCountdown = 8 + random.Next(0, 8);
+                PlanPlatformTransition(slugcat, world);
                 SelectBehavior(context);
             }
 
             VirtualInput input = ProduceInput(slugcat, mouse, context);
+            VirtualInput abilityInput;
+            if (TryProduceAbilityInput(slugcat, context, out abilityInput)) input = abilityInput;
             UpdateAttention(slugcat, mouse, context, mouseAttention);
             Attention.Step();
             return input;
+        }
+
+        public PlatformTransitionPlan PlanPlatformTransition(Slugcat slugcat,
+            DesktopCollisionWorld world)
+        {
+            TransitionPlan.Clear();
+            Vec2 center = slugcat.Center;
+            double maximumRange = slugcat.AbilityController is SaintAbilityController
+                ? 195.0 : (slugcat.AbilityController is ArtificerAbilityController ? 250.0 : 105.0);
+            DesktopSurface best = null;
+            Vec2 bestPoint = Vec2.Zero;
+            double bestScore = double.MaxValue;
+            for (int i = 0; i < world.Surfaces.Count; i++)
+            {
+                DesktopSurface surface = world.Surfaces[i];
+                if (!surface.IsHorizontal || surface.Id == slugcat.PrimarySupportingSurfaceId) continue;
+                Vec2 candidate = new Vec2(MathUtil.Clamp(center.X, surface.Left + 12.0,
+                    surface.Right - 12.0), surface.Top - SimulationConstants.HipsChunkRadius);
+                Vec2 delta = candidate - center;
+                if (delta.Length > maximumRange || surface.Right - surface.Left < 24.0) continue;
+                // Prefer another window above or across a modest gap. Floors
+                // below remain a DropDown concern handled by the normal AI.
+                if (delta.Y > 50.0) continue;
+                double score = delta.Length + Math.Max(0.0, delta.Y) * 2.0;
+                if (score >= bestScore) continue;
+                bestScore = score;
+                best = surface;
+                bestPoint = candidate;
+            }
+            if (best == null) return TransitionPlan;
+
+            TransitionPlan.IsValid = true;
+            TransitionPlan.SourceSurfaceId = slugcat.PrimarySupportingSurfaceId;
+            TransitionPlan.TargetSurfaceId = best.Id;
+            TransitionPlan.TargetPoint = bestPoint;
+            TransitionPlan.HorizontalDistance = bestPoint.X - center.X;
+            TransitionPlan.VerticalDistance = bestPoint.Y - center.Y;
+            TransitionPlan.Mode = slugcat.AbilityController is SaintAbilityController
+                ? PlatformTransitionMode.TongueSwing
+                : (slugcat.AbilityController is ArtificerAbilityController
+                    ? PlatformTransitionMode.ExplosiveJump
+                    : PlatformTransitionMode.StandardJump);
+            return TransitionPlan;
+        }
+
+        private bool TryProduceAbilityInput(Slugcat slugcat, UtilityContext context,
+            out VirtualInput input)
+        {
+            input = VirtualInput.Neutral;
+            SpearmasterAbilityController spear =
+                slugcat.AbilityController as SpearmasterAbilityController;
+            if (spear != null)
+            {
+                if (spear.HeldSpear == null && behaviorTicks % 300 < 150)
+                {
+                    Behavior = DesktopBehavior.MakeSpear;
+                    input = new VirtualInput(0, 0, false, true);
+                    return true;
+                }
+                if (spear.HeldSpear != null && behaviorTicks % 120 == 1)
+                {
+                    Behavior = DesktopBehavior.ThrowSpear;
+                    input = new VirtualInput(slugcat.State.Facing, 0, false, false,
+                        true, VirtualPosture.None, false);
+                    return true;
+                }
+            }
+
+            GourmandAbilityController gourmand =
+                slugcat.AbilityController as GourmandAbilityController;
+            if (gourmand != null && !context.Grounded &&
+                (slugcat.BodyChunks[0].Velocity.Y +
+                 slugcat.BodyChunks[1].Velocity.Y) * 0.5 > 2.0)
+            {
+                Behavior = DesktopBehavior.GourmandRoll;
+                input = new VirtualInput(desiredDirection, 1, false, false);
+                return true;
+            }
+
+            if (!TransitionPlan.IsValid) return false;
+            int direction = TransitionPlan.HorizontalDistance < 0.0 ? -1 : 1;
+            if (context.Grounded && behaviorTicks % 60 == 1)
+            {
+                Behavior = DesktopBehavior.Jump;
+                input = new VirtualInput(direction, 0, true, false);
+                return true;
+            }
+            if (TransitionPlan.Mode == PlatformTransitionMode.ExplosiveJump &&
+                !context.Grounded && behaviorTicks % 14 == 1)
+            {
+                Behavior = DesktopBehavior.ExplosiveJump;
+                input = new VirtualInput(direction, -1, true, true);
+                return true;
+            }
+            if (TransitionPlan.Mode == PlatformTransitionMode.TongueSwing &&
+                !context.Grounded && behaviorTicks % 18 == 1)
+            {
+                Behavior = DesktopBehavior.TongueSwing;
+                input = new VirtualInput(direction, -1, true, false);
+                return true;
+            }
+            return false;
         }
 
         private UtilityContext BuildContext(Slugcat slugcat, DesktopCollisionWorld world, MouseTracker mouse)
@@ -178,7 +320,7 @@ namespace RainWorldDesktopPet.AI
                     int wallDirection = slugcat.BodyChunks[0].ContactRight || slugcat.BodyChunks[1].ContactRight
                         ? 1
                         : (slugcat.BodyChunks[0].ContactLeft || slugcat.BodyChunks[1].ContactLeft ? -1 : lastWallDirection);
-                    return new VirtualInput(wallDirection, -1, behaviorTicks % 12 < 3, false);
+                    return new VirtualInput(wallDirection, -1, false, false);
                 case DesktopBehavior.DropDown:
                     return new VirtualInput(slugcat.State.Facing, 1, false, false, VirtualPosture.None, true);
                 case DesktopBehavior.BalanceNearEdge:
@@ -241,6 +383,11 @@ namespace RainWorldDesktopPet.AI
                 case DesktopBehavior.ObserveWindow: return 90;
                 case DesktopBehavior.Jump: return 16;
                 case DesktopBehavior.AvoidMouse: return 18;
+                case DesktopBehavior.ExplosiveJump:
+                case DesktopBehavior.TongueSwing: return 16;
+                case DesktopBehavior.MakeSpear: return 55;
+                case DesktopBehavior.ThrowSpear: return 10;
+                case DesktopBehavior.GourmandRoll: return 24;
                 default: return 45;
             }
         }

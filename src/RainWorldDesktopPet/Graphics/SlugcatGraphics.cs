@@ -16,7 +16,7 @@ namespace RainWorldDesktopPet.Graphics
         private readonly BodyPart head;
         private readonly BodyPart legs;
         private ProceduralTail tail;
-        private SlugcatVisualProfile visualProfile;
+        private SlugcatGraphicsProfile graphicsProfile;
         private ISlugcatGraphicsExtension[] extensions;
         private RainWorldAtlasSet atlas;
         private readonly SlugcatPose renderPose;
@@ -39,11 +39,11 @@ namespace RainWorldDesktopPet.Graphics
             new Dictionary<string, Color>(StringComparer.OrdinalIgnoreCase);
 
         public SlugcatGraphics(Slugcat slugcat)
-            : this(slugcat, SlugcatVisualProfiles.Default, null)
+            : this(slugcat, slugcat.SelectedSlugcat.Graphics, null)
         {
         }
 
-        public SlugcatGraphics(Slugcat slugcat, SlugcatVisualProfile profile,
+        public SlugcatGraphics(Slugcat slugcat, SlugcatGraphicsProfile profile,
             RainWorldAtlasSet atlas)
         {
             this.slugcat = slugcat;
@@ -58,24 +58,31 @@ namespace RainWorldDesktopPet.Graphics
             arms[0] = new Limb(LimbKind.Arm, -1, chest + new Vec2(-4.0, 8.0), 20.0);
             arms[1] = new Limb(LimbKind.Arm, 1, chest + new Vec2(4.0, 8.0), 20.0);
             renderPose = new SlugcatPose();
-            SetVisualProfile(profile ?? SlugcatVisualProfiles.Default, atlas);
+            SetGraphicsProfile(profile ?? SlugcatGraphicsProfiles.Default, atlas);
         }
 
         public ProceduralTail Tail { get { return tail; } }
         public Limb[] Arms { get { return arms; } }
         public BodyPart Legs { get { return legs; } }
         public BodyPart Head { get { return head; } }
-        public SlugcatVisualProfile VisualProfile { get { return visualProfile; } }
+        public SlugcatGraphicsProfile GraphicsProfile { get { return graphicsProfile; } }
+        public SlugcatVisualProfile VisualProfile
+        {
+            get { return SlugcatVisualProfiles.FromGraphics(graphicsProfile); }
+        }
         public ISlugcatGraphicsExtension[] Extensions { get { return extensions; } }
 
         public Color GetPartColor(string part)
         {
             Color color;
             if (partColors.TryGetValue(part, out color)) return color;
-            Color body = visualProfile.ResolveBodyColor(slugcat.Appearance);
+            SlugcatVisualProfile compatibility =
+                SlugcatVisualProfiles.FromGraphics(graphicsProfile);
+            Color body = compatibility != null
+                ? compatibility.ResolveBodyColor(slugcat.Appearance)
+                : graphicsProfile.BodyColor;
             return string.Equals(part, "Face", StringComparison.OrdinalIgnoreCase)
-                ? visualProfile.EyeColor
-                : body;
+                ? graphicsProfile.EyeColor : body;
         }
 
         public void SetPartColor(string part, Color color)
@@ -89,11 +96,11 @@ namespace RainWorldDesktopPet.Graphics
             partColors.Clear();
         }
 
-        public void SetVisualProfile(SlugcatVisualProfile profile, RainWorldAtlasSet sourceAtlas)
+        public void SetGraphicsProfile(SlugcatGraphicsProfile profile, RainWorldAtlasSet sourceAtlas)
         {
             if (profile == null) throw new ArgumentNullException("profile");
             ProceduralTail previous = tail;
-            visualProfile = profile;
+            graphicsProfile = profile;
             atlas = sourceAtlas;
             tail = new ProceduralTail(slugcat.BodyChunks[1].Position, profile.Tail);
             if (previous != null && previous.Segments.Length == tail.Segments.Length)
@@ -116,6 +123,11 @@ namespace RainWorldDesktopPet.Graphics
             for (int i = 0; i < extensions.Length; i++) extraCount += extensions[i].SpriteCount;
             renderPose.ExtraParts = new ExtraGraphicsPartPose[extraCount];
             for (int i = 0; i < extraCount; i++) renderPose.ExtraParts[i] = new ExtraGraphicsPartPose();
+        }
+
+        public void SetVisualProfile(SlugcatVisualProfile profile, RainWorldAtlasSet sourceAtlas)
+        {
+            SetGraphicsProfile(profile, sourceAtlas);
         }
 
         // Called after Player/PhysicalObject update, matching GraphicsModule.Update.
@@ -192,6 +204,10 @@ namespace RainWorldDesktopPet.Graphics
             tail.Step(upper, lower, slugcat.BodyChunks[1].Velocity,
                 slugcat.State.Facing, slugcat.State.BodyMode, world);
 
+            SpearmasterAbilityController extraction =
+                slugcat.AbilityController as SpearmasterAbilityController;
+            if (extraction != null)
+                head.Velocity += extraction.ConsumeGraphicsHeadImpulse();
             head.Update();
             world.PushOutOfTerrain(head, slugcat.BodyChunks[0].Position);
             Vec2 neckDirection = bodyUp * 3.0;
@@ -228,6 +244,17 @@ namespace RainWorldDesktopPet.Graphics
                 arms[i].Step(slugcat, slugcat.BodyChunks[0].Position,
                     slugcat.BodyChunks[1].Position, slugcat.BodyChunks[0].Velocity,
                     world, i == 0 ? null : arms[0], airborneCounter);
+            }
+            SpearmasterAbilityController spearAbility =
+                slugcat.AbilityController as SpearmasterAbilityController;
+            if (spearAbility != null &&
+                (spearAbility.HeldSpear != null || spearAbility.SpearProgress > 0.0))
+            {
+                arms[1].Mode = LimbMode.HuntAbsolutePosition;
+                arms[1].AbsoluteHuntPosition = spearAbility.HeldSpear != null
+                    ? spearAbility.HeldSpear.Chunk.Position
+                    : spearAbility.SpearCreationPosition;
+                arms[1].GripSurfaceId = 0;
             }
             if (slugcat.State.Animation == AnimationIndex.Sleep)
             {
@@ -293,16 +320,20 @@ namespace RainWorldDesktopPet.Graphics
             SlugcatPose pose = renderPose;
             pose.SimulationTick = simulationTick;
             pose.TimeStacker = timeStacker;
-            pose.CurrentSkin = visualProfile.Skin;
-            pose.OriginalSlugcatId = visualProfile.ResolveOriginalSlugcatId(slugcat.Appearance);
-            pose.VisualProfileName = visualProfile.DisplayName;
-            pose.BaseSpriteCount = visualProfile.BaseSpriteCount;
-            pose.ExtraSpriteCount = visualProfile.ExtraSpriteCount;
-            pose.GraphicsExtensions = visualProfile.ExtensionNames.Length == 0
+            pose.SelectedSlugcat = slugcat.SelectedSlugcat.Id;
+            SlugcatVisualProfile compatibilityProfile =
+                SlugcatVisualProfiles.FromGraphics(graphicsProfile);
+            pose.CurrentSkin = compatibilityProfile.Skin;
+            pose.OriginalSlugcatId = compatibilityProfile.ResolveOriginalSlugcatId(
+                slugcat.Appearance);
+            pose.VisualProfileName = graphicsProfile.DisplayName;
+            pose.BaseSpriteCount = graphicsProfile.BaseSpriteCount;
+            pose.ExtraSpriteCount = graphicsProfile.ExtraSpriteCount;
+            pose.GraphicsExtensions = graphicsProfile.ExtensionNames.Length == 0
                 ? "none"
-                : string.Join(", ", visualProfile.ExtensionNames);
-            pose.TailProfileName = visualProfile.Tail.Name;
-            pose.TailRootRadius = visualProfile.Tail.RootRadius;
+                : string.Join(", ", graphicsProfile.ExtensionNames);
+            pose.TailProfileName = graphicsProfile.Tail.Name;
+            pose.TailRootRadius = graphicsProfile.Tail.RootRadius;
             pose.VisualBodyColor = GetPartColor("Body");
             pose.VisualEyeColor = GetPartColor("Face");
             pose.VisualHeadColor = GetPartColor("Head");
@@ -310,12 +341,21 @@ namespace RainWorldDesktopPet.Graphics
             pose.VisualHipsColor = GetPartColor("Hips");
             pose.VisualLegsColor = GetPartColor("Legs");
             pose.VisualTailColor = GetPartColor("Tail");
-            pose.BodyElement = visualProfile.BodyElement;
-            pose.HipsElement = visualProfile.HipsElement;
-            pose.VisualBodyScale = visualProfile.ResolveBodyScale(slugcat.Appearance);
-            pose.VisualHipsScale = visualProfile.ResolveHipsScale(slugcat.Appearance);
-            pose.VisualHeadScale = visualProfile.HeadScale;
-            pose.ArmShoulderScale = visualProfile.ArmShoulderScale;
+            pose.BodyElement = graphicsProfile.BodyElement;
+            pose.HipsElement = graphicsProfile.HipsElement;
+            pose.VisualBodyScale = compatibilityProfile.ResolveBodyScale(slugcat.Appearance);
+            pose.VisualHipsScale = compatibilityProfile.ResolveHipsScale(slugcat.Appearance);
+            pose.VisualHeadScale = graphicsProfile.HeadScale;
+            pose.ArmShoulderScale = graphicsProfile.ArmShoulderScale;
+            pose.MovementProfileDebug = string.Format("run:{0:0.##} weight:{1:0.##} throw:{2:0.##} pole:{3:0.##} corridor:{4:0.##}",
+                slugcat.SelectedSlugcat.Movement.RunSpeedFactor,
+                slugcat.SelectedSlugcat.Movement.BodyWeightFactor,
+                slugcat.SelectedSlugcat.Movement.ThrowingSkill,
+                slugcat.SelectedSlugcat.Movement.PoleClimbSpeedFactor,
+                slugcat.SelectedSlugcat.Movement.CorridorClimbSpeedFactor);
+            pose.AbilityDebug = slugcat.AbilityController.DebugState;
+            pose.AudioProfileDebug = slugcat.SelectedSlugcat.Audio.Jump + ", " +
+                slugcat.SelectedSlugcat.Audio.FootstepA;
             for (int i = 0; i < 2; i++)
             {
                 pose.ChunkLast[i] = slugcat.BodyChunks[i].LastPosition;

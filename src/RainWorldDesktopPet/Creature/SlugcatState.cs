@@ -50,6 +50,7 @@ namespace RainWorldDesktopPet.Creature
         public bool Dead;
         public bool Standing;
         public int StunCounter;
+        public int SlowMovementStun;
         public int InitialStunValue;
         public int ImpactBlinkTicks;
 
