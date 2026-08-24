@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
+using System.Runtime.InteropServices;
 using System.Text;
 using RainWorldDesktopPet.AI;
 using RainWorldDesktopPet.Core;
@@ -54,11 +55,18 @@ namespace RainWorldDesktopPet.Graphics
         private readonly PointF[] abilityTriangle = new PointF[3];
         private readonly Bitmap tailRaster;
         private readonly System.Drawing.Graphics tailRasterGraphics;
-        private readonly Bitmap fireSmokeShaderMask;
+        private readonly FireSmokeShaderAssets fireSmokeAssets;
+        private readonly Bitmap fireSmokeShaderRaster;
+        private readonly byte[] fireSmokePixels;
         private readonly Bitmap flatLightShaderMask;
         private readonly Bitmap lightSourceShaderMask;
         private readonly Bitmap shockWaveShaderMask;
         private const int TailRasterSize = 128;
+        private const int FireSmokeShaderRasterSize = 128;
+        private Vec2 effectWorldOrigin;
+        private double effectRenderScale;
+        private int effectScreenWidth;
+        private int effectScreenHeight;
         public const int OriginalTailMeshVertexCount = 15;
         public const int OriginalTailMeshTriangleCount = 13;
         private static readonly int[,] TailTriangles =
@@ -82,8 +90,14 @@ namespace RainWorldDesktopPet.Graphics
             new Dictionary<string, DmsSkinDefinition>(StringComparer.OrdinalIgnoreCase);
 
         public SpriteRenderer(RainWorldAtlasSet atlas)
+            : this(atlas, null)
+        {
+        }
+
+        public SpriteRenderer(RainWorldAtlasSet atlas, FireSmokeShaderAssets fireSmokeAssets)
         {
             this.atlas = atlas;
+            this.fireSmokeAssets = fireSmokeAssets;
             tailRaster = new Bitmap(TailRasterSize, TailRasterSize,
                 PixelFormat.Format32bppPArgb);
             tailRasterGraphics = System.Drawing.Graphics.FromImage(tailRaster);
@@ -91,12 +105,16 @@ namespace RainWorldDesktopPet.Graphics
             tailRasterGraphics.PixelOffsetMode = PixelOffsetMode.Half;
             tailRasterGraphics.CompositingMode = CompositingMode.SourceCopy;
             tailRasterGraphics.CompositingQuality = CompositingQuality.HighSpeed;
-            // Rain World's effect sprites all use the generated Futile_White
-            // quad. The installed resources.assets registers the compiled
-            // FireSmoke, FlatLight, LightSource and ShockWave shaders. GDI+
-            // cannot execute Unity shaders, so deterministic alpha masks for
-            // those four shader roles are built once and reused by every draw.
-            fireSmokeShaderMask = CreateEffectShaderMask(EffectShaderMask.FireSmoke);
+            // FireSmoke is evaluated from the installed shader source and its
+            // original noise/noise2 Texture2D assets. The other three Unity
+            // shaders remain simple single-role adapters.
+            if (fireSmokeAssets != null)
+            {
+                fireSmokeShaderRaster = new Bitmap(FireSmokeShaderRasterSize,
+                    FireSmokeShaderRasterSize, PixelFormat.Format32bppPArgb);
+                fireSmokePixels = new byte[FireSmokeShaderRasterSize *
+                    FireSmokeShaderRasterSize * 4];
+            }
             flatLightShaderMask = CreateEffectShaderMask(EffectShaderMask.FlatLight);
             lightSourceShaderMask = CreateEffectShaderMask(EffectShaderMask.LightSource);
             shockWaveShaderMask = CreateEffectShaderMask(EffectShaderMask.ShockWave);
@@ -202,6 +220,10 @@ namespace RainWorldDesktopPet.Graphics
             try
             {
                 double scale = pose.CharacterRenderScale;
+                effectWorldOrigin = renderSpace.WorldOrigin;
+                effectRenderScale = scale;
+                effectScreenWidth = Math.Max(1, renderSpace.VirtualDesktopBounds.Width);
+                effectScreenHeight = Math.Max(1, renderSpace.VirtualDesktopBounds.Height);
                 graphics.Transform = new Matrix((float)scale, 0.0f, 0.0f, (float)scale,
                     (float)-renderSpace.WorldOrigin.X,
                     (float)-renderSpace.WorldOrigin.Y);
@@ -1468,17 +1490,13 @@ namespace RainWorldDesktopPet.Graphics
                             0.2 + 0.8 * Math.Sqrt(Math.Max(0.0, life)));
                     Color front = effect.Kind == AbilityEffectKind.FlashingSmoke
                         ? Color.White : LerpColor(colorB, colorA, life);
-                    back = Color.FromArgb(MathUtil.Clamp((int)(255 * alpha * 0.8),
-                        0, 255), back.R, back.G, back.B);
-                    front = Color.FromArgb(MathUtil.Clamp((int)(255 * alpha * 0.6),
-                        0, 255), front.R, front.G, front.B);
                     double baseScale = 11.0 * effect.Radius * Math.Max(0.0, scale);
                     double rotation = MathUtil.Lerp(effect.LastRotation,
                         effect.Rotation, interpolation);
-                    DrawEffectShaderSprite(graphics, fireSmokeShaderMask, position,
-                        rotation, baseScale * 1.1 * 16.0, back);
-                    DrawEffectShaderSprite(graphics, fireSmokeShaderMask, position,
-                        rotation, baseScale * 0.9 * 16.0, front);
+                    DrawOriginalFireSmoke(graphics, position, rotation,
+                        baseScale * 1.1 * 16.0, back, alpha * 0.8);
+                    DrawOriginalFireSmoke(graphics, position, rotation,
+                        baseScale * 0.9 * 16.0, front, alpha * 0.6);
                 }
                 else
                 {
@@ -1550,7 +1568,6 @@ namespace RainWorldDesktopPet.Graphics
 
         private enum EffectShaderMask
         {
-            FireSmoke,
             FlatLight,
             LightSource,
             ShockWave
@@ -1574,18 +1591,7 @@ namespace RainWorldDesktopPet.Graphics
                         alpha = Math.Pow(Math.Max(0.0, 1.0 - radius), 0.65);
                     else if (kind == EffectShaderMask.ShockWave)
                         alpha = Math.Exp(-Math.Pow((radius - 0.76) / 0.055, 2.0));
-                    else
-                    {
-                        double angle = Math.Atan2(ny, nx);
-                        double warp = 0.11 * Math.Sin(angle * 5.0 + radius * 11.0) +
-                            0.055 * Math.Sin(angle * 9.0 - radius * 17.0);
-                        double edge = 1.0 - (radius + warp);
-                        double cellular = 0.72 + 0.28 * Math.Sin(
-                            x * 0.31 + Math.Sin(y * 0.19) * 2.1) *
-                            Math.Sin(y * 0.27 - Math.Sin(x * 0.23) * 1.7);
-                        alpha = Math.Pow(MathUtil.Clamp01(edge * 2.1), 0.7) *
-                            MathUtil.Clamp01(cellular);
-                    }
+                    else alpha = 0.0;
                     int a = MathUtil.Clamp((int)Math.Round(alpha * 255.0), 0, 255);
                     mask.SetPixel(x, y, Color.FromArgb(a, 255, 255, 255));
                 }
@@ -1593,10 +1599,86 @@ namespace RainWorldDesktopPet.Graphics
             return mask;
         }
 
+        private void DrawOriginalFireSmoke(System.Drawing.Graphics graphics, Vec2 center,
+            double rotation, double size, Color color, double vertexAlpha)
+        {
+            if (fireSmokeAssets == null || fireSmokeShaderRaster == null ||
+                size <= 0.0001 || vertexAlpha <= 0.0) return;
+
+            double radians = rotation * Math.PI / 180.0;
+            double cosine = Math.Cos(radians);
+            double sine = Math.Sin(radians);
+            // RoomCamera initializes the shader's global _RAIN to 0.5. The
+            // desktop runtime has no RainCycle/room weather writer, so keep
+            // that original default instead of inventing a time animation.
+            const double rain = 0.5;
+            int index = 0;
+            for (int y = 0; y < FireSmokeShaderRasterSize; y++)
+            {
+                double v = (y + 0.5) / FireSmokeShaderRasterSize;
+                double localY = (v - 0.5) * size;
+                for (int x = 0; x < FireSmokeShaderRasterSize; x++)
+                {
+                    double u = (x + 0.5) / FireSmokeShaderRasterSize;
+                    double localX = (u - 0.5) * size;
+                    double worldX = center.X + localX * cosine - localY * sine;
+                    double worldY = center.Y + localX * sine + localY * cosine;
+                    double screenX = worldX * effectRenderScale - effectWorldOrigin.X;
+                    double screenY = worldY * effectRenderScale - effectWorldOrigin.Y;
+                    double textX = Math.Floor(screenX) / effectScreenWidth;
+                    double textY = Math.Floor(screenY - rain * 153.2) /
+                        effectScreenHeight + 0.04;
+                    double dx = u - 0.5;
+                    double dy = v - 0.5;
+                    double dist = MathUtil.Clamp01(1.0 - Math.Sqrt(dx * dx + dy * dy) * 2.0);
+                    double h = (Math.Sin((1.77 * rain + fireSmokeAssets.SampleNoise(
+                        textX * 5.2, rain * 0.1 + textY * 2.6) * 3.0) *
+                        Math.PI * 2.0) * 0.5) + 0.5;
+                    h *= (Math.Sin((3.5 * rain + fireSmokeAssets.SampleNoise(
+                        textX * 12.2, rain * 0.25 + textY * 6.6) * 3.0) *
+                        Math.PI * 2.0) * 0.5) + 0.5;
+                    h *= 0.5 + 0.5 * Math.Sin((fireSmokeAssets.SampleNoise(u, v) +
+                        rain) * Math.PI * 6.0);
+                    double inside = 0.3 + 0.5 * vertexAlpha;
+                    h = h * dist + ((h + (1.0 - h) * inside) - h * dist) * dist;
+                    h -= fireSmokeAssets.SampleNoise2(textX * 15.2,
+                        rain * 0.1 + textY * 7.6) * (0.7 + (0.3 - 0.7) * vertexAlpha);
+                    if (h * vertexAlpha >= 0.35)
+                    {
+                        fireSmokePixels[index] = color.B;
+                        fireSmokePixels[index + 1] = color.G;
+                        fireSmokePixels[index + 2] = color.R;
+                        fireSmokePixels[index + 3] = 255;
+                    }
+                    else
+                    {
+                        fireSmokePixels[index] = 0;
+                        fireSmokePixels[index + 1] = 0;
+                        fireSmokePixels[index + 2] = 0;
+                        fireSmokePixels[index + 3] = 0;
+                    }
+                    index += 4;
+                }
+            }
+            BitmapData data = fireSmokeShaderRaster.LockBits(new Rectangle(0, 0,
+                fireSmokeShaderRaster.Width, fireSmokeShaderRaster.Height),
+                ImageLockMode.WriteOnly, PixelFormat.Format32bppPArgb);
+            try { Marshal.Copy(fireSmokePixels, 0, data.Scan0, fireSmokePixels.Length); }
+            finally { fireSmokeShaderRaster.UnlockBits(data); }
+            DrawEffectSprite(graphics, fireSmokeShaderRaster, center, rotation, size, null);
+        }
+
         private void DrawEffectShaderSprite(System.Drawing.Graphics graphics,
             Bitmap mask, Vec2 center, double rotation, double size, Color tint)
         {
             if (mask == null || size <= 0.0001 || tint.A <= 0) return;
+            DrawEffectSprite(graphics, mask, center, rotation, size,
+                GetEffectTintAttributes(tint));
+        }
+
+        private void DrawEffectSprite(System.Drawing.Graphics graphics, Bitmap bitmap,
+            Vec2 center, double rotation, double size, ImageAttributes attributes)
+        {
             // DrawImage accepts a parallelogram. Supplying the already-rotated
             // world-space points avoids Save/Translate/Rotate/Restore for each
             // smoke mask and light sprite, which was the hot path during rapid
@@ -1612,9 +1694,9 @@ namespace RainWorldDesktopPet.Graphics
                 size * sine)).ToPointF();
             effectDestinationPoints[2] = (topLeft + new Vec2(-size * sine,
                 size * cosine)).ToPointF();
-            graphics.DrawImage(mask, effectDestinationPoints,
-                new RectangleF(0, 0, mask.Width, mask.Height), GraphicsUnit.Pixel,
-                GetEffectTintAttributes(tint), null, 0);
+            graphics.DrawImage(bitmap, effectDestinationPoints,
+                new RectangleF(0, 0, bitmap.Width, bitmap.Height), GraphicsUnit.Pixel,
+                attributes, null, 0);
         }
 
         private ImageAttributes GetEffectTintAttributes(Color tint)
@@ -1688,7 +1770,8 @@ namespace RainWorldDesktopPet.Graphics
         {
             tailRasterGraphics.Dispose();
             tailRaster.Dispose();
-            fireSmokeShaderMask.Dispose();
+            if (fireSmokeShaderRaster != null) fireSmokeShaderRaster.Dispose();
+            if (fireSmokeAssets != null) fireSmokeAssets.Dispose();
             flatLightShaderMask.Dispose();
             lightSourceShaderMask.Dispose();
             shockWaveShaderMask.Dispose();

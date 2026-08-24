@@ -99,6 +99,7 @@
     <Compile Include="RainWorld\DxtDecoder.cs" />
     <Compile Include="RainWorld\DmsSpriteCatalog.cs" />
     <Compile Include="RainWorld\EmbeddedUnityAtlasProvider.cs" />
+    <Compile Include="RainWorld\FireSmokeShaderAssets.cs" />
     <Compile Include="RainWorld\RainWorldAssetLoader.cs" />
     <Compile Include="RainWorld\RainWorldAtlasLoader.cs" />
     <Compile Include="RainWorld\RainWorldInstallation.cs" />

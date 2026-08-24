@@ -144,6 +144,10 @@ namespace RainWorldDesktopPet.Tests
             else
             {
                 Run("Local embedded original atlas loads without DMS", delegate { EmbeddedOriginalAtlasLoads(localInstallation); });
+                Run("Local FireSmoke uses the original noise textures", delegate
+                {
+                    OriginalFireSmokeAssetsLoad(localInstallation);
+                });
                 Run("Installed Workshop mods parse without loading their DLLs",
                     delegate { LocalWorkshopIntegrationsParse(localInstallation); });
             }
@@ -1895,6 +1899,22 @@ namespace RainWorldDesktopPet.Tests
                 "drop-through should leave the grounded state");
             True(slugcat.BodyChunks[0].Velocity.Y > 0.0 && slugcat.BodyChunks[1].Velocity.Y > 0.0,
                 "drop-through should push both chunks downward");
+        }
+
+        private static void OriginalFireSmokeAssetsLoad(RainWorldInstallation installation)
+        {
+            string status;
+            using (FireSmokeShaderAssets assets = FireSmokeShaderAssets.TryLoad(installation,
+                out status))
+            {
+                True(assets != null, status);
+                double first = assets.SampleNoise(0.123, 0.456);
+                double second = assets.SampleNoise2(0.789, 0.234);
+                True(first >= 0.0 && first <= 1.0,
+                    "original Palettes/noise red channel is sampleable");
+                True(second >= 0.0 && second <= 1.0,
+                    "original Palettes/noise2 red channel is sampleable");
+            }
         }
 
         private static void EmbeddedOriginalAtlasLoads(RainWorldInstallation installation)

@@ -105,7 +105,7 @@ DesktopPetAI
 
 **Desktop Implementation:** `ArtificerAbilityController.UpdateAfterMovement`, `Slugcat.Step`, `SpriteRenderer.DrawAbilityObjects`, `RainWorldAudioEngine`.
 
-**Known Difference:** 원작 room의 creature/weapon 목록이 없으므로 `InGameNoise(position,8000,...)`는 생성하지 않는다. GDI에는 `FireSmoke`, `FlatLight`, `LightSource` shader가 없어 동일 수치의 scale/alpha/layer를 radial gradient로 어댑트한다. 이 원작 jump/parry 분기에는 `Room.ScreenMovement` 호출이 없으므로 임의 카메라 흔들림을 추가하지 않는다. ZeroG와 수중 room 상태는 데스크톱 지형 모델에 없어 해당 분기는 비활성이다.
+**Known Difference:** 원작 room의 creature/weapon 목록이 없으므로 `InGameNoise(position,8000,...)`는 생성하지 않는다. `FireSmoke`는 설치된 원본 fragment 식과 `Palettes/noise`·`noise2` Texture2D를 CPU로 직접 실행한다. Unity shader runtime이 없는 GDI에서도 임의 방사형 연기 마스크로 대체하지 않는다. 이 원작 jump/parry 분기에는 `Room.ScreenMovement` 호출이 없으므로 임의 카메라 흔들림을 추가하지 않는다. ZeroG와 수중 room 상태는 데스크톱 지형 모델에 없어 해당 분기는 비활성이다.
 
 ### Explosive Parry
 
