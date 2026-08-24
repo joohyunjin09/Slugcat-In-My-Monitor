@@ -4,6 +4,8 @@ using System.Media;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
+using System.Collections.Generic;
+using System.Diagnostics;
 using RainWorldDesktopPet.Workshop;
 
 namespace RainWorldDesktopPet.Audio
@@ -60,22 +62,77 @@ namespace RainWorldDesktopPet.Audio
 
     public sealed class WorkshopAudioPlayer : IDisposable
     {
+        private sealed class PlaybackCommand
+        {
+            public MeowSoundVariation Variation;
+            public bool Stop;
+        }
+
         private static int aliasCounter;
         private readonly WorkshopLog log;
+        private readonly object commandSync = new object();
+        private readonly Queue<PlaybackCommand> commands = new Queue<PlaybackCommand>();
+        private readonly AutoResetEvent commandSignal = new AutoResetEvent(false);
+        private readonly Thread worker;
         private SoundPlayer player;
         private string mciAlias;
+        private volatile string lastEvent = "none";
+        private volatile bool stopping;
+        private bool disposed;
 
         public WorkshopAudioPlayer(WorkshopLog log)
         {
             this.log = log ?? new WorkshopLog(false);
+            worker = new Thread(WorkerMain);
+            worker.IsBackground = true;
+            worker.Name = "Push To Meow playback";
+            worker.Start();
         }
+
+        internal string LastEvent { get { return lastEvent; } }
 
         public bool TryPlay(MeowSoundVariation variation)
         {
-            if (variation == null || !File.Exists(variation.FilePath)) return false;
+            if (variation == null || string.IsNullOrWhiteSpace(variation.FilePath) ||
+                stopping) return false;
+            lock (commandSync)
+            {
+                // Only the newest contextual meow matters if the audio device
+                // is still opening the preceding request.
+                commands.Clear();
+                commands.Enqueue(new PlaybackCommand { Variation = variation });
+            }
+            lastEvent = "queued: " + variation.AssetName;
+            commandSignal.Set();
+            return true;
+        }
+
+        private void WorkerMain()
+        {
+            while (!stopping)
+            {
+                PlaybackCommand command = null;
+                lock (commandSync)
+                    if (commands.Count > 0) command = commands.Dequeue();
+                if (command == null)
+                {
+                    commandSignal.WaitOne(250);
+                    continue;
+                }
+                if (command.Stop) StopCore();
+                else PlayCore(command.Variation);
+            }
+            StopCore();
+        }
+
+        private void PlayCore(MeowSoundVariation variation)
+        {
             try
             {
-                Stop();
+                StopCore();
+                if (!File.Exists(variation.FilePath))
+                    throw new FileNotFoundException("Workshop sound file is missing",
+                        variation.FilePath);
                 mciAlias = "rwptm_" + System.Diagnostics.Process.GetCurrentProcess().Id + "_" +
                     Interlocked.Increment(ref aliasCounter);
                 uint open = MciSendString("open \"" + variation.FilePath + "\" type waveaudio alias " +
@@ -92,7 +149,13 @@ namespace RainWorldDesktopPet.Audio
                         null, 0, IntPtr.Zero);
                     if (speedResult != 0) variation.PlaybackPitch = 1f;
                     uint play = MciSendString("play " + mciAlias + " from 0", null, 0, IntPtr.Zero);
-                    if (play == 0) return true;
+                    if (play == 0)
+                    {
+                        lastEvent = "playback started: " + variation.AssetName;
+                        LogDiagnostic("[Audio] Playback started: PushToMeow -> " +
+                            variation.FilePath);
+                        return;
+                    }
                     MciSendString("close " + mciAlias, null, 0, IntPtr.Zero);
                     mciAlias = null;
                 }
@@ -103,18 +166,34 @@ namespace RainWorldDesktopPet.Audio
                 player = new SoundPlayer(variation.FilePath);
                 player.Load();
                 player.Play();
-                return true;
+                lastEvent = "playback started: " + variation.AssetName;
+                LogDiagnostic("[Audio] Playback started: PushToMeow -> " +
+                    variation.FilePath + " [SoundPlayer fallback]");
             }
             catch (Exception exception)
             {
-                log.Warning("PushToMeow", "Could not play " + variation.FilePath + ": " +
-                    exception.Message);
-                Stop();
-                return false;
+                string message = "[Audio] Failed to load/play PushToMeow " +
+                    variation.FilePath + ": " + exception.Message;
+                lastEvent = "playback failed: " + variation.AssetName + " (" +
+                    exception.Message + ")";
+                log.Warning("PushToMeow", message);
+                LogDiagnostic(message);
+                StopCore();
             }
         }
 
         public void Stop()
+        {
+            if (stopping) return;
+            lock (commandSync)
+            {
+                commands.Clear();
+                commands.Enqueue(new PlaybackCommand { Stop = true });
+            }
+            commandSignal.Set();
+        }
+
+        private void StopCore()
         {
             if (!string.IsNullOrEmpty(mciAlias))
             {
@@ -135,7 +214,18 @@ namespace RainWorldDesktopPet.Audio
 
         public void Dispose()
         {
-            Stop();
+            if (disposed) return;
+            disposed = true;
+            stopping = true;
+            commandSignal.Set();
+            if (worker.IsAlive) worker.Join(2000);
+            commandSignal.Dispose();
+        }
+
+        private static void LogDiagnostic(string message)
+        {
+            Debug.WriteLine(message);
+            Trace.WriteLine(message);
         }
 
         [DllImport("winmm.dll", EntryPoint = "mciSendStringW", CharSet = CharSet.Unicode)]

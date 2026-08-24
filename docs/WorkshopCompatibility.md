@@ -129,10 +129,11 @@ It parses loose real-world `modinfo.json` files safely (including trailing comma
 only relevant metadata/asset directories, and never loads a Workshop DLL.
 
 The scan occurs at startup and on explicit refresh. `FileSystemWatcher` only marks the catalog
-dirty; opening the skin menu refreshes if needed, so no Workshop enumeration, JSON parsing, PNG
-decode, or file probing occurs per frame. `WorkshopAssetCache` caches decoded WAV durations for
-the process and invalidates entries after file size/time changes or deletion. The current skin
-falls back to the base appearance if it disappears during refresh.
+dirty; **Reload Sprites** or the Skin Editor's refresh action applies the change, so opening a
+menu never performs Workshop enumeration, JSON parsing, PNG decode, or file probing. No such work
+occurs per frame. `WorkshopAssetCache` caches decoded WAV durations for the process and
+invalidates entries after file size/time changes or deletion. A part whose selection disappears
+or becomes incomplete during refresh falls back to the base appearance independently.
 
 ## 7. DMS parser and renderer added
 
@@ -143,14 +144,17 @@ element-name, generic-character, and asymmetric-side rules.
 
 `SpriteRenderer` replaces each current animation element by name, so idle, walking, crawling,
 jumping/falling, climbing, sitting/sleeping, turning, and stun paths continue to use their proper
-frames. It maps `TailTexture` onto the existing continuous tail mesh and preserves base
-Artificer scar, Rivulet gills, Spearmaster speckles/tail, and Saint extras whenever a skin omits
-the corresponding complete group.
+frames. It maps `TailTexture` onto the existing continuous tail mesh. Selection is isolated across
+the 12 official groups: HEAD, FACE, BODY, ARMS, HIPS, LEGS, TAIL, FACESCAR, GILLS,
+TAILSPECKLES, ASCENSION, and PIXEL. A skin can be selected for a group only when every required
+frame for that group exists; otherwise that part remains vanilla.
 
-The Settings appearance panel and tray appearance menu retain built-in variants and add Workshop
-DMS selection. The tray submenu includes preview, skin name, author, source mod, active state,
-available parts, refresh, and a no-overlay option. Inactive installed skins are shown disabled (or
-labelled inactive in Settings), matching DMS's default `LoadInactiveMods=false` behavior.
+The Skin Editor is the single runtime customization path. Each part independently offers
+Vanilla plus active DMS sheets complete for that part, with preview/name/author/source metadata.
+Settings and tray no longer expose a whole-DMS-skin selector, preventing a partial sheet from
+silently affecting unrelated parts. Inactive installed skins remain unselectable, matching DMS's
+default `LoadInactiveMods=false` behavior. The `--dms-skin` command-line compatibility option
+atomically fills only the selected sheet's complete groups.
 
 ## 8. Locally tested installed skins
 
@@ -172,26 +176,12 @@ The five newly installed source mods were inactive in the Remix list during test
 recognized and logged, but must be enabled in Rain World's Remix menu before the UI allows them
 to be selected.
 
-## 9. Files changed
+## 9. Related implementation
 
-```text
-src/RainWorldDesktopPet/Audio/NaturalMeowController.cs
-src/RainWorldDesktopPet/Audio/PushToMeowLibrary.cs
-src/RainWorldDesktopPet/Audio/WaveAudio.cs
-src/RainWorldDesktopPet/Core/GameLoop.cs
-src/RainWorldDesktopPet/Graphics/SlugcatPose.cs
-src/RainWorldDesktopPet/Graphics/SpriteRenderer.cs
-src/RainWorldDesktopPet/Program.cs
-src/RainWorldDesktopPet/RainWorldDesktopPet.csproj
-src/RainWorldDesktopPet/UI/LayeredOverlayWindow.cs
-src/RainWorldDesktopPet/UI/SettingsWindow.cs
-src/RainWorldDesktopPet/Workshop/DmsSkinCatalog.cs
-src/RainWorldDesktopPet/Workshop/WorkshopAssetCache.cs
-src/RainWorldDesktopPet/Workshop/WorkshopCatalog.cs
-src/RainWorldDesktopPet/Workshop/WorkshopLog.cs
-tests/RainWorldDesktopPet.Tests/Program.cs
-docs/WorkshopCompatibility.md
-```
+The integration is split across `Workshop/DmsSkinCatalog.cs`, `UI/SkinEditorWindow.cs`,
+`Graphics/SpriteRenderer.cs`, `Core/GameLoop.cs`, the `Audio` directory, and corresponding tests.
+The local game-fidelity re-audit is recorded in
+`docs/analysis/RainWorldFidelityOverhaul.md`.
 
 ## 10. Safety and known limits
 
@@ -199,8 +189,9 @@ docs/WorkshopCompatibility.md
 - Bad JSON, PNG/TXT pairs, missing WAVs, and mid-update files are logged and isolated rather than
   terminating the application. Debug detail is separated from normal release logging, and the
   log rotates at 2 MB under `%LOCALAPPDATA%/SlugcatInMyMonitor/workshop.log`.
-- WAV/RIFF assets registered by the inspected mod are supported. Unknown or unsupported audio
-  formats are skipped instead of guessed.
+- WAV/RIFF assets registered by the inspected mod are supported and are read on a background
+  worker. Unknown or unsupported audio formats, including OGG without an additional codec, are
+  skipped instead of guessed.
 - The desktop program cannot call Rain World's `Room.PlaySound`, oracle/creature reactions,
   lungs, bubbles, or the game's input hook because it does not host a Rain World room/player.
   Windows MCI reproduces registered volume and pitch; `SoundPlayer` is a safe fallback.
@@ -221,6 +212,6 @@ docs/WorkshopCompatibility.md
 `build.ps1 -Configuration Debug` and `build.ps1 -Configuration Release` compile the .NET
 Framework 4.8 solution. The test executable covers the existing fixed-step physics/AI/rendering
 suite, Workshop discovery without DLL loading, actual Push To Meow registration/duration parsing,
-DMS generic element mapping, valid partial-atlas survival, corrupt-atlas fallback, special-sprite
-fallback, and preview rendering. Final command results and commit information are reported with
-the delivery.
+DMS per-part isolation, valid partial-atlas survival, corrupt-atlas fallback, special-sprite
+fallback, actual installed UnityFS sound decoding, asynchronous desktop refresh, and preview
+rendering. Final command results and commit information are reported with the delivery.

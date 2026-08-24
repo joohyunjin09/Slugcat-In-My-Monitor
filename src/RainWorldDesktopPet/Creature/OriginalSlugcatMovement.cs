@@ -136,6 +136,7 @@ namespace RainWorldDesktopPet.Creature
             state.CrawlTurnDelay = state.ExitBellySlideCounter = 0;
             state.StopRollingCounter = state.ConsistentDownDiagonal = 0;
             state.LowerBodyFramesOnGround = state.UpperBodyFramesOffGround = 0;
+            state.FlipFromSlide = false;
         }
 
         private void UpdateOriginalCounters(VirtualInput input, VirtualInput previous,
@@ -368,6 +369,7 @@ namespace RainWorldDesktopPet.Creature
             chest.Velocity.X -= state.SlideDirection * 4.0 * factor;
             jumpBoost = rivulet ? 9.0 : 5.0;
             state.Animation = AnimationIndex.Flip;
+            state.FlipFromSlide = false;
             state.BodyMode = BodyModeIndex.Default;
             state.Standing = false;
             state.SlideCounter = 0;
@@ -428,6 +430,7 @@ namespace RainWorldDesktopPet.Creature
                     state.RollDirection = -direction;
                     state.SlideDirection = -direction;
                     state.Animation = AnimationIndex.Flip;
+                    state.FlipFromSlide = true;
                     state.Standing = true;
                     owner.EmitSound("Slugcat_Sectret_Super_Wall_Jump",
                         owner.Center, 1.0, 1.0, 1);
@@ -564,6 +567,8 @@ namespace RainWorldDesktopPet.Creature
             BodyChunk chest = owner.BodyChunks[0];
             BodyChunk hips = owner.BodyChunks[1];
             SlugcatMovementProfile movement = owner.SelectedSlugcat.Movement;
+            int crawlAxis = Math.Abs(chest.Position.X - hips.Position.X) > 0.5
+                ? Math.Sign(chest.Position.X - hips.Position.X) : state.Facing;
             if (input.X != 0) state.Facing = input.X;
             if (state.BodyMode == BodyModeIndex.WallClimb)
             {
@@ -582,6 +587,11 @@ namespace RainWorldDesktopPet.Creature
                 ? (crawl ? (input.Y != 0 ? 1.0 : movement.CrawlSpeed)
                     : 4.2 * movement.RunSpeedFactor)
                 : (input.Y != 0 ? movement.CrawlSpeed : movement.AirRunSpeed);
+            // Player.UpdateBodyMode Crawl reduces dynamicRunSpeed while the
+            // requested direction opposes the current body axis. This is
+            // independent of CrawlTurn's animation forces.
+            if (grounded && crawl && input.X != 0 && input.X != crawlAxis)
+                mainSpeed *= 0.75;
             double hipsSpeed = grounded
                 ? (crawl ? mainSpeed : (input.Y != 0 ? 2.0 :
                     4.0 * movement.RunSpeedFactor)) : mainSpeed;
@@ -708,7 +718,8 @@ namespace RainWorldDesktopPet.Creature
             Vec2 perpendicular = new Vec2(-axis.Y, axis.X);
             int direction = owner.State.SlideDirection == 0
                 ? owner.State.Facing : owner.State.SlideDirection;
-            double force = MathUtil.Lerp(0.38, 0.8, owner.State.AerobicLevel) * 2.5;
+            double force = MathUtil.Lerp(0.38, 0.8, owner.State.AerobicLevel) *
+                (owner.State.FlipFromSlide ? 2.5 : 1.0);
             chest.Velocity -= perpendicular * (direction * force);
             hips.Velocity += perpendicular * (direction * force);
             owner.State.Standing = false;
@@ -718,6 +729,7 @@ namespace RainWorldDesktopPet.Creature
                 owner.State.Animation = AnimationIndex.None;
                 owner.State.Standing = chest.Position.Y < hips.Position.Y - 3.0;
                 owner.State.RollDirection = 0;
+                owner.State.FlipFromSlide = false;
             }
         }
 

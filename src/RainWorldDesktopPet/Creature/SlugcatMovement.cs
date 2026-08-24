@@ -25,6 +25,7 @@ namespace RainWorldDesktopPet.Creature
 
         public long IgnoredSurfaceId { get { return dropThroughTicks > 0 ? dropThroughSurfaceId : 0; } }
         public VirtualInput[] InputHistory { get { return (VirtualInput[])inputHistory.Clone(); } }
+        internal VirtualInput[] InputHistoryForRead { get { return inputHistory; } }
         public Vec2[] LastAirMovementContribution { get { return lastAirMovementContribution; } }
         public double[] LastAirHorizontalVelocityBefore { get { return lastAirHorizontalVelocityBefore; } }
         public double[] LastAirHorizontalVelocityAfter { get { return lastAirHorizontalVelocityAfter; } }

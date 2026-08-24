@@ -62,7 +62,20 @@ namespace RainWorldDesktopPet.Creature
         public Vec2 TargetPosition;
         public Vec2 PreviousPreviousPosition;
         public Vec2 PreviousPreviousPreviousPosition;
-        public bool IsAlive { get { return Life > 0.0 && Lifetime > 0; } }
+        public bool IsAlive
+        {
+            get
+            {
+                // Match each original CosmeticSprite's destruction check.
+                // Smoke checks lastLife <= 0, ExplosionLight checks lastLife < 0,
+                // and ShockWave checks lastLife > 1 after advancing.
+                if (Kind == AbilityEffectKind.Smoke ||
+                    Kind == AbilityEffectKind.FlashingSmoke) return LastLife > 0.0;
+                if (Kind == AbilityEffectKind.ExplosionLight) return LastLife >= 0.0;
+                if (Kind == AbilityEffectKind.ShockWave) return LastLife <= 1.0;
+                return Life > 0.0 && Lifetime > 0;
+            }
+        }
 
         public static AbilityEffect CreateExplosionSmoke(Vec2 position, Vec2 velocity,
             double size, Random source)
@@ -98,6 +111,9 @@ namespace RainWorldDesktopPet.Creature
             AbilityEffect effect = new AbilityEffect(AbilityEffectKind.ExplosionLight,
                 position, Vec2.Zero, lifeTime, radius);
             effect.Intensity = alpha;
+            // ExplosionLight initializes lastLife to zero, so the same-tick
+            // draw interpolates into the three-frame flash instead of popping.
+            effect.LastLife = 0.0;
             return effect;
         }
 
@@ -113,7 +129,12 @@ namespace RainWorldDesktopPet.Creature
                     Math.Max(standardLifeTime + 1, exceptionalLifeTime));
             lifeTime = Math.Max(1, lifeTime);
             AbilityEffect effect = new AbilityEffect(AbilityEffectKind.Spark,
-                initialPosition, velocity, lifeTime, 2.0);
+                initialPosition, velocity, lifeTime, 1.0);
+            // Spark stores lastPos before offsetting pos along velocity. Its
+            // three-point trail history begins at the unshifted spawn point.
+            effect.LastPosition = position;
+            effect.PreviousPreviousPosition = position;
+            effect.PreviousPreviousPreviousPosition = position;
             effect.Gravity = gravity;
             effect.collisionChunk = new BodyChunk(0, effect.Position, 1.0, 0.01);
             return effect;
@@ -166,7 +187,6 @@ namespace RainWorldDesktopPet.Creature
             else if (Kind == AbilityEffectKind.ShockWave)
             {
                 Life += 1.0 / Math.Max(1.0, LifeTime);
-                if (Life >= 1.0) Life = -1.0;
             }
             else
             {
@@ -341,6 +361,7 @@ namespace RainWorldDesktopPet.Creature
             }
 
             Owner.State.Animation = AnimationIndex.Flip;
+            Owner.State.FlipFromSlide = false;
             Owner.State.BodyMode = BodyModeIndex.Default;
             Owner.State.Grounded = false;
             explosiveJumpCounter++;
@@ -372,16 +393,13 @@ namespace RainWorldDesktopPet.Creature
         private void EmitJumpEffects(bool parry)
         {
             Vec2 effectPosition = Owner.BodyChunks[0].Position;
-            Owner.EmitSound("Fire_Spear_Explode", effectPosition,
-                0.3 + random.NextDouble() * 0.3,
-                0.5 + random.NextDouble() * 2.0, 1);
-            Owner.AddEffect(AbilityEffect.CreateExplosionLight(effectPosition,
-                160.0, 1.0, 3));
             for (int i = 0; i < 8; i++)
             {
                 Owner.AddEffect(AbilityEffect.CreateExplosionSmoke(effectPosition,
                     RandomUnit() * (5.0 * random.NextDouble()), 1.0, random));
             }
+            Owner.AddEffect(AbilityEffect.CreateExplosionLight(effectPosition,
+                160.0, 1.0, 3));
             for (int i = 0; i < 10; i++)
             {
                 Vec2 at = effectPosition + RandomUnit() * (40.0 * random.NextDouble());
@@ -394,6 +412,9 @@ namespace RainWorldDesktopPet.Creature
                 Owner.AddEffect(AbilityEffect.CreateShockWave(effectPosition,
                     200.0, 0.2, 6));
             }
+            Owner.EmitSound("Fire_Spear_Explode", effectPosition,
+                0.3 + random.NextDouble() * 0.3,
+                0.5 + random.NextDouble() * 2.0, 1);
         }
 
         private void ApplyOverheat(int dangerThreshold)
@@ -412,10 +433,10 @@ namespace RainWorldDesktopPet.Creature
                 deathPosition, Vec2.Zero, 400, 80.0));
             Owner.AddEffect(new AbilityEffect(AbilityEffectKind.Explosion,
                 deathPosition, Vec2.Zero, 7, 350.0));
-            Owner.AddEffect(new AbilityEffect(AbilityEffectKind.ExplosionLight,
-                deathPosition, Vec2.Zero, 7, 280.0));
-            Owner.AddEffect(new AbilityEffect(AbilityEffectKind.ExplosionLight,
-                deathPosition, Vec2.Zero, 3, 230.0));
+            Owner.AddEffect(AbilityEffect.CreateExplosionLight(deathPosition,
+                280.0, 1.0, 7));
+            Owner.AddEffect(AbilityEffect.CreateExplosionLight(deathPosition,
+                230.0, 1.0, 3));
             Owner.AddEffect(new AbilityEffect(AbilityEffectKind.ExplosionSpikes,
                 deathPosition, Vec2.Zero, 7, 170.0));
             Owner.AddEffect(AbilityEffect.CreateShockWave(deathPosition,
@@ -795,8 +816,13 @@ namespace RainWorldDesktopPet.Creature
         public Vec2 TonguePosition { get { return position; } }
         public Vec2[] Rope { get { return (Vec2[])rope.Clone(); } }
         public Vec2[] LastRope { get { return (Vec2[])lastRope.Clone(); } }
+        internal Vec2[] RopeForRender { get { return rope; } }
+        internal Vec2[] LastRopeForRender { get { return lastRope; } }
         public double RopeTotalLength { get { return desktopRope.TotalLength; } }
         public double RequestedRopeLength { get { return requestedLength; } }
+        public double LastElasticityExcess { get; private set; }
+        public double LastElasticityTargetLength { get; private set; }
+        public double LastElasticityRequestLength { get; private set; }
         public double RopeStretchFactor
         {
             get
@@ -958,6 +984,9 @@ namespace RainWorldDesktopPet.Creature
             position = Owner.BodyChunks[0].Position;
             lastPosition = position;
             returning = false;
+            LastElasticityExcess = 0.0;
+            LastElasticityTargetLength = 0.0;
+            LastElasticityRequestLength = 0.0;
             FillRope(position, position, null);
         }
 
@@ -1087,10 +1116,26 @@ namespace RainWorldDesktopPet.Creature
             double terrainMassShare = mode == SaintTongueMode.AttachedToTerrain ? 1.0 : 0.0;
             Vec2 baseDirection = (desktopRope.AConnect -
                 Owner.BodyChunks[0].Position).Normalized;
-            double requestRope = Math.Min(requestedLength, desktopRope.TotalLength);
-            double targetLength = requestRope * MathUtil.Lerp(0.7, 1.0, elastic);
+            // Tongue.RequestRope uses min(requestedRopeLength,
+            // onRopePos * totalRope). Terrain attachment uses the player's
+            // default onRopePos=1 and totalRope=200. Attached elasticity then
+            // maps a from 1.1 to 1 as elastic relaxes; the previous 0.7 made a
+            // slack rope pull Saint toward the anchor every tick.
+            const double onRopePosition = 1.0;
+            const double totalRope = 200.0;
+            double requestRope = Math.Min(requestedLength,
+                onRopePosition * totalRope);
+            LastElasticityRequestLength = requestRope;
+            double attachedFactor = MathUtil.Lerp(1.1, 0.7,
+                MathUtil.InverseLerp(0.5, 0.4,
+                    Math.Abs(0.5 - onRopePosition)));
+            double targetLength = requestRope * MathUtil.Lerp(
+                mode == SaintTongueMode.AttachedToTerrain ? attachedFactor : 0.7,
+                1.0, elastic);
+            LastElasticityTargetLength = targetLength;
             double strength = MathUtil.Lerp(0.85, 0.25, elastic);
             double excess = desktopRope.TotalLength - targetLength;
+            LastElasticityExcess = excess;
             if (excess <= 0.0) return;
             Owner.BodyChunks[0].Velocity += baseDirection *
                 (excess * strength * terrainMassShare);

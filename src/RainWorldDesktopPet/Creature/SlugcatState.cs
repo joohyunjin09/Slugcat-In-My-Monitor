@@ -94,6 +94,9 @@ namespace RainWorldDesktopPet.Creature
         public int ConsistentDownDiagonal;
         public int LowerBodyFramesOnGround;
         public int UpperBodyFramesOffGround;
+        // Player.flipFromSlide selects the 2.5x angular impulse used only by
+        // the belly-slide reversal. A standing backflip uses the base impulse.
+        public bool FlipFromSlide;
 
         // Creature.Stunned is deliberately not equivalent to stun > 0.
         // Rain World considers a creature unconscious only while stun >= 10.

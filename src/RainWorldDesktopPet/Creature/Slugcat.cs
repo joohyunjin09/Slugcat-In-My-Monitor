@@ -17,6 +17,8 @@ namespace RainWorldDesktopPet.Creature
         private readonly List<SoundEvent> soundEvents = new List<SoundEvent>();
         private readonly List<AbilityEffect> effects = new List<AbilityEffect>();
         private readonly List<DesktopSpear> spears = new List<DesktopSpear>();
+        private readonly IList<AbilityEffect> effectView;
+        private readonly IList<DesktopSpear> spearView;
         private readonly Dictionary<DesktopSpear, string> spearAirLoops =
             new Dictionary<DesktopSpear, string>();
         private readonly Random spearImpactRandom = new Random(0x5BEA7);
@@ -29,6 +31,8 @@ namespace RainWorldDesktopPet.Creature
 
         public Slugcat(Vec2 spawnPosition, SlugcatId selectedSlugcat)
         {
+            effectView = effects.AsReadOnly();
+            spearView = spears.AsReadOnly();
             BodyChunks = new BodyChunk[2];
             BodyChunks[0] = new BodyChunk(0, spawnPosition + new Vec2(0.0, -SimulationConstants.BodyConnectionDistance),
                 SimulationConstants.MainChunkRadius, SimulationConstants.MainChunkMass);
@@ -60,8 +64,8 @@ namespace RainWorldDesktopPet.Creature
         public SlugcatProfile SelectedSlugcat { get; private set; }
         public SlugcatAppearance Appearance { get; private set; }
         public ISlugcatAbilityController AbilityController { get { return abilityController; } }
-        public IList<AbilityEffect> AbilityEffects { get { return effects.AsReadOnly(); } }
-        public IList<DesktopSpear> Spears { get { return spears.AsReadOnly(); } }
+        public IList<AbilityEffect> AbilityEffects { get { return effectView; } }
+        public IList<DesktopSpear> Spears { get { return spearView; } }
         public TerrainImpactData LastTerrainImpact { get { return lastTerrainImpact; } }
         public long LastTerrainImpactTick { get; private set; }
         public long TerrainImpactSequence { get; private set; }
@@ -281,7 +285,7 @@ namespace RainWorldDesktopPet.Creature
                 State.Standing = false;
             }
             State.Conscious = !State.Dead && State.StunCounter < 10;
-            if (beginsStun) EmitSound("Slugcat_Stunned_Init", Center, 1.0, 1.0, 10);
+            if (beginsStun) EmitSound("UI_Slugcat_Stunned_Init", Center, 1.0, 1.0, 10);
         }
 
         public void Die()
@@ -467,6 +471,13 @@ namespace RainWorldDesktopPet.Creature
             SoundEvent[] result = soundEvents.ToArray();
             soundEvents.Clear();
             return result;
+        }
+
+        public void DrainSoundEvents(ICollection<SoundEvent> target)
+        {
+            if (target == null) throw new ArgumentNullException("target");
+            for (int i = 0; i < soundEvents.Count; i++) target.Add(soundEvents[i]);
+            soundEvents.Clear();
         }
 
         public void AddEffect(AbilityEffect effect)

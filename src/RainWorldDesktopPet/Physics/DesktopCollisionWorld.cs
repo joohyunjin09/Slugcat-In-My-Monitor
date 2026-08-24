@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Drawing;
+using System.Threading;
 using RainWorldDesktopPet.Core;
 using RainWorldDesktopPet.Desktop;
 using RainWorldDesktopPet.Graphics;
@@ -9,6 +10,13 @@ namespace RainWorldDesktopPet.Physics
 {
     public sealed class DesktopCollisionWorld
     {
+        private sealed class PendingRefresh
+        {
+            public IList<DesktopWindowSnapshot> Windows;
+            public IList<MonitorInfo> Monitors;
+            public bool EnumerationSucceeded;
+        }
+
         private sealed class CachedWindow
         {
             public long Id;
@@ -43,6 +51,9 @@ namespace RainWorldDesktopPet.Physics
         private IList<MonitorInfo> monitors;
         private long snapshotVersion;
         private DesktopCollisionSnapshot currentSnapshot;
+        private readonly object refreshSync = new object();
+        private PendingRefresh pendingRefresh;
+        private int refreshInFlight;
 
         public DesktopCollisionWorld(WindowEnumerator windowEnumerator)
         {
@@ -60,6 +71,63 @@ namespace RainWorldDesktopPet.Physics
         {
             IList<DesktopWindowSnapshot> windows = windowEnumerator.Enumerate(overlayHandle);
             RefreshFromSnapshots(windows, windowEnumerator.LastEnumerationSucceeded, true);
+        }
+
+        // EnumWindows, DWM queries and monitor topology reads can occasionally
+        // wait on another desktop process. Keep that work outside the fixed/UI
+        // loop and publish one immutable input snapshot at a time.
+        public void RequestRefresh(IntPtr overlayHandle)
+        {
+            if (Interlocked.CompareExchange(ref refreshInFlight, 1, 0) != 0) return;
+            try
+            {
+                ThreadPool.QueueUserWorkItem(delegate
+                {
+                    PendingRefresh result = new PendingRefresh();
+                    try
+                    {
+                        result.Windows = windowEnumerator.Enumerate(overlayHandle);
+                        result.EnumerationSucceeded = windowEnumerator.LastEnumerationSucceeded;
+                        result.Monitors = MonitorManager.GetMonitors();
+                    }
+                    catch
+                    {
+                        result.Windows = new DesktopWindowSnapshot[0];
+                        result.EnumerationSucceeded = false;
+                        result.Monitors = null;
+                    }
+                    lock (refreshSync) pendingRefresh = result;
+                });
+            }
+            catch
+            {
+                Interlocked.Exchange(ref refreshInFlight, 0);
+                throw;
+            }
+        }
+
+        public bool TryApplyPendingRefresh()
+        {
+            PendingRefresh result;
+            lock (refreshSync)
+            {
+                result = pendingRefresh;
+                if (result == null) return false;
+                pendingRefresh = null;
+            }
+            // Missing windows expire through the normal grace count. Avoiding
+            // IsWindow/DWM revalidation here is what keeps application calls
+            // completely off the simulation thread.
+            try
+            {
+                RefreshFromSnapshots(result.Windows, result.EnumerationSucceeded,
+                    false, result.Monitors);
+                return true;
+            }
+            finally
+            {
+                Interlocked.Exchange(ref refreshInFlight, 0);
+            }
         }
 
         public void RefreshFromSnapshots(IList<DesktopWindowSnapshot> windows)

@@ -37,9 +37,12 @@ namespace RainWorldDesktopPet.Core
         private readonly WorkshopLog workshopLog;
         private WorkshopCatalog workshopCatalog;
         private DmsSkinCatalog dmsSkins;
+        private readonly Dictionary<string, string> dmsPartSelections =
+            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         private PushToMeowLibrary pushToMeow;
         private NaturalMeowController meowController;
         private readonly WorkshopAssetCache workshopAssetCache = new WorkshopAssetCache();
+        private readonly List<SoundEvent> pendingSounds = new List<SoundEvent>(16);
 
         public GameLoop(IntPtr overlayHandle, RainWorldInstallation installation,
             SlugcatId selectedSlugcat)
@@ -166,6 +169,17 @@ namespace RainWorldDesktopPet.Core
         {
             get { return dmsSkins == null ? new DmsSkinDefinition[0] : dmsSkins.Skins; }
         }
+
+        public bool TryGetDmsPartPreview(string part, out AtlasSprite sprite)
+        {
+            sprite = null;
+            string element = DmsSpriteGroups.PreviewElement(part);
+            if (string.IsNullOrEmpty(element)) return false;
+            DmsSkinDefinition skin = Renderer.GetDmsPart(part);
+            if (skin != null && skin.TryGetSprite(element, CurrentSlugcatId(),
+                DmsSpriteSide.None, out sprite)) return true;
+            return atlas != null && atlas.TryGet(element, out sprite);
+        }
         public DmsSkinDefinition ActiveDmsSkin { get { return Renderer.ActiveDmsSkin; } }
         public bool PushToMeowAvailable { get { return pushToMeow != null && pushToMeow.IsAvailable; } }
 
@@ -193,13 +207,17 @@ namespace RainWorldDesktopPet.Core
                 return;
             }
 
+            if (World.TryApplyPendingRefresh())
+            {
+                Vec2 surfaceDelta = Slugcat.ApplyMovingSurfaceDelta(World);
+                Graphics.ApplyMovingSurfaceDelta(surfaceDelta);
+            }
+
             surfaceRefreshAccumulator += elapsed;
             if (surfaceRefreshAccumulator >= SimulationConstants.WindowRefreshSeconds)
             {
                 surfaceRefreshAccumulator %= SimulationConstants.WindowRefreshSeconds;
-                World.Refresh(overlayHandle);
-                Vec2 surfaceDelta = Slugcat.ApplyMovingSurfaceDelta(World);
-                Graphics.ApplyMovingSurfaceDelta(surfaceDelta);
+                World.RequestRefresh(overlayHandle);
             }
 
             fixedTimeStep.AddElapsed(elapsed);
@@ -221,13 +239,15 @@ namespace RainWorldDesktopPet.Core
                     : AI.Step(Slugcat, World, mouse, mouseAttention);
                 Slugcat.Step(input, World, mouse.Position, mouse.Velocity);
                 RecoverFromDesktopEscape();
-                SoundEvent[] sounds = Slugcat.DrainSoundEvents();
-                for (int soundIndex = 0; soundIndex < sounds.Length; soundIndex++)
-                    Audio.Play(sounds[soundIndex], Slugcat.Center, simulationTick, 500.0);
+                pendingSounds.Clear();
+                Slugcat.DrainSoundEvents(pendingSounds);
+                for (int soundIndex = 0; soundIndex < pendingSounds.Count; soundIndex++)
+                    Audio.Play(pendingSounds[soundIndex], Slugcat.Center, simulationTick, 500.0);
                 if (!Slugcat.State.Conscious || Slugcat.State.Dead ||
                     Slugcat.State.StunCounter > 0)
                     mouseAttention.Suppress(now, mouse.Position, Graphics.Head.Position);
-                parityDiagnostics.ObserveSurfaceState(Slugcat, World, input, simulationTick);
+                if (DebugEnabled)
+                    parityDiagnostics.ObserveSurfaceState(Slugcat, World, input, simulationTick);
                 Graphics.Step(AI.Attention, AI.OriginalAttentionTarget,
                     AI.MouseAttentionActive && Slugcat.State.Conscious &&
                         !Slugcat.State.Dead && Slugcat.State.StunCounter < 1,
@@ -249,8 +269,10 @@ namespace RainWorldDesktopPet.Core
 
         public SlugcatPose BuildPose()
         {
-            SlugcatPose pose = Graphics.BuildPose(Interpolation, AI.Attention, simulationTick);
-            pose.AudioProfileDebug += " | " + Audio.Status + " | last=" + Audio.LastEvent;
+            SlugcatPose pose = Graphics.BuildPose(Interpolation, AI.Attention,
+                simulationTick, DebugEnabled);
+            if (DebugEnabled)
+                pose.AudioProfileDebug += " | " + Audio.Status + " | last=" + Audio.LastEvent;
             meowController.ApplyPose(pose, clock.Elapsed.TotalSeconds);
             pose.LogicTicksPerSecond = SimulationConstants.LogicTicksPerSecond;
             pose.LogicStepSeconds = fixedTimeStep.StepSeconds;
@@ -308,7 +330,7 @@ namespace RainWorldDesktopPet.Core
                 pose.CurrentSurfaceRight = 0.0;
                 pose.CurrentSurfaceTop = 0.0;
             }
-            parityDiagnostics.Observe(pose);
+            if (DebugEnabled) parityDiagnostics.Observe(pose);
             return pose;
         }
 
@@ -423,11 +445,25 @@ namespace RainWorldDesktopPet.Core
             return true;
         }
 
-        public bool SetDmsSkin(string id, out string reason)
+        public string GetDmsPartSelection(string part)
         {
+            string id;
+            return !string.IsNullOrWhiteSpace(part) &&
+                dmsPartSelections.TryGetValue(part, out id) ? id : null;
+        }
+
+        public bool SetDmsPart(string part, string id, out string reason)
+        {
+            if (string.IsNullOrWhiteSpace(part) ||
+                !DmsSpriteGroups.Required.ContainsKey(part))
+            {
+                reason = "Unknown DMS part: " + (part ?? "<null>");
+                return false;
+            }
             if (string.IsNullOrWhiteSpace(id))
             {
-                Renderer.SetDmsSkin(null);
+                dmsPartSelections.Remove(part);
+                Renderer.SetDmsPart(part, null);
                 reason = null;
                 return true;
             }
@@ -442,21 +478,63 @@ namespace RainWorldDesktopPet.Core
                 reason = "The source mod is installed but disabled in Rain World Remix: " + skin.ModName;
                 return false;
             }
-            Renderer.SetDmsSkin(skin);
+            if (!skin.HasPart(part))
+            {
+                reason = skin.Name + " does not provide a complete " + part + " sprite group.";
+                return false;
+            }
+            dmsPartSelections[part] = skin.Id;
+            Renderer.SetDmsPart(part, skin);
+            reason = null;
+            return true;
+        }
+
+        public void ClearDmsParts()
+        {
+            dmsPartSelections.Clear();
+            Renderer.ClearDmsParts();
+        }
+
+        // Command-line compatibility: it atomically replaces every selection,
+        // rather than layering a whole skin over retained editor overrides.
+        public bool SetDmsSkin(string id, out string reason)
+        {
+            if (string.IsNullOrWhiteSpace(id))
+            {
+                ClearDmsParts();
+                reason = null;
+                return true;
+            }
+            DmsSkinDefinition skin = dmsSkins == null ? null : dmsSkins.Find(id);
+            if (skin == null)
+            {
+                reason = "DMS spritesheet is no longer installed: " + id;
+                return false;
+            }
+            if (!skin.IsModActive)
+            {
+                reason = "The source mod is installed but disabled in Rain World Remix: " + skin.ModName;
+                return false;
+            }
+            ClearDmsParts();
+            foreach (string part in skin.AvailableParts)
+            {
+                dmsPartSelections[part] = skin.Id;
+                Renderer.SetDmsPart(part, skin);
+            }
             reason = null;
             return true;
         }
 
         public void RefreshWorkshopIntegration()
         {
-            string selected = ActiveDmsSkin == null ? null : ActiveDmsSkin.Id;
             workshopCatalog.Refresh();
-            ReloadWorkshopIntegrations(selected);
+            ReloadWorkshopIntegrations(null);
         }
 
         private void ReloadWorkshopIntegrations(string selectedDmsId)
         {
-            Renderer.SetDmsSkin(null);
+            Renderer.ClearDmsParts();
             if (meowController != null) meowController.Dispose();
             if (dmsSkins != null) dmsSkins.Dispose();
             dmsSkins = new DmsSkinCatalog(workshopCatalog, workshopLog);
@@ -465,6 +543,18 @@ namespace RainWorldDesktopPet.Core
                 Environment.TickCount ^ workshopCatalog.Revision, workshopAssetCache);
             meowController = new NaturalMeowController(pushToMeow, workshopLog,
                 Environment.TickCount ^ 0x514D454F);
+            // Re-resolve each explicit part against the new catalog. Missing,
+            // disabled, or now-incomplete sheets become Vanilla; no stale atlas
+            // reference survives disposal of the old catalog.
+            string[] selectedParts = new string[dmsPartSelections.Count];
+            dmsPartSelections.Keys.CopyTo(selectedParts, 0);
+            for (int i = 0; i < selectedParts.Length; i++)
+            {
+                string selectedId = dmsPartSelections[selectedParts[i]];
+                string ignored;
+                if (!SetDmsPart(selectedParts[i], selectedId, out ignored))
+                    dmsPartSelections.Remove(selectedParts[i]);
+            }
             if (!string.IsNullOrWhiteSpace(selectedDmsId))
             {
                 string ignored;

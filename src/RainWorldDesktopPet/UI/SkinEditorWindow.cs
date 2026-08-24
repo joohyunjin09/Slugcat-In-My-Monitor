@@ -10,19 +10,18 @@ using RainWorldDesktopPet.Core;
 using RainWorldDesktopPet.Creature;
 using RainWorldDesktopPet.Graphics;
 using RainWorldDesktopPet.RainWorld;
+using RainWorldDesktopPet.Workshop;
 
 namespace RainWorldDesktopPet.UI
 {
     public sealed class SkinEditorWindow : Form
     {
-        private static readonly string[] PartNames =
-        { "Head", "Face", "Body", "Arms", "Hips", "Legs", "Tail", "The Mark" };
+        private static readonly string[] PartNames = DmsSpriteGroups.SelectableParts;
 
         private static readonly CharacterChoice[] Characters = BuildCharacterChoices();
 
         private readonly GameLoop gameLoop;
         private readonly Action stateChanged;
-        private readonly DmsSpriteCatalog catalog;
         private readonly Dictionary<string, ComboBox> partSelectors =
             new Dictionary<string, ComboBox>(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, Button> colorButtons =
@@ -33,7 +32,6 @@ namespace RainWorldDesktopPet.UI
         private readonly Panel previewPanel;
         private readonly Label assetLabel;
         private readonly ToolStripStatusLabel statusLabel;
-        private readonly CheckBox entireSetCheck;
         private bool updatingControls;
 
         public SkinEditorWindow(GameLoop gameLoop, Action stateChanged)
@@ -41,15 +39,15 @@ namespace RainWorldDesktopPet.UI
             if (gameLoop == null) throw new ArgumentNullException("gameLoop");
             this.gameLoop = gameLoop;
             this.stateChanged = stateChanged;
-            catalog = new DmsSpriteCatalog(gameLoop.Installation);
-            for (int i = 0; i < PartNames.Length; i++) partSelections[PartNames[i]] = "default";
+            for (int i = 0; i < PartNames.Length; i++)
+                partSelections[PartNames[i]] = gameLoop.GetDmsPartSelection(PartNames[i]) ?? "default";
 
-            Text = "Slugcat Skin Editor (Experimental)";
+            Text = "Slugcat Skin Editor";
             FormBorderStyle = FormBorderStyle.Sizable;
             StartPosition = FormStartPosition.CenterScreen;
             ShowInTaskbar = true;
-            MinimumSize = new Size(920, 600);
-            ClientSize = new Size(1120, 700);
+            MinimumSize = new Size(920, 720);
+            ClientSize = new Size(1120, 820);
             Font = new Font("Segoe UI", 9.0f, FontStyle.Regular, GraphicsUnit.Point);
 
             TableLayoutPanel root = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(10),
@@ -64,7 +62,7 @@ namespace RainWorldDesktopPet.UI
 
             Label experimentalNotice = new Label
             {
-                Text = "Experimental: Only Dress My Slugcat (DMS) sprite sets are supported. Other Workshop mods are not loaded.",
+                Text = "Each part has one explicit source. Incomplete DMS parts fall back to the current Vanilla Slugcat.",
                 Dock = DockStyle.Fill,
                 BackColor = Color.FromArgb(255, 244, 204),
                 ForeColor = Color.FromArgb(95, 69, 0),
@@ -83,7 +81,7 @@ namespace RainWorldDesktopPet.UI
 
             GroupBox partsGroup = new GroupBox { Text = "Appearance Parts", Dock = DockStyle.Fill };
             TableLayoutPanel parts = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(8),
-                ColumnCount = 3, RowCount = PartNames.Length + 1 };
+                ColumnCount = 3, RowCount = PartNames.Length };
             parts.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 85));
             parts.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             parts.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 92));
@@ -91,7 +89,7 @@ namespace RainWorldDesktopPet.UI
             {
                 string part = PartNames[i];
                 parts.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-                Label label = new Label { Text = part, Dock = DockStyle.Fill,
+                Label label = new Label { Text = PartDisplayName(part), Dock = DockStyle.Fill,
                     TextAlign = ContentAlignment.MiddleLeft };
                 ComboBox selector = new ComboBox { Dock = DockStyle.Fill,
                     DropDownStyle = ComboBoxStyle.DropDownList, Tag = part };
@@ -105,10 +103,6 @@ namespace RainWorldDesktopPet.UI
                 parts.Controls.Add(selector, 1, i);
                 parts.Controls.Add(color, 2, i);
             }
-            entireSetCheck = new CheckBox { Text = "Apply Selected Set to Every Available Part",
-                AutoSize = true, Dock = DockStyle.Fill };
-            parts.SetColumnSpan(entireSetCheck, 3);
-            parts.Controls.Add(entireSetCheck, 0, PartNames.Length);
             partsGroup.Controls.Add(parts);
             root.Controls.Add(partsGroup, 1, 1);
 
@@ -146,7 +140,7 @@ namespace RainWorldDesktopPet.UI
 
             PopulateSpriteSelectors();
             RefreshFromGame();
-            SetStatus(catalog.Status);
+            SetStatus(gameLoop.DmsSkins.Count + " DMS spritesheets loaded. Part choices follow the installed DMS DLL rules.");
         }
 
         public void RefreshFromGame()
@@ -160,6 +154,10 @@ namespace RainWorldDesktopPet.UI
                 for (int i = 0; i < PartNames.Length; i++)
                 {
                     string part = PartNames[i];
+                    partSelections[part] = gameLoop.GetDmsPartSelection(part) ?? "default";
+                    ComboBox selector = partSelectors[part];
+                    int selected = FindChoice(selector, partSelections[part]);
+                    selector.SelectedIndex = selected < 0 ? 0 : selected;
                     Color color = gameLoop.GetPartColor(part);
                     colorButtons[part].BackColor = color;
                     colorButtons[part].ForeColor = ReadableText(color);
@@ -168,12 +166,6 @@ namespace RainWorldDesktopPet.UI
             }
             finally { updatingControls = false; }
             previewPanel.Invalidate();
-        }
-
-        protected override void Dispose(bool disposing)
-        {
-            if (disposing) catalog.Dispose();
-            base.Dispose(disposing);
         }
 
         private void PopulateSpriteSelectors()
@@ -187,14 +179,14 @@ namespace RainWorldDesktopPet.UI
                     ComboBox selector = partSelectors[part];
                     string selectedId = partSelections[part];
                     selector.Items.Clear();
-                    selector.Items.Add(new SpriteChoice("Default", "default", null));
-                    for (int j = 0; j < catalog.Sets.Count; j++)
+                    selector.Items.Add(new SpriteChoice("Vanilla " +
+                        gameLoop.SelectedSlugcat.DisplayName, "default", null));
+                    for (int j = 0; j < gameLoop.DmsSkins.Count; j++)
                     {
-                        DmsSpriteSet set = catalog.Sets[j];
-                        string image;
-                        string metadata;
-                        if (set.TryGetPartFiles(part, out image, out metadata))
-                            selector.Items.Add(new SpriteChoice(set.Name, set.Id, set));
+                        DmsSkinDefinition set = gameLoop.DmsSkins[j];
+                        if (set.IsModActive && set.HasPart(part))
+                            selector.Items.Add(new SpriteChoice(set.Name + " — " +
+                                PartDisplayName(part), set.Id, set));
                     }
                     selector.SelectedIndex = FindChoice(selector, selectedId);
                     if (selector.SelectedIndex < 0) selector.SelectedIndex = 0;
@@ -209,6 +201,7 @@ namespace RainWorldDesktopPet.UI
             CharacterChoice choice = characterList.SelectedItem as CharacterChoice;
             if (choice == null) return;
             gameLoop.SetSelectedSlugcat(choice.Id);
+            PopulateSpriteSelectors();
             Changed(choice.Name + " applied.");
         }
 
@@ -219,27 +212,22 @@ namespace RainWorldDesktopPet.UI
             SpriteChoice choice = selector == null ? null : selector.SelectedItem as SpriteChoice;
             string part = selector == null ? null : selector.Tag as string;
             if (choice == null || part == null) return;
-            if (entireSetCheck.Checked && choice.Set != null)
-            {
-                for (int i = 0; i < PartNames.Length; i++) ApplySpriteChoice(PartNames[i], choice.Set);
-                PopulateSpriteSelectors();
-                Changed(choice.Name + " applied to every available part.");
-                return;
-            }
             ApplySpriteChoice(part, choice.Set);
             Changed(part + " sprite changed to " + choice.Name + ".");
         }
 
-        private void ApplySpriteChoice(string part, DmsSpriteSet set)
+        private void ApplySpriteChoice(string part, DmsSkinDefinition set)
         {
             if (set == null)
-            { gameLoop.ClearPartAtlas(part); partSelections[part] = "default"; return; }
-            string image;
-            string metadata;
-            if (!set.TryGetPartFiles(part, out image, out metadata)) return;
+            {
+                string clearReason;
+                gameLoop.SetDmsPart(part, null, out clearReason);
+                partSelections[part] = "default";
+                return;
+            }
             string reason;
-            if (!gameLoop.SetPartAtlas(part, image, metadata, out reason))
-            { SetStatus("Could not load " + set.Name + ": " + reason); return; }
+            if (!gameLoop.SetDmsPart(part, set.Id, out reason))
+            { SetStatus("Could not select " + set.Name + ": " + reason); return; }
             partSelections[part] = set.Id;
         }
 
@@ -261,14 +249,20 @@ namespace RainWorldDesktopPet.UI
         }
 
         private void ReloadCatalog(object sender, EventArgs e)
-        { catalog.Reload(); PopulateSpriteSelectors(); SetStatus(catalog.Status); }
+        {
+            gameLoop.RefreshWorkshopIntegration();
+            for (int i = 0; i < PartNames.Length; i++)
+                partSelections[PartNames[i]] = gameLoop.GetDmsPartSelection(PartNames[i]) ?? "default";
+            PopulateSpriteSelectors();
+            SetStatus(gameLoop.DmsSkins.Count + " DMS spritesheets reloaded.");
+        }
 
         private void ResetAll(object sender, EventArgs e)
         {
             gameLoop.SetSelectedSlugcat(SlugcatId.White);
             gameLoop.ClearPartColors();
-            for (int i = 0; i < PartNames.Length; i++)
-            { gameLoop.ClearPartAtlas(PartNames[i]); partSelections[PartNames[i]] = "default"; }
+            gameLoop.ClearDmsParts();
+            for (int i = 0; i < PartNames.Length; i++) partSelections[PartNames[i]] = "default";
             PopulateSpriteSelectors();
             RefreshFromGame();
             Changed("Appearance reset.");
@@ -337,7 +331,7 @@ namespace RainWorldDesktopPet.UI
 
         private string BuildAppearanceData()
         {
-            StringBuilder value = new StringBuilder("SIMM_SKIN_V3|");
+            StringBuilder value = new StringBuilder("SIMM_SKIN_V4|");
             value.Append(gameLoop.SelectedSlugcat.Id);
             for (int i = 0; i < PartNames.Length; i++)
             {
@@ -353,7 +347,8 @@ namespace RainWorldDesktopPet.UI
             string[] fields = (value ?? string.Empty).Trim().Split('|');
             SlugcatId character;
             int firstPart;
-            if (fields.Length >= 2 && fields[0] == "SIMM_SKIN_V3")
+            if (fields.Length >= 2 && (fields[0] == "SIMM_SKIN_V4" ||
+                fields[0] == "SIMM_SKIN_V3"))
             {
                 if (!SlugcatProfiles.TryParse(fields[1], out character))
                     throw new InvalidOperationException("The preset character data is invalid.");
@@ -372,8 +367,8 @@ namespace RainWorldDesktopPet.UI
             else
                 throw new InvalidOperationException("The file is not a Slugcat appearance preset.");
 
-            Dictionary<string, DmsSpriteSet> sets =
-                new Dictionary<string, DmsSpriteSet>(StringComparer.OrdinalIgnoreCase);
+            Dictionary<string, DmsSkinDefinition> sets =
+                new Dictionary<string, DmsSkinDefinition>(StringComparer.OrdinalIgnoreCase);
             Dictionary<string, Color> colors =
                 new Dictionary<string, Color>(StringComparer.OrdinalIgnoreCase);
             for (int i = firstPart; i < fields.Length; i++)
@@ -381,17 +376,15 @@ namespace RainWorldDesktopPet.UI
                 int equals = fields[i].IndexOf('=');
                 int comma = fields[i].LastIndexOf(',');
                 if (equals <= 0 || comma <= equals) continue;
-                string part = fields[i].Substring(0, equals);
+                string part = NormalizePresetPart(fields[i].Substring(0, equals));
                 if (!partSelectors.ContainsKey(part)) continue;
                 string id = fields[i].Substring(equals + 1, comma - equals - 1);
-                DmsSpriteSet set = FindSet(id);
+                DmsSkinDefinition set = FindSet(id);
                 if (!string.Equals(id, "default", StringComparison.OrdinalIgnoreCase))
                 {
                     if (set == null)
                         throw new InvalidOperationException("Required sprite set is not installed: " + id);
-                    string image;
-                    string metadata;
-                    if (!set.TryGetPartFiles(part, out image, out metadata))
+                    if (!set.HasPart(part))
                         throw new InvalidOperationException(set.Name + " does not contain " + part + ".");
                 }
                 sets[part] = set;
@@ -402,11 +395,17 @@ namespace RainWorldDesktopPet.UI
                 colors[part] = Color.FromArgb(unchecked((int)argb));
             }
 
+            // Loading a preset replaces the complete appearance state. V3 did
+            // not contain the four Downpour special groups, so those must
+            // explicitly become Vanilla rather than leaking from the current
+            // V4/editor selection.
             gameLoop.SetSelectedSlugcat(character);
+            gameLoop.ClearDmsParts();
+            gameLoop.ClearPartColors();
             for (int i = 0; i < PartNames.Length; i++)
             {
                 string part = PartNames[i];
-                DmsSpriteSet set;
+                DmsSkinDefinition set;
                 if (sets.TryGetValue(part, out set)) ApplySpriteChoice(part, set);
                 Color color;
                 if (colors.TryGetValue(part, out color)) gameLoop.SetPartColor(part, color);
@@ -466,7 +465,7 @@ namespace RainWorldDesktopPet.UI
             float scaleX, float scaleY)
         {
             AtlasSprite sprite;
-            if (!gameLoop.TryGetAtlasSprite(DmsSpriteCatalog.GetPreviewElement(part), false, out sprite)) return;
+            if (!gameLoop.TryGetDmsPartPreview(part, out sprite)) return;
             sprites.Add(new PreviewSprite
             {
                 Part = part,
@@ -591,12 +590,43 @@ namespace RainWorldDesktopPet.UI
             }
         }
 
-        private DmsSpriteSet FindSet(string id)
+        private DmsSkinDefinition FindSet(string id)
         {
             if (string.Equals(id, "default", StringComparison.OrdinalIgnoreCase)) return null;
-            for (int i = 0; i < catalog.Sets.Count; i++)
-                if (string.Equals(catalog.Sets[i].Id, id, StringComparison.OrdinalIgnoreCase)) return catalog.Sets[i];
+            for (int i = 0; i < gameLoop.DmsSkins.Count; i++)
+                if (string.Equals(gameLoop.DmsSkins[i].Id, id,
+                    StringComparison.OrdinalIgnoreCase)) return gameLoop.DmsSkins[i];
             return null;
+        }
+
+        private static string PartDisplayName(string part)
+        {
+            switch (part)
+            {
+                case "HEAD": return "Head";
+                case "FACE": return "Face";
+                case "BODY": return "Body";
+                case "ARMS": return "Arms";
+                case "HIPS": return "Hips";
+                case "LEGS": return "Legs";
+                case "TAIL": return "Tail";
+                case "FACESCAR": return "Artificer Face Scar";
+                case "GILLS": return "Rivulet Gills";
+                case "TAILSPECKLES": return "Spearmaster Tail Speckles";
+                case "ASCENSION": return "Saint Ascension";
+                case "PIXEL": return "The Mark / Pixel";
+                default: return part;
+            }
+        }
+
+        private static string NormalizePresetPart(string part)
+        {
+            string compact = (part ?? string.Empty).Trim().Replace(" ", string.Empty)
+                .Replace("_", string.Empty).Replace("-", string.Empty).ToUpperInvariant();
+            if (compact == "THEMARK" || compact == "MARK") return "PIXEL";
+            if (compact == "FACESCAR") return "FACESCAR";
+            if (compact == "TAILSPECKLES") return "TAILSPECKLES";
+            return compact;
         }
 
         private static int FindChoice(ComboBox selector, string id)
@@ -617,10 +647,10 @@ namespace RainWorldDesktopPet.UI
 
         private sealed class SpriteChoice
         {
-            public SpriteChoice(string name, string id, DmsSpriteSet set) { Name = name; Id = id; Set = set; }
+            public SpriteChoice(string name, string id, DmsSkinDefinition set) { Name = name; Id = id; Set = set; }
             public readonly string Name;
             public readonly string Id;
-            public readonly DmsSpriteSet Set;
+            public readonly DmsSkinDefinition Set;
             public override string ToString() { return Name; }
         }
 

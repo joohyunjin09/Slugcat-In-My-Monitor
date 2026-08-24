@@ -2,6 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.IO;
+using System.Diagnostics;
+using System.Threading;
 using RainWorldDesktopPet.Audio;
 using RainWorldDesktopPet.AI;
 using RainWorldDesktopPet.Core;
@@ -94,6 +96,8 @@ namespace RainWorldDesktopPet.Tests
                 GourmandExhaustionReplay);
             run("Local sounds.txt maps ability SoundIDs and PLAYALL metadata",
                 LocalAbilitySoundCatalog);
+            run("Installed UnityFS jump family decodes and queues without blocking",
+                LocalUnityFsAudioPlayback);
             run("Sound setting defaults ON, persists, and gates future events",
                 SoundSettingPersistenceAndGate);
         }
@@ -266,7 +270,12 @@ namespace RainWorldDesktopPet.Tests
                     True(effect.Radius >= 0.6 && effect.Radius <= 1.5,
                         "ExplosionSmoke rad range");
                 }
-                else if (effect.Kind == AbilityEffectKind.Spark) sparkCount++;
+                else if (effect.Kind == AbilityEffectKind.Spark)
+                {
+                    sparkCount++;
+                    Near(1.0, effect.Radius, 0.000001,
+                        "Spark triangle half-width");
+                }
                 else if (effect.Kind == AbilityEffectKind.ExplosionLight)
                 {
                     lightCount++;
@@ -274,6 +283,8 @@ namespace RainWorldDesktopPet.Tests
                         "ExplosionLight radius");
                     Near(3.0, effect.LifeTime, 0.000001,
                         "ExplosionLight lifetime");
+                    Near(0.0, effect.LastLife, 0.000001,
+                        "ExplosionLight initializes lastLife at zero");
                 }
                 True(effect.Kind != AbilityEffectKind.ShockWave,
                     "explosive jump does not create the parry-only ShockWave");
@@ -281,6 +292,32 @@ namespace RainWorldDesktopPet.Tests
             Equal(8, smokeCount, "ExplosionSmoke count");
             Equal(10, sparkCount, "Spark count");
             Equal(1, lightCount, "ExplosionLight count");
+            for (int i = 0; i < 8; i++)
+                True(slugcat.AbilityEffects[i].Kind == AbilityEffectKind.Smoke,
+                    "ExplosionSmoke creation order " + i);
+            True(slugcat.AbilityEffects[8].Kind == AbilityEffectKind.ExplosionLight,
+                "ExplosionLight follows the eight smoke objects");
+            for (int i = 9; i < 19; i++)
+                True(slugcat.AbilityEffects[i].Kind == AbilityEffectKind.Spark,
+                    "Spark creation order " + i);
+
+            AbilityEffect light = AbilityEffect.CreateExplosionLight(Vec2.Zero,
+                160.0, 1.0, 3);
+            for (int tick = 0; tick < 4; tick++) light.Step();
+            True(light.IsAlive,
+                "ExplosionLight waits until original lastLife becomes negative");
+            light.Step();
+            True(!light.IsAlive,
+                "ExplosionLight expires on the original fifth update check");
+
+            AbilityEffect wave = AbilityEffect.CreateShockWave(Vec2.Zero,
+                200.0, 0.2, 6);
+            for (int tick = 0; tick < 7; tick++) wave.Step();
+            True(wave.IsAlive && wave.Life > 1.0,
+                "ShockWave keeps its final clamped draw while lastLife is one");
+            wave.Step();
+            True(!wave.IsAlive,
+                "ShockWave expires only after lastLife exceeds one");
         }
 
         private static void SpearmasterExtractionReplay()
@@ -663,6 +700,8 @@ namespace RainWorldDesktopPet.Tests
                 "jump edge shoots through SaintTongueCheck");
             True(ability.Mode == SaintTongueMode.AttachedToTerrain,
                 "second tongue update attaches to desktop terrain");
+            True(ability.LastElasticityExcess <= 0.000001,
+                "newly attached rope is slack and applies no anchor pull");
             True(ContainsSound(shoot[0].Sounds, "Tube_Worm_Shoot_Tongue"),
                 "shoot sound tick");
             True(ContainsSound(shoot[1].Sounds, "Tube_Worm_Tongue_Hit_Terrain"),
@@ -675,6 +714,9 @@ namespace RainWorldDesktopPet.Tests
                     VirtualInput.Neutral,
                     new VirtualInput(0, 0, true, false)
                 });
+            True(ability.LastElasticityTargetLength >=
+                ability.LastElasticityRequestLength - 0.000001,
+                "attached neutral tick keeps the original >=1.0 rope allowance");
             True(ability.Mode == SaintTongueMode.Retracting,
                 "jump release preserves the original Retracting state for the frame");
             Near(-8.0, release[1].ChestVelocity.Y, 0.000001, "release chest velocity");
@@ -792,6 +834,52 @@ namespace RainWorldDesktopPet.Tests
                 "tongue shot retains all original variants");
             Equal(2, catalog["SM_Spear_Pull"].Clips.Length,
                 "Spearmaster pull retains both variants");
+            True(catalog.ContainsKey("UI_Slugcat_Stunned_Init"),
+                "stun uses the active UI_Slugcat_Stunned_Init SoundID");
+        }
+
+        private static void LocalUnityFsAudioPlayback()
+        {
+            RainWorldInstallation installation = new RainWorldLocator().Locate(null);
+            if (installation == null) return;
+            using (RainWorldAudioEngine audio = new RainWorldAudioEngine(installation))
+            {
+                string resolved;
+                int pcmBytes;
+                string reason;
+                True(audio.TryResolveAndDecodeForDiagnostics("jump2", out resolved,
+                    out pcmBytes, out reason), "jump2 family decode: " + reason);
+                True(resolved.StartsWith("jump2", StringComparison.OrdinalIgnoreCase) &&
+                    !string.Equals(resolved, "jump2", StringComparison.OrdinalIgnoreCase),
+                    "unindexed sounds.txt name resolves to an installed indexed variant");
+                True(pcmBytes > 44, "resolved FSB5 clip exposes PCM16 data");
+
+                PlayInstalledEvent(audio, "Slugcat_Normal_Jump", 1);
+                PlayInstalledEvent(audio, "Slugcat_Step_A", 2);
+                PlayInstalledEvent(audio, "Slugcat_Terrain_Impact_Medium", 3);
+                PlayInstalledEvent(audio, "Slugcat_Floor_Impact_Standard", 4);
+                PlayInstalledEvent(audio, "Fire_Spear_Explode", 5);
+            }
+        }
+
+        private static void PlayInstalledEvent(RainWorldAudioEngine audio, string id,
+            long tick)
+        {
+            Stopwatch enqueue = Stopwatch.StartNew();
+            audio.Play(new SoundEvent(id, Vec2.Zero, 0.01, 1.0, 0),
+                Vec2.Zero, tick, 100.0);
+            enqueue.Stop();
+            True(enqueue.ElapsedMilliseconds < 100,
+                id + " returns before UnityFS extraction and SoundPlayer.Load");
+            Stopwatch deadline = Stopwatch.StartNew();
+            while (deadline.ElapsedMilliseconds < 3000 &&
+                !audio.LastEvent.StartsWith("playback started: " + id,
+                    StringComparison.OrdinalIgnoreCase) &&
+                !audio.LastEvent.StartsWith("playback failed",
+                    StringComparison.OrdinalIgnoreCase))
+                Thread.Sleep(10);
+            True(audio.LastEvent.StartsWith("playback started: " + id,
+                StringComparison.OrdinalIgnoreCase), id + ": " + audio.LastEvent);
         }
 
         private static DesktopCollisionWorld CreateAirWorld()

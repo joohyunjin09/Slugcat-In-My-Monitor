@@ -123,6 +123,7 @@ Windows ZIP과 SHA-256 파일이 자동으로 첨부됩니다. 자세한 절차�
 - [Slugcat 그래픽 프로필](docs/SlugcatGraphicsProfiles.md)
 - [로컬 자산 조사](docs/analysis/AssetFindings.md)
 - [DLL 조사](docs/analysis/DllFindings.md)
+- [원작 충실도 보강 기록](docs/analysis/RainWorldFidelityOverhaul.md)
 
 ## 에셋 및 상표
 
