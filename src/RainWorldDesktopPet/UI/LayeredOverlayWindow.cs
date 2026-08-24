@@ -43,6 +43,9 @@ namespace RainWorldDesktopPet.UI
             new List<Rectangle>(MaximumSlugcats);
         private readonly CompositionBatchPlanner compositionBatchPlanner =
             new CompositionBatchPlanner();
+        private readonly SimulationStepBudget simulationStepBudget =
+            new SimulationStepBudget();
+        private readonly int[] simulationStepLimits = new int[MaximumSlugcats];
         private readonly Dictionary<string, double> displayRefreshRates =
             new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
         private readonly DesktopCollisionWorld collisionWorld =
@@ -250,9 +253,10 @@ namespace RainWorldDesktopPet.UI
             {
                 PollDragInput();
                 RefreshCollisionWorld();
+                simulationStepBudget.Assign(gameLoops.Count, simulationStepLimits);
                 for (int i = 0; i < gameLoops.Count; i++)
                 {
-                    gameLoops[i].Advance(Handle);
+                    gameLoops[i].Advance(Handle, simulationStepLimits[i]);
                     poseBuffer[i] = gameLoops[i].BuildPose();
                 }
                 UpdateRenderCadence(poseBuffer, gameLoops.Count);

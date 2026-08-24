@@ -84,7 +84,7 @@ namespace RainWorldDesktopPet.Core
             Slugcat = new Slugcat(spawn, selectedSlugcat);
             lastVisibleCenter = Slugcat.Center;
             hasVisibleCenter = true;
-            AI = new DesktopPetAI(Environment.TickCount);
+            AI = new DesktopPetAI(Environment.TickCount, spawnIndex);
             AI.Attention.SetTarget(AttentionKind.RandomPoint,
                 spawn + new Vec2(Slugcat.State.Facing * 60.0, -20.0));
             RainWorldAssetLoader assetLoader = new RainWorldAssetLoader(installation);
@@ -161,6 +161,7 @@ namespace RainWorldDesktopPet.Core
             {
                 RainWorldAtlas replacement = RainWorldAtlasLoader.Load(imagePath, metadataPath);
                 atlas.SetPartOverride(part, replacement);
+                Renderer.InvalidateAtlasAvailability();
                 return true;
             }
             catch (Exception exception)
@@ -172,7 +173,11 @@ namespace RainWorldDesktopPet.Core
 
         public void ClearPartAtlas(string part)
         {
-            if (atlas != null) atlas.ClearPartOverride(part);
+            if (atlas != null)
+            {
+                atlas.ClearPartOverride(part);
+                Renderer.InvalidateAtlasAvailability();
+            }
         }
 
         public Color GetPartColor(string part) { return Graphics.GetPartColor(part); }
@@ -210,6 +215,13 @@ namespace RainWorldDesktopPet.Core
 
         public void Advance(IntPtr overlayHandle)
         {
+            Advance(overlayHandle, 3);
+        }
+
+        public void Advance(IntPtr overlayHandle, int maximumSteps)
+        {
+            if (maximumSteps < 1 || maximumSteps > 3)
+                throw new ArgumentOutOfRangeException("maximumSteps");
             double now = clock.Elapsed.TotalSeconds;
             double elapsed = lastTime <= 0.0 ? SimulationConstants.LogicStepSeconds : now - lastTime;
             lastTime = now;
@@ -234,7 +246,7 @@ namespace RainWorldDesktopPet.Core
 
             fixedTimeStep.AddElapsed(elapsed);
             int steps = 0;
-            while (steps < 3 && fixedTimeStep.ConsumeStep())
+            while (steps < maximumSteps && fixedTimeStep.ConsumeStep())
             {
                 if (!Slugcat.State.Conscious || Slugcat.State.Dead ||
                     Slugcat.State.StunCounter > 0)
@@ -276,6 +288,8 @@ namespace RainWorldDesktopPet.Core
             // MainLoopProcess.RawUpdate zeroes myTimeStacker after the third
             // catch-up Update, preventing a stalled desktop from spiralling.
             if (steps == 3) fixedTimeStep.Reset();
+            else fixedTimeStep.ClampAccumulator(
+                SimulationConstants.LogicStepSeconds * 2.0);
             simulationStepsLastFrame = steps;
         }
 

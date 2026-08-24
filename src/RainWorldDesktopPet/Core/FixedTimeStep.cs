@@ -41,5 +41,12 @@ namespace RainWorldDesktopPet.Core
         {
             accumulator = 0.0;
         }
+
+        public void ClampAccumulator(double maximumSeconds)
+        {
+            if (maximumSeconds < 0.0)
+                throw new ArgumentOutOfRangeException("maximumSeconds");
+            accumulator = Math.Min(accumulator, maximumSeconds);
+        }
     }
 }

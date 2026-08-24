@@ -44,6 +44,8 @@ namespace RainWorldDesktopPet.Tests
             }
 
             Run("FixedTimeStep uses 40 Hz independently of render rate", FixedStepUsesFortyHertz);
+            Run("Crowded Slugcats share a bounded catch-up budget",
+                CrowdedSlugcatsShareCatchUpBudget);
             Run("Desktop world transform scales original X/Y travel uniformly", DesktopWorldTransformScalesTravelUniformly);
             Run("Original horizontal acceleration and friction match input order", OriginalHorizontalInputParity);
             Run("Crawl reversal uses Player's 0.75 dynamicRunSpeed branch",
@@ -2439,6 +2441,40 @@ namespace RainWorldDesktopPet.Tests
             };
             IList<CompositionBatch> separated = planner.Plan(distant, 128);
             Equal(2, separated.Count, "distant surface batch count");
+        }
+
+        private static void CrowdedSlugcatsShareCatchUpBudget()
+        {
+            SimulationStepBudget budget = new SimulationStepBudget();
+            int[] limits = new int[8];
+
+            budget.Assign(1, limits);
+            Equal(3, limits[0], "single Slugcat keeps the original catch-up limit");
+
+            bool[] receivedCatchUp = new bool[6];
+            for (int frame = 0; frame < 6; frame++)
+            {
+                budget.Assign(6, limits);
+                int total = 0;
+                for (int i = 0; i < 6; i++)
+                {
+                    True(limits[i] >= 1 && limits[i] <= 2,
+                        "crowded per-Slugcat limit");
+                    total += limits[i];
+                    if (limits[i] > 1) receivedCatchUp[i] = true;
+                }
+                Equal(10, total, "crowded total catch-up budget");
+            }
+            for (int i = 0; i < receivedCatchUp.Length; i++)
+                True(receivedCatchUp[i], "rotating catch-up slot " + i);
+
+            FixedTimeStep fixedStep = new FixedTimeStep(
+                SimulationConstants.LogicStepSeconds);
+            fixedStep.AddElapsed(1.0);
+            fixedStep.ClampAccumulator(SimulationConstants.LogicStepSeconds * 2.0);
+            Near(SimulationConstants.LogicStepSeconds * 2.0,
+                fixedStep.AccumulatorSeconds, 0.0000001,
+                "bounded retained backlog");
         }
 
         private static void CompositionSurfacesOnlyGrow()

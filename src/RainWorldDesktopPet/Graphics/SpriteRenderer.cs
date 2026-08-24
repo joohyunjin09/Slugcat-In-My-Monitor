@@ -43,6 +43,8 @@ namespace RainWorldDesktopPet.Graphics
         private readonly Dictionary<int, ImageAttributes> effectTintAttributes =
             new Dictionary<int, ImageAttributes>();
         private readonly Dictionary<int, SolidBrush> bodyBrushes = new Dictionary<int, SolidBrush>();
+        private readonly Dictionary<SlugcatId, bool> profileAtlasAvailability =
+            new Dictionary<SlugcatId, bool>();
         private readonly PointF[] destinationPoints = new PointF[3];
         private readonly PointF[] effectDestinationPoints = new PointF[3];
         private readonly Vec2[] tailMeshVertices = new Vec2[15];
@@ -168,6 +170,11 @@ namespace RainWorldDesktopPet.Graphics
             dmsParts.Clear();
         }
 
+        public void InvalidateAtlasAvailability()
+        {
+            profileAtlasAvailability.Clear();
+        }
+
         // Kept for the command-line preview utility. Runtime UI uses only
         // explicit per-part selections through SetDmsPart.
         public void SetDmsSkin(DmsSkinDefinition skin)
@@ -243,14 +250,14 @@ namespace RainWorldDesktopPet.Graphics
                 effectRenderScale = scale;
                 effectScreenWidth = Math.Max(1, renderSpace.VirtualDesktopBounds.Width);
                 effectScreenHeight = Math.Max(1, renderSpace.VirtualDesktopBounds.Height);
-                graphics.Transform = new Matrix((float)scale, 0.0f, 0.0f, (float)scale,
-                    (float)-renderSpace.WorldOrigin.X,
-                    (float)-renderSpace.WorldOrigin.Y);
+                using (Matrix transform = new Matrix((float)scale, 0.0f, 0.0f,
+                    (float)scale, (float)-renderSpace.WorldOrigin.X,
+                    (float)-renderSpace.WorldOrigin.Y))
+                {
+                    graphics.Transform = transform;
+                }
 
-                string missingProfileElement;
-                bool profileAtlasAvailable = atlas != null &&
-                    SlugcatGraphicsProfiles.Get(pose.SelectedSlugcat).IsAvailable(
-                        atlas, out missingProfileElement);
+                bool profileAtlasAvailable = IsProfileAtlasAvailable(pose.SelectedSlugcat);
                 DrawSpears(graphics, slugcat, pose, pose.TimeStacker, false);
                 if (profileAtlasAvailable)
                 {
@@ -288,8 +295,12 @@ namespace RainWorldDesktopPet.Graphics
 
                 if (debug)
                 {
-                    graphics.Transform = new Matrix(1.0f, 0.0f, 0.0f, 1.0f,
-                        (float)-renderSpace.WorldOrigin.X, (float)-renderSpace.WorldOrigin.Y);
+                    using (Matrix transform = new Matrix(1.0f, 0.0f, 0.0f, 1.0f,
+                        (float)-renderSpace.WorldOrigin.X,
+                        (float)-renderSpace.WorldOrigin.Y))
+                    {
+                        graphics.Transform = transform;
+                    }
                     DrawDebugWorld(graphics, pose, world, slugcat, ai);
                 }
             }
@@ -436,6 +447,17 @@ namespace RainWorldDesktopPet.Graphics
                     graphics.DrawString(text, debugFont, foreground, new PointF(8.0f, 8.0f));
                 }
             }
+        }
+
+        private bool IsProfileAtlasAvailable(SlugcatId id)
+        {
+            bool available;
+            if (profileAtlasAvailability.TryGetValue(id, out available)) return available;
+            string missing;
+            available = atlas != null && SlugcatGraphicsProfiles.Get(id).IsAvailable(
+                atlas, out missing);
+            profileAtlasAvailability[id] = available;
+            return available;
         }
 
         private static void AppendSurfaceDebug(StringBuilder builder, DesktopCollisionWorld world, BodyChunk chunk)
@@ -1377,7 +1399,15 @@ namespace RainWorldDesktopPet.Graphics
         {
             ConsumeGpuFireSmokeMasks();
             SaintAbilityController saint = slugcat.AbilityController as SaintAbilityController;
-            if (saint != null && saint.Mode != SaintTongueMode.Retracted)
+            bool drawsTongue = saint != null && saint.Mode != SaintTongueMode.Retracted;
+            if (!drawsTongue && slugcat.Spears.Count == 0 &&
+                slugcat.AbilityEffects.Count == 0)
+            {
+                if (fireSmokeRasters.Count != 0)
+                    PruneFireSmokeRasters(slugcat.AbilityEffects, pose.SimulationTick);
+                return;
+            }
+            if (drawsTongue)
             {
                 Vec2[] currentRope = saint.RopeForRender;
                 Vec2[] previousRope = saint.LastRopeForRender;

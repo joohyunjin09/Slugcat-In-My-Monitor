@@ -83,8 +83,17 @@ namespace RainWorldDesktopPet.AI
         private Vec2 spearmasterTarget;
 
         public DesktopPetAI(int seed)
+            : this(seed, 0)
         {
+        }
+
+        public DesktopPetAI(int seed, int evaluationPhase)
+        {
+            if (evaluationPhase < 0) throw new ArgumentOutOfRangeException("evaluationPhase");
             random = new Random(seed);
+            // Avoid making every spawned Slugcat scan all desktop surfaces on
+            // the same 40 Hz tick. The first still evaluates immediately.
+            evaluationCountdown = evaluationPhase == 0 ? 0 : evaluationPhase + 1;
             Attention = new AttentionSystem();
             Behavior = DesktopBehavior.Idle;
             TransitionPlan = new PlatformTransitionPlan();
