@@ -57,6 +57,7 @@ namespace RainWorldDesktopPet.Graphics
         private readonly Bitmap tailRaster;
         private readonly System.Drawing.Graphics tailRasterGraphics;
         private readonly FireSmokeShaderAssets fireSmokeAssets;
+        private readonly FireSmokeGpuLease fireSmokeGpuLease;
         private readonly FireSmokeGpuRenderer fireSmokeGpu;
         private readonly string fireSmokeGpuStatus;
         private bool fireSmokeGpuFaulted;
@@ -121,8 +122,10 @@ namespace RainWorldDesktopPet.Graphics
             // shaders remain simple single-role adapters.
             if (fireSmokeAssets != null)
             {
-                fireSmokeGpu = FireSmokeGpuRenderer.TryCreate(fireSmokeAssets,
+                fireSmokeGpuLease = FireSmokeGpuPool.TryAcquire(fireSmokeAssets,
                     out fireSmokeGpuStatus);
+                if (fireSmokeGpuLease != null)
+                    fireSmokeGpu = fireSmokeGpuLease.Renderer;
                 fireSmokeDist = new double[FireSmokeShaderRasterSize *
                     FireSmokeShaderRasterSize];
                 fireSmokeUvNoise = new double[FireSmokeShaderRasterSize *
@@ -1956,11 +1959,13 @@ namespace RainWorldDesktopPet.Graphics
                 item.Value.Dispose();
             }
             fireSmokeRasters.Clear();
-            if (fireSmokeGpu != null) fireSmokeGpu.Dispose();
+            if (fireSmokeGpuLease != null) fireSmokeGpuLease.Dispose();
             foreach (KeyValuePair<int, ImageAttributes> item in fireSmokeTintAttributes)
                 item.Value.Dispose();
             fireSmokeTintAttributes.Clear();
-            if (fireSmokeAssets != null) fireSmokeAssets.Dispose();
+            if (fireSmokeAssets != null &&
+                (fireSmokeGpuLease == null || !fireSmokeGpuLease.OwnsAssets))
+                fireSmokeAssets.Dispose();
             flatLightShaderMask.Dispose();
             lightSourceShaderMask.Dispose();
             shockWaveShaderMask.Dispose();

@@ -5,6 +5,7 @@ using System.Drawing.Imaging;
 using System.IO;
 using System.Linq;
 using System.Diagnostics;
+using System.Reflection;
 using System.Threading;
 using RainWorldDesktopPet.AI;
 using RainWorldDesktopPet.Core;
@@ -122,6 +123,8 @@ namespace RainWorldDesktopPet.Tests
             Run("Ten-second idle/walk/turn/jump graphics stay connected", LongGraphicsScenarioStaysConnected);
             Run("Five-minute varied-window soak preserves sprite integrity", FiveMinuteVariedWindowSpriteIntegrity);
             Run("Graphics bounds include procedural extremities", GraphicsBoundsIncludeExtremities);
+            Run("Overlapping Slugcats share one bounded composition upload",
+                OverlappingSlugcatsShareCompositionUpload);
             Run("Unused Stand and Walk hands retract like SlugcatHand", UnusedHandsRetract);
             Run("Crawl hands use original velocity-relative targets", CrawlHandsUseOriginalTargets);
             Run("SlugcatHand connection constraint prevents arm separation", ArmConstraintPreventsSeparation);
@@ -155,6 +158,10 @@ namespace RainWorldDesktopPet.Tests
                 Run("Local FireSmoke GPU worker completes asynchronously", delegate
                 {
                     OriginalFireSmokeGpuWorkerCompletes(localInstallation);
+                });
+                Run("Active Slugcats share one FireSmoke GPU worker", delegate
+                {
+                    ActiveSlugcatsShareFireSmokeGpu(localInstallation);
                 });
                 Run("Installed Workshop mods parse without loading their DLLs",
                     delegate { LocalWorkshopIntegrationsParse(localInstallation); });
@@ -2400,6 +2407,73 @@ namespace RainWorldDesktopPet.Tests
             Near(149.75, overlay.Y, 0.000001, "negative screen world-to-overlay y");
             Near(0.0, Vec2.Distance(world, space.OverlayToWorld(overlay)), 0.000001,
                 "coordinate conversion round trip");
+        }
+
+        private static void OverlappingSlugcatsShareCompositionUpload()
+        {
+            Rectangle[] nearby =
+            {
+                new Rectangle(0, 0, 384, 384),
+                new Rectangle(48, 0, 384, 384),
+                new Rectangle(96, 0, 384, 384),
+                new Rectangle(144, 0, 384, 384)
+            };
+            IList<CompositionBatch> combined = CompositionBatchPlanner.Plan(nearby, 128);
+            Equal(1, combined.Count, "nearby surface batch count");
+            Equal(4, combined[0].SurfaceIndices.Count, "combined Slugcat count");
+            long separateArea = nearby.Sum(delegate(Rectangle bounds)
+            {
+                return (long)bounds.Width * bounds.Height;
+            });
+            long combinedArea = (long)combined[0].Bounds.Width * combined[0].Bounds.Height;
+            True(combinedArea < separateArea,
+                "combined upload should contain fewer pixels than separate surfaces");
+
+            Rectangle[] distant =
+            {
+                new Rectangle(0, 0, 384, 384),
+                new Rectangle(1200, 0, 384, 384)
+            };
+            IList<CompositionBatch> separated = CompositionBatchPlanner.Plan(distant, 128);
+            Equal(2, separated.Count, "distant surface batch count");
+        }
+
+        private static void ActiveSlugcatsShareFireSmokeGpu(
+            RainWorldInstallation installation)
+        {
+            string firstStatus;
+            string secondStatus;
+            FireSmokeShaderAssets firstAssets = FireSmokeShaderAssets.TryLoad(
+                installation, out firstStatus);
+            FireSmokeShaderAssets secondAssets = FireSmokeShaderAssets.TryLoad(
+                installation, out secondStatus);
+            True(firstAssets != null, firstStatus);
+            True(secondAssets != null, secondStatus);
+
+            SpriteRenderer first = null;
+            SpriteRenderer second = null;
+            try
+            {
+                first = new SpriteRenderer(null, firstAssets);
+                firstAssets = null;
+                second = new SpriteRenderer(null, secondAssets);
+                secondAssets = null;
+                FieldInfo gpuField = typeof(SpriteRenderer).GetField("fireSmokeGpu",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+                True(gpuField != null, "SpriteRenderer FireSmoke GPU field");
+                object firstGpu = gpuField.GetValue(first);
+                object secondGpu = gpuField.GetValue(second);
+                True(firstGpu != null, first.FireSmokeGpuStatus);
+                True(ReferenceEquals(firstGpu, secondGpu),
+                    "active SpriteRenderers should share one D3D11 worker");
+            }
+            finally
+            {
+                if (second != null) second.Dispose();
+                else if (secondAssets != null) secondAssets.Dispose();
+                if (first != null) first.Dispose();
+                else if (firstAssets != null) firstAssets.Dispose();
+            }
         }
 
         private static void TwoFortyHertzRenderCadence()

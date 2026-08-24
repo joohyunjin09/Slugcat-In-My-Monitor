@@ -90,7 +90,9 @@
     <Compile Include="Desktop\NativeMethods.cs" />
     <Compile Include="Desktop\WindowEnumerator.cs" />
     <Compile Include="Graphics\BodyPart.cs" />
+    <Compile Include="Graphics\CompositionBatchPlanner.cs" />
     <Compile Include="Graphics\DirectCompositionHost.cs" />
+    <Compile Include="Graphics\FireSmokeGpuPool.cs" />
     <Compile Include="Graphics\FireSmokeGpuRenderer.cs" />
     <Compile Include="Graphics\Limb.cs" />
     <Compile Include="Graphics\ProceduralTail.cs" />

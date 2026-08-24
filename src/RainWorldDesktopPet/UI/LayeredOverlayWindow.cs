@@ -251,22 +251,37 @@ namespace RainWorldDesktopPet.UI
                     poses[i] = gameLoops[i].BuildPose();
                 }
                 UpdateRenderCadence(poses);
+                Rectangle[] surfaceBounds = new Rectangle[gameLoops.Count];
                 for (int i = 0; i < gameLoops.Count; i++)
                 {
-                    GameLoop loop = gameLoops[i];
-                    bool debug = loop.DebugEnabled && ReferenceEquals(loop, gameLoop);
-                    Rectangle surfaceBounds = CalculateRenderBounds(poses[i], debug);
+                    bool debug = gameLoops[i].DebugEnabled &&
+                        ReferenceEquals(gameLoops[i], gameLoop);
+                    surfaceBounds[i] = CalculateRenderBounds(poses[i], debug);
+                }
+                IList<CompositionBatch> batches = CompositionBatchPlanner.Plan(
+                    surfaceBounds, OverlaySizeQuantum);
+                for (int batchIndex = 0; batchIndex < batches.Count; batchIndex++)
+                {
+                    CompositionBatch batch = batches[batchIndex];
                     DirectCompositionHost.CompositionSurface surface =
-                        compositionHost.PrepareSurface(i, surfaceBounds);
+                        compositionHost.PrepareSurface(batchIndex, batch.Bounds);
                     System.Drawing.Graphics graphics = surface.Graphics;
                     graphics.CompositingMode = System.Drawing.Drawing2D.CompositingMode.SourceCopy;
                     graphics.Clear(Color.Transparent);
                     graphics.CompositingMode = System.Drawing.Drawing2D.CompositingMode.SourceOver;
-                    loop.Renderer.Render(graphics, poses[i], new RenderSpace(surfaceBounds), debug,
-                        loop.World, loop.Slugcat, loop.AI, loop.AssetStatus, loop.SelectedSlugcat);
-                    compositionHost.Present(i);
+                    RenderSpace renderSpace = new RenderSpace(batch.Bounds);
+                    for (int member = 0; member < batch.SurfaceIndices.Count; member++)
+                    {
+                        int loopIndex = batch.SurfaceIndices[member];
+                        GameLoop loop = gameLoops[loopIndex];
+                        bool debug = loop.DebugEnabled && ReferenceEquals(loop, gameLoop);
+                        loop.Renderer.Render(graphics, poses[loopIndex], renderSpace, debug,
+                            loop.World, loop.Slugcat, loop.AI, loop.AssetStatus,
+                            loop.SelectedSlugcat);
+                    }
+                    compositionHost.Present(batchIndex);
                 }
-                compositionHost.Commit(gameLoops.Count);
+                compositionHost.Commit(batches.Count);
                 for (int i = 0; i < gameLoops.Count; i++)
                     gameLoops[i].RecordRenderFrame(displayRefreshRate);
                 if (renderErrorCount != 0)
