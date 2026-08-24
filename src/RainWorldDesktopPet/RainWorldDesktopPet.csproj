@@ -97,6 +97,7 @@
     <Compile Include="RainWorld\RainWorldLocator.cs" />
     <Compile Include="RainWorld\UnitySerializedFileReader.cs" />
     <Compile Include="UI\LayeredOverlayWindow.cs" />
+    <Compile Include="UI\SettingsWindow.cs" />
     <Compile Include="UI\SkinEditorWindow.cs" />
   </ItemGroup>
   <ItemGroup>
