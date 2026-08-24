@@ -22,7 +22,7 @@
 - `Fire_Spear_Explode`: volume `.3 + random*.3`, pitch `.5 + random*2`
 - parry에만 `ShockWave(200,.2,6,false)` 추가
 
-`ExplosionSmoke`는 lifeTime 170-400, rad `.6-1.5`, rotation/rotVel, 목표점 drift, 두 `FireSmoke` sprite layer를 사용한다. `Spark`는 4-frame 위치 history, gravity `.4-.9`, terrain bounce `.5`를 사용한다. 이 수명식과 layer를 `AbilityEffect`/`SpriteRenderer` adapter가 보존한다.
+`ExplosionSmoke`는 lifeTime 170-400, rad `.6-1.5`, rotation/rotVel, 목표점 drift, 두 `FireSmoke` sprite layer를 사용한다. `Futile_White`의 16px quad에 맞춰 world radius에는 scale의 8배를 적용한다. `Spark`는 4-frame 위치 history, gravity `.4-.9`, terrain bounce `.5`를 사용한다. 이 수명식과 layer를 `AbilityEffect`/`SpriteRenderer` adapter가 보존한다. GDI에는 원본 smoke/light shader가 없으므로 shader 부분만 radial gradient adapter다.
 
 이 분기에는 `Room.ScreenMovement`가 없다. 따라서 폭발 점프에 임의 카메라 흔들림을 추가하지 않는다. 원작 room object graph가 필요한 `InGameNoise(8000)`과 주변 creature/weapon parry 반사는 데스크톱에 대상이 없으므로 실행하지 않는다.
 
@@ -32,7 +32,9 @@
 
 추출 progress는 `<.1: Lerp(p,.11,.1)`, 이후 `Lerp(p,1,.05)`, `>.95` 완료이며 고정 입력에서 0-based tick 79에 생성된다. `SM_Spear_Pull`과 `SM_Spear_Grab`, 4 WaterDrip/5 Spark, head impulse도 같은 tick/범위를 사용한다.
 
-투척은 horizontal 정지 기준 X 48, Y -1.5(데스크톱 Y-down), vertical 40, base gravity `.9`, thrown 추가 gravity `.45`, air friction `.999`, bounce/surface friction `.4`다. 원작에 없는 임의 player recoil은 제거했다.
+투척은 horizontal 정지 기준 X 48, Y -1.5(데스크톱 Y-down), vertical 40, free gravity `.9`, thrown 순 중력 `.45`, air friction `.999`, bounce/surface friction `.4`다. `ThrowObject`의 chest `+dir*8`, hips `-dir*4` 반동과 `PlayerGraphics`의 5-tick hand follow-through도 적용한다.
+
+파지는 grasp 0의 실제 `SlugcatHand` 위치를 사용한다. Stand의 `spearDir` 보행 주기와 `ChangeOverlap` 조건을 적용해 창이 몸 앞/뒤 layer를 바꾸며, tail speckle의 선택 위치·성장 tint·Y-down 수직 벡터도 `TailSpeckles.DrawSprites` 변환을 따른다.
 
 ## 접촉 전이와 오디오
 

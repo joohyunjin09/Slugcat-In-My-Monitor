@@ -139,6 +139,7 @@ namespace RainWorldDesktopPet.Graphics
                 bool profileAtlasAvailable = atlas != null &&
                     SlugcatGraphicsProfiles.Get(pose.SelectedSlugcat).IsAvailable(
                         atlas, out missingProfileElement);
+                DrawSpears(graphics, slugcat, pose, pose.TimeStacker, false);
                 if (profileAtlasAvailable)
                 {
                     // PlayerGraphics.AddToContainer keeps sprites 0..6 in this
@@ -1129,42 +1130,7 @@ namespace RainWorldDesktopPet.Graphics
                 }
             }
 
-            for (int i = 0; i < slugcat.Spears.Count; i++)
-            {
-                DesktopSpear spear = slugcat.Spears[i];
-                Vec2 center = spear.Chunk.RenderPosition(interpolation);
-                Vec2 direction = spear.Rotation.LengthSquared > 0.001
-                    ? spear.Rotation.Normalized : Vec2.Right;
-                if (spear.HasUmbilical)
-                {
-                    Vec2[] current = spear.Umbilical;
-                    Vec2[] previousFrame = spear.LastUmbilical;
-                    Vec2 previous = Vec2.Lerp(previousFrame[0], current[0], interpolation);
-                    using (Pen umbilical = CreateRoundPen(
-                        LerpColor(pose.VisualBodyColor, Color.White, 0.35), 0.65f))
-                    {
-                        for (int segment = 1; segment < current.Length; segment++)
-                        {
-                            Vec2 next = Vec2.Lerp(previousFrame[segment],
-                                current[segment], interpolation);
-                            graphics.DrawLine(umbilical, previous.ToPointF(), next.ToPointF());
-                            previous = next;
-                        }
-                    }
-                }
-
-                Color needleColor = spear.NeedleHasConnection
-                    ? Color.White
-                    : LerpColor(OutlineColor, Color.White, spear.NeedleFadeFraction);
-                if (atlas != null)
-                {
-                    double anchorY = spear.Mode == DesktopSpearMode.Thrown ||
-                        spear.Mode == DesktopSpearMode.StuckInCreature ? 0.85 : 0.5;
-                    DrawElement(graphics, "BioSpear" + (spear.NeedleType + 1), center,
-                        AimScreen(Vec2.Zero, direction), 1.0, 1.0, 0.5, anchorY,
-                        needleColor);
-                }
-            }
+            DrawSpears(graphics, slugcat, pose, interpolation, true);
 
             for (int i = 0; i < slugcat.AbilityEffects.Count; i++)
             {
@@ -1189,14 +1155,14 @@ namespace RainWorldDesktopPet.Graphics
                 {
                     double radius = Math.Sqrt(Math.Max(0.0, life)) * effect.Radius;
                     double rootLife = Math.Sqrt(Math.Max(0.0, life));
-                    FillCircle(graphics, position, radius,
+                    FillRadialCircle(graphics, position, radius,
                         Color.FromArgb(MathUtil.Clamp((int)(255 * life *
                             effect.Intensity * 0.5), 0, 255), 255, 255, 255));
-                    FillCircle(graphics, position, radius * 0.68,
-                        Color.FromArgb(MathUtil.Clamp((int)(120 * rootLife *
+                    FillRadialCircle(graphics, position, radius,
+                        Color.FromArgb(MathUtil.Clamp((int)(255 * rootLife *
                             effect.Intensity), 0, 255), 255, 255, 255));
-                    FillCircle(graphics, position, radius * 0.32,
-                        Color.FromArgb(MathUtil.Clamp((int)(150 * rootLife *
+                    FillRadialCircle(graphics, position, radius,
+                        Color.FromArgb(MathUtil.Clamp((int)(255 * rootLife *
                             effect.Intensity), 0, 255), 255, 255, 255));
                 }
                 else if (effect.Kind == AbilityEffectKind.ExplosionSpikes)
@@ -1232,9 +1198,18 @@ namespace RainWorldDesktopPet.Graphics
                         trail = position - effect.Velocity.Normalized * 9.0;
                     trail = Vec2.Lerp(position, trail,
                         MathUtil.InverseLerp(0.0, 0.1, life));
-                    using (Pen trailPen = CreateRoundPen(trailColor,
-                        effect.Kind == AbilityEffectKind.Spark ? 2.0f : 1.0f))
-                        graphics.DrawLine(trailPen, position.ToPointF(), trail.ToPointF());
+                    Vec2 axis = position - trail;
+                    if (axis.LengthSquared < 0.000001) axis = Vec2.Down;
+                    Vec2 perpendicular = axis.Normalized.Perpendicular * effect.Radius;
+                    using (Brush trailBrush = new SolidBrush(trailColor))
+                    {
+                        graphics.FillPolygon(trailBrush, new PointF[]
+                        {
+                            (position + perpendicular).ToPointF(),
+                            (position - perpendicular).ToPointF(),
+                            trail.ToPointF()
+                        });
+                    }
                 }
                 else if (effect.Kind == AbilityEffectKind.Smoke ||
                     effect.Kind == AbilityEffectKind.FlashingSmoke)
@@ -1243,20 +1218,18 @@ namespace RainWorldDesktopPet.Graphics
                         ? MathUtil.Lerp(1.0, 0.5, MathUtil.InverseLerp(0.5, 1.0, life))
                         : Math.Sin(Math.Max(0.0, life) * Math.PI);
                     double alpha = Math.Pow(Math.Max(0.0, life), 1.8);
-                    Color colorA = effect.Kind == AbilityEffectKind.FlashingSmoke
-                        ? Color.White : Color.FromArgb(58, 60, 66);
-                    Color colorB = effect.Kind == AbilityEffectKind.FlashingSmoke
-                        ? Color.FromArgb(185, 185, 190) : Color.FromArgb(28, 30, 35);
-                    Color back = LerpColor(colorB, colorA,
-                        0.2 + 0.8 * Math.Sqrt(Math.Max(0.0, life)));
-                    Color front = LerpColor(colorB, colorA, Math.Max(0.0, life));
+                    Color back = effect.Kind == AbilityEffectKind.FlashingSmoke
+                        ? Color.White : Color.Black;
+                    Color front = back;
                     back = Color.FromArgb(MathUtil.Clamp((int)(255 * alpha * 0.8),
                         0, 255), back.R, back.G, back.B);
                     front = Color.FromArgb(MathUtil.Clamp((int)(255 * alpha * 0.6),
                         0, 255), front.R, front.G, front.B);
                     double baseRadius = 11.0 * effect.Radius * Math.Max(0.0, scale);
-                    FillCircle(graphics, position, baseRadius * 1.1, back);
-                    FillCircle(graphics, position, baseRadius * 0.9, front);
+                    // Futile_White is a generated 16px quad. Its half-size
+                    // converts the DLL sprite scale into world-space radius.
+                    FillRadialCircle(graphics, position, baseRadius * 1.1 * 8.0, back);
+                    FillRadialCircle(graphics, position, baseRadius * 0.9 * 8.0, front);
                 }
                 else
                 {
@@ -1267,11 +1240,85 @@ namespace RainWorldDesktopPet.Graphics
             }
         }
 
+        private void DrawSpears(System.Drawing.Graphics graphics, Slugcat slugcat,
+            SlugcatPose pose, double interpolation, bool inFront)
+        {
+            for (int i = 0; i < slugcat.Spears.Count; i++)
+            {
+                DesktopSpear spear = slugcat.Spears[i];
+                if (spear.InFrontOfPlayer != inFront) continue;
+                Vec2 center = spear.Chunk.RenderPosition(interpolation);
+                Vec2 direction = MathUtil.SlerpDirection(
+                    spear.LastRotation, spear.Rotation, interpolation);
+                if (spear.HasUmbilical)
+                {
+                    Vec2[] current = spear.Umbilical;
+                    Vec2[] previousFrame = spear.LastUmbilical;
+                    Vec2 previous = Vec2.Lerp(previousFrame[0], current[0], interpolation);
+                    using (Pen umbilical = CreateRoundPen(
+                        LerpColor(pose.VisualBodyColor, Color.White, 0.35), 0.65f))
+                    {
+                        for (int segment = 1; segment < current.Length; segment++)
+                        {
+                            Vec2 next = Vec2.Lerp(previousFrame[segment],
+                                current[segment], interpolation);
+                            graphics.DrawLine(umbilical, previous.ToPointF(), next.ToPointF());
+                            previous = next;
+                        }
+                    }
+                }
+
+                Color needleColor = spear.NeedleHasConnection
+                    ? Color.White
+                    : LerpColor(OutlineColor, Color.White, spear.NeedleFadeFraction);
+                string element = "BioSpear" + (spear.NeedleType + 1);
+                AtlasSprite atlasSpear;
+                if (atlas != null && atlas.TryGet(element, out atlasSpear))
+                {
+                    double anchorY = spear.Mode == DesktopSpearMode.Thrown ||
+                        spear.Mode == DesktopSpearMode.StuckInCreature ? 0.85 : 0.5;
+                    DrawElement(graphics, element, center,
+                        AimScreen(Vec2.Zero, direction), 1.0, 1.0, 0.5,
+                        anchorY, needleColor);
+                }
+                else
+                {
+                    using (Pen fallback = CreateRoundPen(needleColor, 2.0f))
+                        graphics.DrawLine(fallback,
+                            (center - direction * 13.0).ToPointF(),
+                            (center + direction * 13.0).ToPointF());
+                }
+            }
+        }
+
         private static void FillCircle(System.Drawing.Graphics graphics, Vec2 center, double radius, Color color)
         {
             using (Brush brush = new SolidBrush(color))
             {
                 graphics.FillEllipse(brush, (float)(center.X - radius), (float)(center.Y - radius), (float)(radius * 2.0), (float)(radius * 2.0));
+            }
+        }
+
+        private static void FillRadialCircle(System.Drawing.Graphics graphics,
+            Vec2 center, double radius, Color centerColor)
+        {
+            if (radius <= 0.0001 || centerColor.A <= 0) return;
+            RectangleF bounds = new RectangleF((float)(center.X - radius),
+                (float)(center.Y - radius), (float)(radius * 2.0),
+                (float)(radius * 2.0));
+            using (GraphicsPath path = new GraphicsPath())
+            {
+                path.AddEllipse(bounds);
+                using (PathGradientBrush brush = new PathGradientBrush(path))
+                {
+                    brush.CenterPoint = center.ToPointF();
+                    brush.CenterColor = centerColor;
+                    brush.SurroundColors = new Color[]
+                    {
+                        Color.FromArgb(0, centerColor.R, centerColor.G, centerColor.B)
+                    };
+                    graphics.FillPath(brush, path);
+                }
             }
         }
 

@@ -72,6 +72,10 @@ namespace RainWorldDesktopPet.Tests
                 ArtificerEffectLifecycleReplay);
             run("Spearmaster extraction creates the needle on original progress tick",
                 SpearmasterExtractionReplay);
+            run("Spearmaster needle grows from the selected tail speckle",
+                SpearmasterTailGrowthReplay);
+            run("Spearmaster neutral gate freezes creation while Pickup stays held",
+                SpearmasterNeutralGateReplay);
             run("Spearmaster throw uses ThrowObject velocity and needle gravity",
                 SpearmasterThrowReplay);
             run("Spearmaster AI holds without a target and traverses explicit action states",
@@ -220,6 +224,10 @@ namespace RainWorldDesktopPet.Tests
             True(ContainsSound(replay[0].Sounds, "Fire_Spear_Explode"),
                 "original explosion SoundID");
             Equal(19, replay[0].EffectCount, "light + eight smoke + ten sparks");
+            Near(slugcat.BodyChunks[0].Position.X, replay[0].Sounds[0].Position.X,
+                0.000001, "explosive-jump sound uses firstChunk x");
+            Near(slugcat.BodyChunks[0].Position.Y, replay[0].Sounds[0].Position.Y,
+                0.000001, "explosive-jump sound uses firstChunk y");
         }
 
         private static void ArtificerParryReplay()
@@ -313,12 +321,29 @@ namespace RainWorldDesktopPet.Tests
             SpearmasterAbilityController ability =
                 (SpearmasterAbilityController)slugcat.AbilityController;
             DesktopSpear spear = ability.HeldSpear;
+            AttentionSystem attention = new AttentionSystem();
+            attention.SetTarget(AttentionKind.RandomPoint,
+                slugcat.BodyChunks[0].Position + new Vec2(50.0, 0.0));
+            SlugcatGraphics graphics = new SlugcatGraphics(slugcat,
+                SlugcatVisualProfiles.Spearmaster, null);
+            graphics.Step(attention, world);
+            Near(graphics.Arms[0].End.Position.X, spear.Chunk.Position.X,
+                0.000001, "held needle follows grasp zero x");
+            Near(graphics.Arms[0].End.Position.Y, spear.Chunk.Position.Y,
+                0.000001, "held needle follows grasp zero y");
+            True(graphics.Arms[0].Mode == LimbMode.HuntRelativePosition,
+                "held needle uses SlugcatHand relative hunt mode");
             slugcat.BodyChunks[0].Velocity = Vec2.Zero;
             slugcat.BodyChunks[1].Velocity = Vec2.Zero;
             IList<AbilityReplayTick> throwReplay = AbilityInputReplay.Run(slugcat, world,
                 new[] { new VirtualInput(0, 0, false, false, true,
                     VirtualPosture.None, false) });
             True(spear.Mode == DesktopSpearMode.Thrown, "throw releases held grasp");
+            Equal(5, ability.ThrowFollowTicks, "PlayerGraphics throw follow-through ticks");
+            Near(8.0, slugcat.BodyChunks[0].Velocity.X, 0.000001,
+                "throw adds eight units of chest recoil");
+            Near(-4.0, slugcat.BodyChunks[1].Velocity.X, 0.000001,
+                "throw subtracts four units from hips");
             True(spear.HasUmbilical && spear.Umbilical.Length >= 10 &&
                 spear.Umbilical.Length <= 19,
                 "connected needle creates Spear.Umbilical with 10..19 segments");
@@ -335,10 +360,83 @@ namespace RainWorldDesktopPet.Tests
             True(ContainsSound(flightReplay[0].Sounds,
                 "Spear_Thrown_Through_Air_LOOP"),
                 "thrown needle starts the original flight loop SoundID");
-            Near((beforeY + 1.35) * 0.999, spear.Chunk.Velocity.Y, 0.00001,
-                "PhysicalObject .9 plus thrown Spear .45 gravity");
+            Near((beforeY + 0.45) * 0.999, spear.Chunk.Velocity.Y, 0.00001,
+                "Spear.Update cancels half of PhysicalObject .9 gravity");
             Near(beforePositionY + spear.Chunk.Velocity.Y, spear.Chunk.Position.Y,
                 0.00001, "needle integrates the post-friction velocity");
+            for (int i = 0; i < 5; i++) graphics.Step(attention, world);
+            Equal(0, ability.ThrowFollowTicks,
+                "throwing hand follows the released spear for exactly five graphics ticks");
+        }
+
+        private static void SpearmasterTailGrowthReplay()
+        {
+            DesktopCollisionWorld world = CreateAirWorld();
+            Slugcat slugcat = CreateAirSlugcat(SlugcatId.SpearMaster);
+            AttentionSystem attention = new AttentionSystem();
+            attention.SetTarget(AttentionKind.RandomPoint, new Vec2(50.0, 0.0));
+            SlugcatGraphics graphics = new SlugcatGraphics(slugcat,
+                SlugcatVisualProfiles.Spearmaster, null);
+            VirtualInput pickup = new VirtualInput(0, 0, false, true);
+            for (int i = 0; i < 20; i++)
+            {
+                slugcat.Step(pickup, world, Vec2.Zero, Vec2.Zero);
+                graphics.Step(attention, world);
+            }
+
+            SpearmasterAbilityController ability =
+                (SpearmasterAbilityController)slugcat.AbilityController;
+            SlugcatPose pose = graphics.BuildPose(1.0, attention, 1);
+            ExtraGraphicsPartPose selected =
+                pose.ExtraParts[ability.SpearRow * 3 + ability.SpearLine];
+            ExtraGraphicsPartPose growing = pose.ExtraParts[15];
+            True(growing.Visible && growing.Element.StartsWith("BioSpear",
+                StringComparison.Ordinal), "tail growth uses a BioSpear atlas element");
+            Near(selected.RenderPosition.X, growing.RenderPosition.X, 0.000001,
+                "growing needle starts at selected speckle x");
+            Near(selected.RenderPosition.Y, growing.RenderPosition.Y, 0.000001,
+                "growing needle starts at selected speckle y");
+            Near(-ability.SpearProgress * 0.5, growing.ScaleY, 0.000001,
+                "BioSpear growth scale follows TailSpeckles spearProg");
+
+            for (int i = 20; i < 79; i++)
+            {
+                slugcat.Step(pickup, world, Vec2.Zero, Vec2.Zero);
+                graphics.Step(attention, world);
+            }
+            Vec2 tailMiddle = graphics.Tail.Segments[2].Position;
+            slugcat.Step(pickup, world, Vec2.Zero, Vec2.Zero);
+            int drips = 0;
+            for (int i = 0; i < slugcat.AbilityEffects.Count; i++)
+            {
+                AbilityEffect effect = slugcat.AbilityEffects[i];
+                if (effect.Kind != AbilityEffectKind.WaterDrip) continue;
+                drips++;
+                True(Vec2.Distance(tailMiddle, effect.Position) <= 1.500001,
+                    "completion WaterDrip originates at PlayerGraphics tail[2]");
+            }
+            Equal(4, drips, "tail-middle WaterDrip count");
+        }
+
+        private static void SpearmasterNeutralGateReplay()
+        {
+            DesktopCollisionWorld world = CreateAirWorld();
+            Slugcat slugcat = CreateAirSlugcat(SlugcatId.SpearMaster);
+            List<VirtualInput> pulling = new List<VirtualInput>();
+            for (int i = 0; i < 20; i++)
+                pulling.Add(new VirtualInput(0, 0, false, true));
+            AbilityInputReplay.Run(slugcat, world, pulling);
+            SpearmasterAbilityController ability =
+                (SpearmasterAbilityController)slugcat.AbilityController;
+            double before = ability.SpearProgress;
+            AbilityInputReplay.Run(slugcat, world,
+                new[] { new VirtualInput(1, 0, false, true) });
+            Near(before, ability.SpearProgress, 0.000001,
+                "non-neutral input freezes progress while Pickup is held");
+            AbilityInputReplay.Run(slugcat, world,
+                new[] { VirtualInput.Neutral });
+            True(ability.SpearProgress < before,
+                "releasing Pickup retracts progress");
         }
 
         private static void SpearmasterAiActionStateReplay()

@@ -265,11 +265,11 @@ namespace RainWorldDesktopPet.Creature
 
             if (explosiveJumpCounter >= safeThreshold && random.NextDouble() < 0.25)
             {
-                Owner.AddEffect(AbilityEffect.CreateExplosionSmoke(Owner.Center,
+                Owner.AddEffect(AbilityEffect.CreateExplosionSmoke(Owner.BodyChunks[0].Position,
                     RandomUnit() * (2.0 * random.NextDouble()), 1.0, random));
             }
             if (explosiveJumpCounter >= safeThreshold && random.NextDouble() < 0.5)
-                Owner.AddEffect(AbilityEffect.CreateSpark(Owner.Center, RandomUnit(),
+                Owner.AddEffect(AbilityEffect.CreateSpark(Owner.BodyChunks[0].Position, RandomUnit(),
                     4, 8, random));
 
             if (Owner.State.Grounded || !Owner.State.Conscious ||
@@ -371,26 +371,27 @@ namespace RainWorldDesktopPet.Creature
 
         private void EmitJumpEffects(bool parry)
         {
-            Owner.EmitSound("Fire_Spear_Explode", Owner.Center,
+            Vec2 effectPosition = Owner.BodyChunks[0].Position;
+            Owner.EmitSound("Fire_Spear_Explode", effectPosition,
                 0.3 + random.NextDouble() * 0.3,
                 0.5 + random.NextDouble() * 2.0, 1);
-            Owner.AddEffect(AbilityEffect.CreateExplosionLight(Owner.Center,
+            Owner.AddEffect(AbilityEffect.CreateExplosionLight(effectPosition,
                 160.0, 1.0, 3));
             for (int i = 0; i < 8; i++)
             {
-                Owner.AddEffect(AbilityEffect.CreateExplosionSmoke(Owner.Center,
+                Owner.AddEffect(AbilityEffect.CreateExplosionSmoke(effectPosition,
                     RandomUnit() * (5.0 * random.NextDouble()), 1.0, random));
             }
             for (int i = 0; i < 10; i++)
             {
-                Vec2 at = Owner.Center + RandomUnit() * (40.0 * random.NextDouble());
+                Vec2 at = effectPosition + RandomUnit() * (40.0 * random.NextDouble());
                 Owner.AddEffect(AbilityEffect.CreateSpark(at,
                     RandomUnit() * MathUtil.Lerp(4.0, 30.0, random.NextDouble()),
                     4, 18, random));
             }
             if (parry)
             {
-                Owner.AddEffect(AbilityEffect.CreateShockWave(Owner.Center,
+                Owner.AddEffect(AbilityEffect.CreateShockWave(effectPosition,
                     200.0, 0.2, 6));
             }
         }
@@ -491,18 +492,27 @@ namespace RainWorldDesktopPet.Creature
         private double spearProgress;
         private bool pullSoundPlayed;
         private DesktopSpear heldSpear;
+        private DesktopSpear thrownSpear;
+        private int throwFollowTicks;
         private int spearType;
         private int spearLine;
         private int spearRow;
         private Vec2 graphicsHeadImpulse;
+        private Vec2 tailNeedlePosition;
         private SpearmasterActionState actionState;
         private Vec2 aimTarget;
 
-        public SpearmasterAbilityController(Slugcat owner) : base(owner) { }
+        public SpearmasterAbilityController(Slugcat owner) : base(owner)
+        {
+            tailNeedlePosition = owner.BodyChunks[1].Position;
+        }
 
         public override string Name { get { return "Needle spear"; } }
         public double SpearProgress { get { return spearProgress; } }
         public DesktopSpear HeldSpear { get { return heldSpear; } }
+        public DesktopSpear ThrownSpear { get { return thrownSpear; } }
+        public int ThrowFollowTicks { get { return throwFollowTicks; } }
+        public int HeldHand { get { return 0; } }
         public int SpearType { get { return spearType; } }
         public int SpearLine { get { return spearLine; } }
         public int SpearRow { get { return spearRow; } }
@@ -561,10 +571,7 @@ namespace RainWorldDesktopPet.Creature
                     actionState == SpearmasterActionState.Throwing || input.ThrowPressed;
                 if (activelyAiming && Math.Abs(direction.X) > 0.001)
                     Owner.State.Facing = direction.X < 0.0 ? -1 : 1;
-                Vec2 hand = Owner.BodyChunks[0].Position + direction *
-                    (activelyAiming ? 18.0 : 12.0) + new Vec2(0.0, 2.0);
                 heldSpear.SetConnectionAnchor(TailConnectionAnchor());
-                heldSpear.HoldAt(hand, direction);
                 if (input.ThrowPressed)
                 {
                     bool vertical = Owner.State.Animation == AnimationIndex.Flip &&
@@ -583,9 +590,13 @@ namespace RainWorldDesktopPet.Creature
                     heldSpear.HoldAt(throwPosition, direction);
                     heldSpear.SetConnectionAnchor(TailConnectionAnchor());
                     heldSpear.Throw(velocity, direction);
+                    Owner.BodyChunks[0].Velocity += direction * 8.0;
+                    Owner.BodyChunks[1].Velocity -= direction * 4.0;
                     Owner.EmitSound("Slugcat_Throw_Spear", throwPosition,
                         1.0, 1.0, 0);
                     actionState = SpearmasterActionState.Recovering;
+                    thrownSpear = heldSpear;
+                    throwFollowTicks = 5;
                     heldSpear = null;
                 }
                 return;
@@ -593,11 +604,14 @@ namespace RainWorldDesktopPet.Creature
 
             bool neutral = input.X == 0 && input.Y == 0 &&
                 !input.Jump && !input.Throw;
-            if (!input.Pickup || !neutral)
+            if (!input.Pickup)
             {
                 RetractSpearProgress();
                 return;
             }
+            // Player.GrabUpdate leaves an in-progress needle unchanged while
+            // Pickup remains held but another action breaks the neutral gate.
+            if (!neutral) return;
 
             if (actionState != SpearmasterActionState.PreparingSpear)
                 actionState = SpearmasterActionState.PullingSpear;
@@ -648,8 +662,7 @@ namespace RainWorldDesktopPet.Creature
             Owner.AddSpear(heldSpear);
             Owner.EmitSound("SM_Spear_Grab", Owner.Center, 1.0,
                 0.5 + random.NextDouble() * 1.5, 1);
-            Vec2 tailEffectPosition = Owner.BodyChunks[1].Position +
-                (Owner.BodyChunks[1].Position - Owner.BodyChunks[0].Position).Normalized * 8.0;
+            Vec2 tailEffectPosition = tailNeedlePosition;
             Vec2 towardHips = (Owner.BodyChunks[1].Position - tailEffectPosition).Normalized;
             for (int i = 0; i < 4; i++)
             {
@@ -698,6 +711,17 @@ namespace RainWorldDesktopPet.Creature
             return hips + awayFromChest * 8.0;
         }
 
+        public void SetTailNeedlePosition(Vec2 position)
+        {
+            tailNeedlePosition = position;
+        }
+
+        public void AdvanceThrowFollowThrough()
+        {
+            if (throwFollowTicks > 0) throwFollowTicks--;
+            if (throwFollowTicks <= 0) thrownSpear = null;
+        }
+
         private void RetractSpearProgress()
         {
             spearProgress = MathUtil.Lerp(spearProgress, 0.0, 0.05);
@@ -716,10 +740,13 @@ namespace RainWorldDesktopPet.Creature
             spearProgress = 0.0;
             pullSoundPlayed = false;
             heldSpear = null;
+            thrownSpear = null;
+            throwFollowTicks = 0;
             spearType = 0;
             spearLine = 0;
             spearRow = 0;
             graphicsHeadImpulse = Vec2.Zero;
+            tailNeedlePosition = Owner.BodyChunks[1].Position;
             actionState = SpearmasterActionState.Idle;
             aimTarget = Vec2.Zero;
         }

@@ -75,11 +75,11 @@ V2 프리셋을 위한 호환 경로에서만 유지한다.
 
 **Sprites:** 공통 세트, `tinyStar` 15개, `BioSpear1..3` 중 하나, story cosmetic pearl의 `JetFishEyeA`/`Futile_White`/`BodyPearl`.
 
-**Extra graphics:** `TailSpeckles` index `12..27`(15 `tinyStar` + 1 `BioSpear`)와 `CosmeticPearl` index `28..30`. 데스크톱에는 spear 생성 gameplay가 없어 `spearProg=0`과 동일하게 BioSpear는 0 scale/비표시다. Pearl은 원작 constructor의 `visible=false`, `globalAlpha=0`, `scarVisible=false` 상태를 유지한다.
+**Extra graphics:** `TailSpeckles` index `12..27`(15 `tinyStar` + 1 `BioSpear`)와 `CosmeticPearl` index `28..30`. needle 생성 중에는 선택 speckle 위치에서 `BioSpear1..3`가 progress에 따라 자라고, progress 0에서만 0 scale/비표시다. Pearl은 원작 constructor의 `visible=false`, `globalAlpha=0`, `scarVisible=false` 상태를 유지한다.
 
 각 speckle row는 `s=Lerp(0.4,0.95,Pow(row/4,0.8))`에서 원작 `SpinePosition`을 샘플하고, 교차된 세 line을 `tinyStar`로 그린다. 색은 body에서 `Lerp(white,body,0.3)` 쪽으로 row별 보간한다.
 
-**Tail:** `SpearmasterTail`; 반경 `8, 6, 4, 2`, 길이 `4, 7, 7, 7`, root radius `8`. topology는 공통 15-vertex/13-triangle continuous mesh이며 개별 tail sprite로 바꾸지 않는다.
+**Tail:** `SpearmasterTail`; 물리 segment 반경 `8, 6, 4, 2`, 길이 `4, 7, 7, 7`. `DrawSprites`의 별도 `num4=6` 때문에 렌더 mesh root radius는 `6`(지름 12)이다. topology는 공통 15-vertex/13-triangle continuous mesh이며 개별 tail sprite로 바꾸지 않는다.
 
 **Face logic:** `FaceA`/blink `FaceB`, unconscious/dead 공유 `FaceStunned`/`FaceDead`.
 

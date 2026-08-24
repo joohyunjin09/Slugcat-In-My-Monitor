@@ -35,6 +35,9 @@ namespace RainWorldDesktopPet.Graphics
         private double lastBreath;
         private int blink;
         private double airborneCounter;
+        private double spearDirection;
+        private bool leftFoot;
+        private int previousAnimationFrame;
         private readonly Dictionary<string, Color> partColors =
             new Dictionary<string, Color>(StringComparer.OrdinalIgnoreCase);
 
@@ -168,6 +171,17 @@ namespace RainWorldDesktopPet.Graphics
             blink = Math.Max(blink, slugcat.State.ImpactBlinkTicks);
             lastLegsDirection = legsDirection;
 
+            if (slugcat.State.BodyMode == BodyModeIndex.Stand && slugcat.LastInput.X != 0)
+                spearDirection = MathUtil.Clamp(
+                    spearDirection + slugcat.LastInput.X * 0.1, -1.0, 1.0);
+            else
+                spearDirection = MathUtil.MoveTowards(spearDirection, 0.0, 0.05);
+            if (slugcat.State.BodyMode == BodyModeIndex.Stand &&
+                slugcat.LastInput.X != 0 && slugcat.State.AnimationFrame == 0 &&
+                previousAnimationFrame > 0)
+                leftFoot = !leftFoot;
+            previousAnimationFrame = slugcat.State.AnimationFrame;
+
             for (int i = 0; i < 2; i++)
             {
                 drawPositions[i, 1] = drawPositions[i, 0];
@@ -207,7 +221,20 @@ namespace RainWorldDesktopPet.Graphics
             SpearmasterAbilityController extraction =
                 slugcat.AbilityController as SpearmasterAbilityController;
             if (extraction != null)
+            {
+                if (tail.Segments.Length > 2)
+                {
+                    extraction.SetTailNeedlePosition(tail.Segments[2].Position);
+                    for (int i = 0; i < slugcat.Spears.Count; i++)
+                    {
+                        if (slugcat.Spears[i].NeedleHasConnection)
+                            slugcat.Spears[i].SetConnectionAnchor(
+                                tail.Segments[2].Position);
+                    }
+                }
                 head.Velocity += extraction.ConsumeGraphicsHeadImpulse();
+                if (extraction.SpearProgress > 0.1) blink = Math.Max(blink, 5);
+            }
             head.Update();
             world.PushOutOfTerrain(head, slugcat.BodyChunks[0].Position);
             Vec2 neckDirection = bodyUp * 3.0;
@@ -245,16 +272,68 @@ namespace RainWorldDesktopPet.Graphics
                     slugcat.BodyChunks[1].Position, slugcat.BodyChunks[0].Velocity,
                     world, i == 0 ? null : arms[0], airborneCounter);
             }
-            SpearmasterAbilityController spearAbility =
-                slugcat.AbilityController as SpearmasterAbilityController;
-            if (spearAbility != null &&
-                (spearAbility.HeldSpear != null || spearAbility.SpearProgress > 0.0))
+            SpearmasterAbilityController spearAbility = extraction;
+            if (spearAbility != null && spearAbility.HeldSpear != null)
             {
-                arms[1].Mode = LimbMode.HuntAbsolutePosition;
-                arms[1].AbsoluteHuntPosition = spearAbility.HeldSpear != null
-                    ? spearAbility.HeldSpear.Chunk.Position
-                    : spearAbility.SpearCreationPosition;
-                arms[1].GripSurfaceId = 0;
+                int hand = spearAbility.HeldHand;
+                if (!arms[hand].MovementEngagedThisTick &&
+                    slugcat.State.Animation != AnimationIndex.Sleep)
+                {
+                    Vec2 relative = new Vec2(-20.0 + 40.0 * hand, 12.0);
+                    if (spearDirection != 0.0 &&
+                        slugcat.State.BodyMode == BodyModeIndex.Stand)
+                    {
+                        Vec2 standingTarget = DegreesToScreenDirection(
+                            180.0 + (hand == 0 ? -1.0 : 1.0) * 8.0 +
+                            slugcat.LastInput.X * 4.0) * 12.0;
+                        double frameCycle = slugcat.State.AnimationFrame / 6.0 *
+                            Math.PI * 2.0;
+                        standingTarget.Y -= Math.Sin(frameCycle) * 2.0;
+                        standingTarget.X -= Math.Cos(
+                            (slugcat.State.AnimationFrame + (!leftFoot ? 6 : 0)) /
+                            12.0 * Math.PI * 2.0) * 4.0 * slugcat.LastInput.X;
+                        standingTarget.X += slugcat.LastInput.X * 2.0;
+                        relative = Vec2.Lerp(relative, standingTarget,
+                            Math.Abs(spearDirection));
+                    }
+                    arms[hand].Mode = LimbMode.HuntRelativePosition;
+                    arms[hand].RelativeHuntPosition = relative;
+                    arms[hand].GripSurfaceId = 0;
+                    arms[hand].RetractCounter = Math.Max(0,
+                        arms[hand].RetractCounter - 10);
+                }
+
+                Vec2 heldDirection = GetHeldSpearDirection(
+                    spearAbility.HeldSpear, hand);
+                if (slugcat.State.BodyMode == BodyModeIndex.Stand)
+                {
+                    spearAbility.HeldSpear.SetOverlap(
+                        (spearDirection > -0.4 && hand == 0) ||
+                        (spearDirection < 0.4 && hand == 1));
+                }
+                spearAbility.HeldSpear.HoldAt(arms[hand].End.Position,
+                    heldDirection, arms[hand].End.Velocity);
+                spearAbility.HeldSpear.SetConnectionAnchor(
+                    tail.Segments.Length > 2 ? tail.Segments[2].Position :
+                    slugcat.BodyChunks[1].Position);
+            }
+            else if (spearAbility != null && spearAbility.ThrowFollowTicks > 0 &&
+                spearAbility.ThrownSpear != null && slugcat.State.Conscious)
+            {
+                int hand = spearAbility.HeldHand;
+                DesktopSpear thrown = spearAbility.ThrownSpear;
+                arms[hand].Mode = LimbMode.HuntAbsolutePosition;
+                arms[hand].AbsoluteHuntPosition = thrown.Chunk.Position;
+                arms[hand].GripSurfaceId = 0;
+                Vec2 direction = MathUtil.Direction(
+                    arms[hand].End.Position, thrown.Chunk.Position);
+                if (Vec2.Distance(arms[hand].End.Position,
+                    thrown.Chunk.Position) < 40.0)
+                    arms[hand].End.Position = thrown.Chunk.Position;
+                else
+                    arms[hand].End.Velocity += direction * 6.0;
+                arms[1 - hand].End.Velocity -= direction * 3.0;
+                spearAbility.AdvanceThrowFollowThrough();
             }
             if (slugcat.State.Animation == AnimationIndex.Sleep)
             {
@@ -265,6 +344,45 @@ namespace RainWorldDesktopPet.Graphics
             }
             for (int i = 0; i < extensions.Length; i++)
                 extensions[i].Step(slugcat, lookDirection);
+        }
+
+        private Vec2 GetHeldSpearDirection(DesktopSpear spear, int hand)
+        {
+            Vec2 direction = MathUtil.Direction(
+                slugcat.BodyChunks[0].Position, spear.Chunk.Position) *
+                (hand == 0 ? -1.0 : 1.0);
+            if (slugcat.State.Animation != AnimationIndex.HangFromBeam)
+                direction = -direction.Perpendicular;
+            if (slugcat.State.BodyMode == BodyModeIndex.Crawl)
+            {
+                direction = MathUtil.Direction(slugcat.BodyChunks[1].Position,
+                    Vec2.Lerp(spear.Chunk.Position,
+                        slugcat.BodyChunks[0].Position, 0.8));
+            }
+            else if (slugcat.State.Animation == AnimationIndex.ClimbOnBeam)
+            {
+                direction.Y = -Math.Abs(direction.Y);
+                direction = MathUtil.SlerpDirection(direction,
+                    MathUtil.Direction(slugcat.BodyChunks[1].Position,
+                        slugcat.BodyChunks[0].Position), 0.75);
+            }
+            else
+            {
+                double phase = (slugcat.State.AnimationFrame + (leftFoot ? 9 : 3)) /
+                    12.0 * Math.PI * 2.0;
+                double degrees = (80.0 + Math.Cos(phase) * 4.0 * spearDirection) *
+                    spearDirection;
+                direction = MathUtil.SlerpDirection(direction,
+                    DegreesToScreenDirection(degrees), Math.Abs(spearDirection));
+            }
+            return direction.LengthSquared > 0.000001
+                ? direction.Normalized : new Vec2(slugcat.State.Facing, 0.0);
+        }
+
+        private static Vec2 DegreesToScreenDirection(double degrees)
+        {
+            double radians = degrees * Math.PI / 180.0;
+            return new Vec2(Math.Sin(radians), -Math.Cos(radians));
         }
 
         private void ApplyOriginalBodyModeOffsets()

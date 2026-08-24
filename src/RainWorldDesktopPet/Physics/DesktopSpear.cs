@@ -44,6 +44,8 @@ namespace RainWorldDesktopPet.Physics
             Chunk = new BodyChunk(0, position, 5.0, 0.07);
             Mode = DesktopSpearMode.Held;
             Rotation = Vec2.Right;
+            LastRotation = Rotation;
+            InFrontOfPlayer = true;
             NeedleType = MathUtil.Clamp(needleType, 0, 2);
             IsSpearmasterNeedle = true;
             NeedleHasConnection = true;
@@ -56,6 +58,8 @@ namespace RainWorldDesktopPet.Physics
         public readonly BodyChunk Chunk;
         public DesktopSpearMode Mode { get; private set; }
         public Vec2 Rotation { get; private set; }
+        public Vec2 LastRotation { get; private set; }
+        public bool InFrontOfPlayer { get; private set; }
         public double RotationSpeed { get; private set; }
         public int NeedleType { get; private set; }
         public bool IsSpearmasterNeedle { get; private set; }
@@ -105,10 +109,16 @@ namespace RainWorldDesktopPet.Physics
 
         public void HoldAt(Vec2 position, Vec2 direction)
         {
+            HoldAt(position, direction, Vec2.Zero);
+        }
+
+        public void HoldAt(Vec2 position, Vec2 direction, Vec2 handVelocity)
+        {
             Mode = DesktopSpearMode.Held;
             Chunk.LastPosition = Chunk.Position;
             Chunk.Position = position;
-            Chunk.Velocity = Vec2.Zero;
+            Chunk.Velocity = handVelocity;
+            LastRotation = Rotation;
             if (direction.LengthSquared > 0.001) Rotation = direction.Normalized;
             RotationSpeed = 0.0;
             stillTicks = 0;
@@ -123,6 +133,7 @@ namespace RainWorldDesktopPet.Physics
         {
             Mode = DesktopSpearMode.Thrown;
             Chunk.Velocity = velocity;
+            LastRotation = Rotation;
             ThrowDirection = direction.LengthSquared > 0.001
                 ? direction.Normalized : velocity.Normalized;
             if (ThrowDirection.LengthSquared > 0.001) Rotation = ThrowDirection;
@@ -133,6 +144,12 @@ namespace RainWorldDesktopPet.Physics
             LastImpactSound = null;
             ImpactSparkCount = 0;
             if (NeedleHasConnection) CreateUmbilical();
+            InFrontOfPlayer = true;
+        }
+
+        public void SetOverlap(bool inFront)
+        {
+            InFrontOfPlayer = inFront;
         }
 
         public void DisconnectNeedle()
@@ -183,8 +200,9 @@ namespace RainWorldDesktopPet.Physics
 
             Age++;
             Chunk.BeginTick();
-            Chunk.Integrate(Gravity + (Mode == DesktopSpearMode.Thrown
-                ? ThrownGravity : 0.0), AirFriction);
+            LastRotation = Rotation;
+            Chunk.Integrate(Mode == DesktopSpearMode.Thrown
+                ? ThrownGravity : Gravity, AirFriction);
             world.Resolve(Chunk, world.CurrentSnapshot, 0, SurfaceFriction, Bounce);
             StepUmbilical();
 
