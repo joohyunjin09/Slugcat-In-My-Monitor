@@ -59,6 +59,7 @@
     <Compile Include="Core\DesktopRecovery.cs" />
     <Compile Include="Core\MathUtil.cs" />
     <Compile Include="Core\SimulationConstants.cs" />
+    <Compile Include="Core\UiLocalization.cs" />
     <Compile Include="Core\Vec2.cs" />
     <Compile Include="Creature\Slugcat.cs" />
     <Compile Include="Creature\SlugcatAbilities.cs" />

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Drawing;
+using RainWorldDesktopPet.Core;
 using RainWorldDesktopPet.Graphics;
 
 namespace RainWorldDesktopPet.Creature
@@ -260,11 +261,14 @@ namespace RainWorldDesktopPet.Creature
         {
             switch (id)
             {
-                case SlugcatId.Gourmand: return "Gourmand — 대식가";
-                case SlugcatId.Artificer: return "Artificer — 기술병";
-                case SlugcatId.SpearMaster: return "SpearMaster — 창술가";
-                case SlugcatId.Rivulet: return "Rivulet — 물살이";
-                case SlugcatId.Saint: return "Saint — 성자";
+                case SlugcatId.White: return UiLocalization.Text("Survivor — 생존자", "Survivor");
+                case SlugcatId.Yellow: return UiLocalization.Text("Monk — 수도승", "Monk");
+                case SlugcatId.Red: return UiLocalization.Text("Hunter — 사냥꾼", "Hunter");
+                case SlugcatId.Gourmand: return UiLocalization.Text("Gourmand — 대식가", "Gourmand");
+                case SlugcatId.Artificer: return UiLocalization.Text("Artificer — 기술병", "Artificer");
+                case SlugcatId.SpearMaster: return UiLocalization.Text("SpearMaster — 창술가", "SpearMaster");
+                case SlugcatId.Rivulet: return UiLocalization.Text("Rivulet — 물살이", "Rivulet");
+                case SlugcatId.Saint: return UiLocalization.Text("Saint — 성자", "Saint");
                 default: return Get(id).DisplayName;
             }
         }

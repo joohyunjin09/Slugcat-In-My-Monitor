@@ -12,8 +12,14 @@ namespace RainWorldDesktopPet.Desktop
         internal const int WS_EX_LAYERED = 0x00080000;
         internal const int WS_EX_NOACTIVATE = 0x08000000;
         internal const int WS_EX_NOREDIRECTIONBITMAP = 0x00200000;
+        internal const int WH_MOUSE_LL = 14;
         internal const int WM_NCHITTEST = 0x0084;
+        internal const int WM_CANCELMODE = 0x001F;
+        internal const int WM_LBUTTONDOWN = 0x0201;
         internal const int WM_MOUSEMOVE = 0x0200;
+        internal const int WM_LBUTTONUP = 0x0202;
+        internal const int WM_LBUTTONDBLCLK = 0x0203;
+        internal const int WM_CAPTURECHANGED = 0x0215;
         internal const int WM_DISPLAYCHANGE = 0x007E;
         internal const int WM_DPICHANGED = 0x02E0;
         internal const int HTTRANSPARENT = -1;
@@ -28,6 +34,7 @@ namespace RainWorldDesktopPet.Desktop
         internal const int VREFRESH = 116;
 
         internal delegate bool EnumWindowsProc(IntPtr handle, IntPtr parameter);
+        internal delegate IntPtr LowLevelMouseProc(int code, IntPtr message, IntPtr data);
 
         internal const int WHDR_DONE = 0x00000001;
         internal const int WHDR_PREPARED = 0x00000002;
@@ -71,6 +78,16 @@ namespace RainWorldDesktopPet.Desktop
                 X = x;
                 Y = y;
             }
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        internal struct LowLevelMouseHookData
+        {
+            internal Point Point;
+            internal uint MouseData;
+            internal uint Flags;
+            internal uint Time;
+            internal UIntPtr ExtraInfo;
         }
 
         [StructLayout(LayoutKind.Sequential)]
@@ -129,6 +146,31 @@ namespace RainWorldDesktopPet.Desktop
 
         [DllImport("user32.dll")]
         internal static extern short GetAsyncKeyState(int virtualKey);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        internal static extern IntPtr SetWindowsHookEx(int hookId,
+            LowLevelMouseProc callback, IntPtr module, uint threadId);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        internal static extern bool UnhookWindowsHookEx(IntPtr hook);
+
+        [DllImport("user32.dll")]
+        internal static extern IntPtr CallNextHookEx(IntPtr hook, int code,
+            IntPtr message, IntPtr data);
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
+        internal static extern IntPtr GetModuleHandle(string moduleName);
+
+        [DllImport("user32.dll")]
+        internal static extern IntPtr SetCapture(IntPtr handle);
+
+        [DllImport("user32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        internal static extern bool ReleaseCapture();
+
+        [DllImport("user32.dll")]
+        internal static extern IntPtr GetCapture();
 
         [DllImport("user32.dll")]
         internal static extern IntPtr GetDC(IntPtr handle);

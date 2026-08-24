@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using RainWorldDesktopPet.Core;
 
 namespace RainWorldDesktopPet.RainWorld
 {
@@ -16,7 +17,8 @@ namespace RainWorldDesktopPet.RainWorld
         public RainWorldAssetLoader(RainWorldInstallation installation)
         {
             this.installation = installation;
-            Status = "No atlas scan has run.";
+            Status = UiLocalization.Text("아직 atlas를 검색하지 않았습니다.",
+                "No atlas scan has run.");
         }
 
         public string Status { get; private set; }
@@ -25,7 +27,8 @@ namespace RainWorldDesktopPet.RainWorld
         {
             if (installation == null)
             {
-                Status = "Rain World installation is unavailable.";
+                Status = UiLocalization.Text("Rain World 설치본을 사용할 수 없습니다.",
+                    "Rain World installation is unavailable.");
                 return null;
             }
 
@@ -64,19 +67,23 @@ namespace RainWorldDesktopPet.RainWorld
                         set.Add(atlas);
                         if (ContainsPlayerElements(set))
                         {
-                            Status = "Loaded loose local atlas: " + image;
+                            Status = UiLocalization.Text("로컬 atlas를 불러왔습니다: ",
+                                "Loaded loose local atlas: ") + image;
                             return set;
                         }
                         set.Dispose();
                     }
                     catch (Exception exception)
                     {
-                        Status = "Skipped incompatible atlas " + metadata + ": " + exception.Message;
+                        Status = UiLocalization.Text("호환되지 않는 atlas를 건너뛰었습니다: ",
+                            "Skipped incompatible atlas: ") + metadata + ": " + exception.Message;
                     }
                 }
             }
 
-            Status = embeddedFailure + " No compatible non-mod original loose player atlas was found; procedural rendering is active.";
+            Status = embeddedFailure + UiLocalization.Text(
+                " 호환되는 원본 플레이어 atlas를 찾지 못해 절차형 렌더링을 사용합니다.",
+                " No compatible non-mod original loose player atlas was found; procedural rendering is active.");
             return null;
         }
 

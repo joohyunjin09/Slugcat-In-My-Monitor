@@ -1,6 +1,7 @@
 using System;
 using System.Drawing;
 using System.Windows.Forms;
+using RainWorldDesktopPet.Core;
 using RainWorldDesktopPet.Creature;
 
 namespace RainWorldDesktopPet.UI
@@ -13,6 +14,7 @@ namespace RainWorldDesktopPet.UI
         private readonly Button nextButton;
         private readonly Button removeButton;
         private readonly ComboBox characterSelector;
+        private readonly ComboBox languageSelector;
         private readonly CheckBox debugCheck;
         private readonly CheckBox pauseCheck;
         private readonly Button retryButton;
@@ -24,7 +26,7 @@ namespace RainWorldDesktopPet.UI
             if (app == null) throw new ArgumentNullException("app");
             this.app = app;
 
-            Text = "SlugcatInMyMonitor Settings";
+            Text = T("SlugcatInMyMonitor 설정", "SlugcatInMyMonitor Settings");
             FormBorderStyle = FormBorderStyle.Sizable;
             StartPosition = FormStartPosition.CenterScreen;
             ShowInTaskbar = true;
@@ -46,7 +48,7 @@ namespace RainWorldDesktopPet.UI
             root.RowStyles.Add(new RowStyle(SizeType.Absolute, 44));
             Controls.Add(root);
 
-            GroupBox slugcatsGroup = new GroupBox { Text = "Slugcats", Dock = DockStyle.Fill };
+            GroupBox slugcatsGroup = new GroupBox { Text = T("슬러그캣", "Slugcats"), Dock = DockStyle.Fill };
             TableLayoutPanel slugcatsLayout = new TableLayoutPanel
             {
                 Dock = DockStyle.Fill,
@@ -68,9 +70,9 @@ namespace RainWorldDesktopPet.UI
                 WrapContents = false,
                 Padding = new Padding(0)
             };
-            addButton = ActionButton("Add Slugcat", delegate { app.SettingsAddSlugcat(); RefreshFromApp(); });
-            nextButton = ActionButton("Select Next", delegate { app.SettingsSelectNextSlugcat(); RefreshFromApp(); });
-            removeButton = ActionButton("Remove Selected", delegate { app.SettingsRemoveSelectedSlugcat(); RefreshFromApp(); });
+            addButton = ActionButton(T("슬러그캣 추가", "Add Slugcat"), delegate { app.SettingsAddSlugcat(); RefreshFromApp(); });
+            nextButton = ActionButton(T("다음 선택", "Select Next"), delegate { app.SettingsSelectNextSlugcat(); RefreshFromApp(); });
+            removeButton = ActionButton(T("선택 항목 삭제", "Remove Selected"), delegate { app.SettingsRemoveSelectedSlugcat(); RefreshFromApp(); });
             slugcatActions.Controls.Add(addButton);
             slugcatActions.Controls.Add(nextButton);
             slugcatActions.Controls.Add(removeButton);
@@ -80,7 +82,7 @@ namespace RainWorldDesktopPet.UI
 
             GroupBox appearanceGroup = new GroupBox
             {
-                Text = "Selected Slugcat Character",
+                Text = T("선택한 슬러그캣", "Selected Slugcat"),
                 Dock = DockStyle.Fill
             };
             TableLayoutPanel appearanceLayout = new TableLayoutPanel
@@ -94,7 +96,7 @@ namespace RainWorldDesktopPet.UI
             appearanceLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             appearanceLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
             appearanceLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 38));
-            appearanceLayout.Controls.Add(FieldLabel("Character and Ability"), 0, 0);
+            appearanceLayout.Controls.Add(FieldLabel(T("캐릭터와 능력", "Character and Ability")), 0, 0);
             characterSelector = new ComboBox { Dock = DockStyle.Fill,
                 DropDownStyle = ComboBoxStyle.DropDownList };
             for (int i = 0; i < SlugcatProfiles.All.Count; i++)
@@ -108,18 +110,18 @@ namespace RainWorldDesktopPet.UI
                 WrapContents = false,
                 AutoSize = true
             };
-            Button editorButton = ActionButton("Open Experimental Skin Editor", delegate
+            Button editorButton = ActionButton(T("실험적 스킨 편집기 열기", "Open Experimental Skin Editor"), delegate
             {
                 app.SettingsOpenAppearanceEditor();
             });
             appearanceActions.Controls.Add(editorButton);
-            appearanceActions.Controls.Add(ActionButton("Refresh Workshop", RefreshWorkshop));
+            appearanceActions.Controls.Add(ActionButton(T("Workshop 새로 고침", "Refresh Workshop"), RefreshWorkshop));
             appearanceLayout.SetColumnSpan(appearanceActions, 2);
             appearanceLayout.Controls.Add(appearanceActions, 0, 1);
             appearanceGroup.Controls.Add(appearanceLayout);
             root.Controls.Add(appearanceGroup, 0, 1);
 
-            GroupBox behaviorGroup = new GroupBox { Text = "Application", Dock = DockStyle.Fill };
+            GroupBox behaviorGroup = new GroupBox { Text = T("프로그램", "Application"), Dock = DockStyle.Fill };
             FlowLayoutPanel behaviorLayout = new FlowLayoutPanel
             {
                 Dock = DockStyle.Fill,
@@ -127,20 +129,36 @@ namespace RainWorldDesktopPet.UI
                 FlowDirection = FlowDirection.LeftToRight,
                 WrapContents = true
             };
-            debugCheck = new CheckBox { Text = "Debug Overlay", AutoSize = true, Margin = new Padding(3, 9, 18, 3) };
+            debugCheck = new CheckBox { Text = T("디버그 오버레이", "Debug Overlay"), AutoSize = true, Margin = new Padding(3, 9, 18, 3) };
             debugCheck.CheckedChanged += delegate
             {
                 if (!updating) app.SettingsDebugEnabled = debugCheck.Checked;
             };
-            pauseCheck = new CheckBox { Text = "Pause All Slugcats", AutoSize = true, Margin = new Padding(3, 9, 18, 3) };
+            pauseCheck = new CheckBox { Text = T("모든 슬러그캣 일시 정지", "Pause All Slugcats"), AutoSize = true, Margin = new Padding(3, 9, 18, 3) };
             pauseCheck.CheckedChanged += delegate
             {
                 if (!updating) app.SettingsPaused = pauseCheck.Checked;
             };
-            retryButton = ActionButton("Retry Rendering", delegate { app.SettingsRetryRendering(); RefreshFromApp(); });
+            retryButton = ActionButton(T("렌더링 재시도", "Retry Rendering"), delegate { app.SettingsRetryRendering(); RefreshFromApp(); });
             behaviorLayout.Controls.Add(debugCheck);
             behaviorLayout.Controls.Add(pauseCheck);
             behaviorLayout.Controls.Add(retryButton);
+            behaviorLayout.Controls.Add(new Label
+            {
+                Text = T("언어", "Language"),
+                AutoSize = true,
+                Margin = new Padding(3, 10, 3, 3)
+            });
+            languageSelector = new ComboBox
+            {
+                DropDownStyle = ComboBoxStyle.DropDownList,
+                Width = 105,
+                Margin = new Padding(3, 6, 3, 3)
+            };
+            languageSelector.Items.Add(new LanguageChoice(UiLanguage.Korean, "한국어"));
+            languageSelector.Items.Add(new LanguageChoice(UiLanguage.English, "English"));
+            languageSelector.SelectedIndexChanged += LanguageChanged;
+            behaviorLayout.Controls.Add(languageSelector);
             behaviorGroup.Controls.Add(behaviorLayout);
             root.Controls.Add(behaviorGroup, 0, 2);
 
@@ -159,8 +177,8 @@ namespace RainWorldDesktopPet.UI
                 WrapContents = false,
                 Padding = new Padding(0, 6, 0, 0)
             };
-            footer.Controls.Add(ActionButton("Close", delegate { Close(); }));
-            footer.Controls.Add(ActionButton("Exit Application", delegate { app.SettingsExitApplication(); }));
+            footer.Controls.Add(ActionButton(T("닫기", "Close"), delegate { Close(); }));
+            footer.Controls.Add(ActionButton(T("프로그램 종료", "Exit Application"), delegate { app.SettingsExitApplication(); }));
             root.Controls.Add(footer, 0, 4);
 
             Activated += delegate { RefreshFromApp(); };
@@ -190,6 +208,15 @@ namespace RainWorldDesktopPet.UI
                 retryButton.Enabled = app.SettingsCanRetryRendering;
                 debugCheck.Checked = app.SettingsDebugEnabled;
                 pauseCheck.Checked = app.SettingsPaused;
+                for (int i = 0; i < languageSelector.Items.Count; i++)
+                {
+                    LanguageChoice language = languageSelector.Items[i] as LanguageChoice;
+                    if (language != null && language.Id == UiLocalization.Current)
+                    {
+                        languageSelector.SelectedIndex = i;
+                        break;
+                    }
+                }
 
                 for (int i = 0; i < characterSelector.Items.Count; i++)
                 {
@@ -200,8 +227,10 @@ namespace RainWorldDesktopPet.UI
                         break;
                     }
                 }
-                statusLabel.Text = names.Length + " active Slugcat" + (names.Length == 1 ? string.Empty : "s") +
-                    ". Left-click the tray icon to reopen this window.";
+                statusLabel.Text = T("실행 중인 슬러그캣: " + names.Length +
+                        "마리 · 트레이 아이콘을 왼쪽 클릭하면 이 창을 다시 열 수 있습니다.",
+                    names.Length + " active Slugcat" + (names.Length == 1 ? string.Empty : "s") +
+                        ". Left-click the tray icon to reopen this window.");
             }
             finally { updating = false; }
         }
@@ -222,6 +251,17 @@ namespace RainWorldDesktopPet.UI
             RefreshFromApp();
         }
 
+        private void LanguageChanged(object sender, EventArgs e)
+        {
+            if (updating) return;
+            LanguageChoice choice = languageSelector.SelectedItem as LanguageChoice;
+            if (choice == null || choice.Id == UiLocalization.Current) return;
+            app.SettingsSetLanguage(choice.Id);
+            statusLabel.Text = T(
+                "언어 설정을 저장했습니다. 프로그램을 다시 시작하면 모든 UI에 적용됩니다.",
+                "Language saved. Restart the application to apply it to the entire UI.");
+        }
+
         private void RefreshWorkshop()
         {
             try
@@ -233,7 +273,8 @@ namespace RainWorldDesktopPet.UI
             catch (Exception exception)
             {
                 Program.LogException(exception);
-                statusLabel.Text = "Workshop refresh failed: " + exception.Message;
+                statusLabel.Text = T("Workshop 새로 고침 실패: ",
+                    "Workshop refresh failed: ") + exception.Message;
             }
         }
 
@@ -254,6 +295,9 @@ namespace RainWorldDesktopPet.UI
             return button;
         }
 
+        private static string T(string korean, string english)
+        { return UiLocalization.Text(korean, english); }
+
         private sealed class CharacterChoice
         {
             public CharacterChoice(SlugcatProfile profile)
@@ -265,6 +309,15 @@ namespace RainWorldDesktopPet.UI
             public readonly string Name;
             public override string ToString()
             { return Name; }
+        }
+
+        private sealed class LanguageChoice
+        {
+            public LanguageChoice(UiLanguage id, string name)
+            { Id = id; Name = name; }
+            public readonly UiLanguage Id;
+            public readonly string Name;
+            public override string ToString() { return Name; }
         }
 
     }

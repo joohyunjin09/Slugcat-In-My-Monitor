@@ -42,7 +42,7 @@ namespace RainWorldDesktopPet.UI
             for (int i = 0; i < PartNames.Length; i++)
                 partSelections[PartNames[i]] = gameLoop.GetDmsPartSelection(PartNames[i]) ?? "default";
 
-            Text = "Slugcat Skin Editor";
+            Text = T("슬러그캣 스킨 편집기", "Slugcat Skin Editor");
             FormBorderStyle = FormBorderStyle.Sizable;
             StartPosition = FormStartPosition.CenterScreen;
             ShowInTaskbar = true;
@@ -62,7 +62,9 @@ namespace RainWorldDesktopPet.UI
 
             Label experimentalNotice = new Label
             {
-                Text = "Each part has one explicit source. Incomplete DMS parts fall back to the current Vanilla Slugcat.",
+                Text = T(
+                    "각 파츠는 하나의 스프라이트 출처를 사용합니다. 불완전한 DMS 파츠는 현재 슬러그캣의 기본 외형으로 표시됩니다.",
+                    "Each part has one explicit source. Incomplete DMS parts fall back to the current Vanilla Slugcat."),
                 Dock = DockStyle.Fill,
                 BackColor = Color.FromArgb(255, 244, 204),
                 ForeColor = Color.FromArgb(95, 69, 0),
@@ -72,14 +74,14 @@ namespace RainWorldDesktopPet.UI
             root.SetColumnSpan(experimentalNotice, 3);
             root.Controls.Add(experimentalNotice, 0, 0);
 
-            GroupBox characterGroup = new GroupBox { Text = "Slugcat", Dock = DockStyle.Fill };
+            GroupBox characterGroup = new GroupBox { Text = T("슬러그캣", "Slugcat"), Dock = DockStyle.Fill };
             characterList = new ListBox { Dock = DockStyle.Fill, IntegralHeight = false };
             for (int i = 0; i < Characters.Length; i++) characterList.Items.Add(Characters[i]);
             characterList.SelectedIndexChanged += CharacterChanged;
             characterGroup.Controls.Add(characterList);
             root.Controls.Add(characterGroup, 0, 1);
 
-            GroupBox partsGroup = new GroupBox { Text = "Appearance Parts", Dock = DockStyle.Fill };
+            GroupBox partsGroup = new GroupBox { Text = T("외형 파츠", "Appearance Parts"), Dock = DockStyle.Fill };
             TableLayoutPanel parts = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(8),
                 ColumnCount = 3, RowCount = PartNames.Length };
             parts.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 85));
@@ -94,7 +96,7 @@ namespace RainWorldDesktopPet.UI
                 ComboBox selector = new ComboBox { Dock = DockStyle.Fill,
                     DropDownStyle = ComboBoxStyle.DropDownList, Tag = part };
                 selector.SelectedIndexChanged += PartSelectionChanged;
-                Button color = new Button { Text = "Color...", Dock = DockStyle.Fill, Tag = part,
+                Button color = new Button { Text = T("색상...", "Color..."), Dock = DockStyle.Fill, Tag = part,
                     UseVisualStyleBackColor = false };
                 color.Click += CustomizeColor;
                 partSelectors[part] = selector;
@@ -106,7 +108,7 @@ namespace RainWorldDesktopPet.UI
             partsGroup.Controls.Add(parts);
             root.Controls.Add(partsGroup, 1, 1);
 
-            GroupBox previewGroup = new GroupBox { Text = "Preview", Dock = DockStyle.Fill };
+            GroupBox previewGroup = new GroupBox { Text = T("미리보기", "Preview"), Dock = DockStyle.Fill };
             TableLayoutPanel previewLayout = new TableLayoutPanel { Dock = DockStyle.Fill,
                 RowCount = 2, ColumnCount = 1 };
             previewLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
@@ -123,13 +125,13 @@ namespace RainWorldDesktopPet.UI
             FlowLayoutPanel actions = new FlowLayoutPanel { Dock = DockStyle.Fill,
                 FlowDirection = FlowDirection.RightToLeft, WrapContents = false,
                 Padding = new Padding(0, 7, 0, 0) };
-            actions.Controls.Add(ActionButton("Close", delegate { Close(); }));
-            actions.Controls.Add(ActionButton("Reload Sprites", ReloadCatalog));
-            actions.Controls.Add(ActionButton("Load Preset...", LoadPreset));
-            actions.Controls.Add(ActionButton("Save Preset...", SavePreset));
-            actions.Controls.Add(ActionButton("Paste", PasteSetup));
-            actions.Controls.Add(ActionButton("Copy", CopySetup));
-            actions.Controls.Add(ActionButton("Reset", ResetAll));
+            actions.Controls.Add(ActionButton(T("닫기", "Close"), delegate { Close(); }));
+            actions.Controls.Add(ActionButton(T("스프라이트 새로 고침", "Reload Sprites"), ReloadCatalog));
+            actions.Controls.Add(ActionButton(T("프리셋 불러오기...", "Load Preset..."), LoadPreset));
+            actions.Controls.Add(ActionButton(T("프리셋 저장...", "Save Preset..."), SavePreset));
+            actions.Controls.Add(ActionButton(T("붙여넣기", "Paste"), PasteSetup));
+            actions.Controls.Add(ActionButton(T("복사", "Copy"), CopySetup));
+            actions.Controls.Add(ActionButton(T("초기화", "Reset"), ResetAll));
             root.SetColumnSpan(actions, 3);
             root.Controls.Add(actions, 0, 2);
 
@@ -140,7 +142,10 @@ namespace RainWorldDesktopPet.UI
 
             PopulateSpriteSelectors();
             RefreshFromGame();
-            SetStatus(gameLoop.DmsSkins.Count + " DMS spritesheets loaded. Part choices follow the installed DMS DLL rules.");
+            SetStatus(T("DMS 스프라이트 시트 " + gameLoop.DmsSkins.Count +
+                    "개를 불러왔습니다. 파츠 선택에는 설치된 DMS 규칙이 적용됩니다.",
+                gameLoop.DmsSkins.Count +
+                    " DMS spritesheets loaded. Part choices follow the installed DMS rules."));
         }
 
         public void RefreshFromGame()
@@ -179,8 +184,8 @@ namespace RainWorldDesktopPet.UI
                     ComboBox selector = partSelectors[part];
                     string selectedId = partSelections[part];
                     selector.Items.Clear();
-                    selector.Items.Add(new SpriteChoice("Vanilla " +
-                        gameLoop.SelectedSlugcat.DisplayName, "default", null));
+                    selector.Items.Add(new SpriteChoice(T("기본 ", "Vanilla ") +
+                        SlugcatProfiles.SelectionLabel(gameLoop.SelectedSlugcat.Id), "default", null));
                     for (int j = 0; j < gameLoop.DmsSkins.Count; j++)
                     {
                         DmsSkinDefinition set = gameLoop.DmsSkins[j];
@@ -202,7 +207,7 @@ namespace RainWorldDesktopPet.UI
             if (choice == null) return;
             gameLoop.SetSelectedSlugcat(choice.Id);
             PopulateSpriteSelectors();
-            Changed(choice.Name + " applied.");
+            Changed(T(choice.Name + "을(를) 적용했습니다.", choice.Name + " applied."));
         }
 
         private void PartSelectionChanged(object sender, EventArgs e)
@@ -213,7 +218,8 @@ namespace RainWorldDesktopPet.UI
             string part = selector == null ? null : selector.Tag as string;
             if (choice == null || part == null) return;
             ApplySpriteChoice(part, choice.Set);
-            Changed(part + " sprite changed to " + choice.Name + ".");
+            Changed(T(PartDisplayName(part) + " 스프라이트를 " + choice.Name + "(으)로 변경했습니다.",
+                part + " sprite changed to " + choice.Name + "."));
         }
 
         private void ApplySpriteChoice(string part, DmsSkinDefinition set)
@@ -227,7 +233,7 @@ namespace RainWorldDesktopPet.UI
             }
             string reason;
             if (!gameLoop.SetDmsPart(part, set.Id, out reason))
-            { SetStatus("Could not select " + set.Name + ": " + reason); return; }
+            { SetStatus(T(set.Name + " 선택 실패: ", "Could not select " + set.Name + ": ") + reason); return; }
             partSelections[part] = set.Id;
         }
 
@@ -244,7 +250,8 @@ namespace RainWorldDesktopPet.UI
                 gameLoop.SetPartColor(part, dialog.Color);
                 button.BackColor = dialog.Color;
                 button.ForeColor = ReadableText(dialog.Color);
-                Changed(part + " color changed.");
+                Changed(T(PartDisplayName(part) + " 색상을 변경했습니다.",
+                    part + " color changed."));
             }
         }
 
@@ -254,7 +261,8 @@ namespace RainWorldDesktopPet.UI
             for (int i = 0; i < PartNames.Length; i++)
                 partSelections[PartNames[i]] = gameLoop.GetDmsPartSelection(PartNames[i]) ?? "default";
             PopulateSpriteSelectors();
-            SetStatus(gameLoop.DmsSkins.Count + " DMS spritesheets reloaded.");
+            SetStatus(T("DMS 스프라이트 시트 " + gameLoop.DmsSkins.Count + "개를 다시 불러왔습니다.",
+                gameLoop.DmsSkins.Count + " DMS spritesheets reloaded."));
         }
 
         private void ResetAll(object sender, EventArgs e)
@@ -265,7 +273,7 @@ namespace RainWorldDesktopPet.UI
             for (int i = 0; i < PartNames.Length; i++) partSelections[PartNames[i]] = "default";
             PopulateSpriteSelectors();
             RefreshFromGame();
-            Changed("Appearance reset.");
+            Changed(T("외형을 초기화했습니다.", "Appearance reset."));
         }
 
         private void CopySetup(object sender, EventArgs e)
@@ -273,18 +281,21 @@ namespace RainWorldDesktopPet.UI
             try
             {
                 Clipboard.SetText(BuildAppearanceData());
-                SetStatus("Appearance copied to the clipboard.");
+                SetStatus(T("외형 설정을 클립보드에 복사했습니다.",
+                    "Appearance copied to the clipboard."));
             }
-            catch (Exception exception) { SetStatus("Copy failed: " + exception.Message); }
+            catch (Exception exception) { SetStatus(T("복사 실패: ", "Copy failed: ") + exception.Message); }
         }
 
         private void PasteSetup(object sender, EventArgs e)
         {
             try
             {
-                ApplyAppearanceData(Clipboard.GetText(), "Appearance pasted from the clipboard.");
+                ApplyAppearanceData(Clipboard.GetText(), T(
+                    "클립보드의 외형 설정을 적용했습니다.",
+                    "Appearance pasted from the clipboard."));
             }
-            catch (Exception exception) { SetStatus("Paste failed: " + exception.Message); }
+            catch (Exception exception) { SetStatus(T("붙여넣기 실패: ", "Paste failed: ") + exception.Message); }
         }
 
         private void SavePreset(object sender, EventArgs e)
@@ -294,19 +305,20 @@ namespace RainWorldDesktopPet.UI
                 Directory.CreateDirectory(PresetDirectory);
                 using (SaveFileDialog dialog = new SaveFileDialog())
                 {
-                    dialog.Title = "Save Slugcat appearance preset";
+                    dialog.Title = T("슬러그캣 외형 프리셋 저장", "Save Slugcat Appearance Preset");
                     dialog.InitialDirectory = PresetDirectory;
-                    dialog.Filter = "Slugcat appearance preset (*.simmskin)|*.simmskin|All files (*.*)|*.*";
+                    dialog.Filter = T("슬러그캣 외형 프리셋 (*.simmskin)|*.simmskin|모든 파일 (*.*)|*.*",
+                        "Slugcat appearance preset (*.simmskin)|*.simmskin|All files (*.*)|*.*");
                     dialog.DefaultExt = "simmskin";
                     dialog.AddExtension = true;
                     dialog.OverwritePrompt = true;
                     dialog.FileName = CurrentCharacterName() + ".simmskin";
                     if (dialog.ShowDialog(this) != DialogResult.OK) return;
                     File.WriteAllText(dialog.FileName, BuildAppearanceData(), Encoding.UTF8);
-                    SetStatus("Preset saved: " + Path.GetFileName(dialog.FileName));
+                    SetStatus(T("프리셋 저장 완료: ", "Preset saved: ") + Path.GetFileName(dialog.FileName));
                 }
             }
-            catch (Exception exception) { SetStatus("Preset save failed: " + exception.Message); }
+            catch (Exception exception) { SetStatus(T("프리셋 저장 실패: ", "Preset save failed: ") + exception.Message); }
         }
 
         private void LoadPreset(object sender, EventArgs e)
@@ -316,17 +328,18 @@ namespace RainWorldDesktopPet.UI
                 Directory.CreateDirectory(PresetDirectory);
                 using (OpenFileDialog dialog = new OpenFileDialog())
                 {
-                    dialog.Title = "Load Slugcat appearance preset";
+                    dialog.Title = T("슬러그캣 외형 프리셋 불러오기", "Load Slugcat Appearance Preset");
                     dialog.InitialDirectory = PresetDirectory;
-                    dialog.Filter = "Slugcat appearance preset (*.simmskin)|*.simmskin|All files (*.*)|*.*";
+                    dialog.Filter = T("슬러그캣 외형 프리셋 (*.simmskin)|*.simmskin|모든 파일 (*.*)|*.*",
+                        "Slugcat appearance preset (*.simmskin)|*.simmskin|All files (*.*)|*.*");
                     dialog.CheckFileExists = true;
                     dialog.Multiselect = false;
                     if (dialog.ShowDialog(this) != DialogResult.OK) return;
                     ApplyAppearanceData(File.ReadAllText(dialog.FileName, Encoding.UTF8),
-                        "Preset loaded: " + Path.GetFileName(dialog.FileName));
+                        T("프리셋 불러오기 완료: ", "Preset loaded: ") + Path.GetFileName(dialog.FileName));
                 }
             }
-            catch (Exception exception) { SetStatus("Preset load failed: " + exception.Message); }
+            catch (Exception exception) { SetStatus(T("프리셋 불러오기 실패: ", "Preset load failed: ") + exception.Message); }
         }
 
         private string BuildAppearanceData()
@@ -351,7 +364,8 @@ namespace RainWorldDesktopPet.UI
                 fields[0] == "SIMM_SKIN_V3"))
             {
                 if (!SlugcatProfiles.TryParse(fields[1], out character))
-                    throw new InvalidOperationException("The preset character data is invalid.");
+                    throw new InvalidOperationException(T("프리셋의 캐릭터 정보가 올바르지 않습니다.",
+                        "The preset character data is invalid."));
                 firstPart = 2;
             }
             else if (fields.Length >= 3 && fields[0] == "SIMM_SKIN_V2")
@@ -360,12 +374,14 @@ namespace RainWorldDesktopPet.UI
                 SlugcatSkin skin;
                 if (!Enum.TryParse(fields[1], true, out variant) ||
                     !Enum.TryParse(fields[2], true, out skin))
-                    throw new InvalidOperationException("The preset character data is invalid.");
+                    throw new InvalidOperationException(T("프리셋의 캐릭터 정보가 올바르지 않습니다.",
+                        "The preset character data is invalid."));
                 character = LegacyCharacterId(variant, skin);
                 firstPart = 3;
             }
             else
-                throw new InvalidOperationException("The file is not a Slugcat appearance preset.");
+                throw new InvalidOperationException(T("슬러그캣 외형 프리셋 파일이 아닙니다.",
+                    "The file is not a Slugcat appearance preset."));
 
             Dictionary<string, DmsSkinDefinition> sets =
                 new Dictionary<string, DmsSkinDefinition>(StringComparer.OrdinalIgnoreCase);
@@ -383,15 +399,18 @@ namespace RainWorldDesktopPet.UI
                 if (!string.Equals(id, "default", StringComparison.OrdinalIgnoreCase))
                 {
                     if (set == null)
-                        throw new InvalidOperationException("Required sprite set is not installed: " + id);
+                        throw new InvalidOperationException(T("필요한 스프라이트 세트가 설치되어 있지 않습니다: ",
+                            "Required sprite set is not installed: ") + id);
                     if (!set.HasPart(part))
-                        throw new InvalidOperationException(set.Name + " does not contain " + part + ".");
+                        throw new InvalidOperationException(T(set.Name + "에 " + PartDisplayName(part) + " 파츠가 없습니다.",
+                            set.Name + " does not contain " + part + "."));
                 }
                 sets[part] = set;
                 uint argb;
                 if (!uint.TryParse(fields[i].Substring(comma + 1),
                     System.Globalization.NumberStyles.HexNumber, null, out argb))
-                    throw new InvalidOperationException("Invalid color for " + part + ".");
+                    throw new InvalidOperationException(T(PartDisplayName(part) + " 색상 정보가 올바르지 않습니다.",
+                        "Invalid color for " + part + "."));
                 colors[part] = Color.FromArgb(unchecked((int)argb));
             }
 
@@ -603,18 +622,18 @@ namespace RainWorldDesktopPet.UI
         {
             switch (part)
             {
-                case "HEAD": return "Head";
-                case "FACE": return "Face";
-                case "BODY": return "Body";
-                case "ARMS": return "Arms";
-                case "HIPS": return "Hips";
-                case "LEGS": return "Legs";
-                case "TAIL": return "Tail";
-                case "FACESCAR": return "Artificer Face Scar";
-                case "GILLS": return "Rivulet Gills";
-                case "TAILSPECKLES": return "Spearmaster Tail Speckles";
-                case "ASCENSION": return "Saint Ascension";
-                case "PIXEL": return "The Mark / Pixel";
+                case "HEAD": return T("머리", "Head");
+                case "FACE": return T("얼굴", "Face");
+                case "BODY": return T("몸", "Body");
+                case "ARMS": return T("팔", "Arms");
+                case "HIPS": return T("엉덩이", "Hips");
+                case "LEGS": return T("다리", "Legs");
+                case "TAIL": return T("꼬리", "Tail");
+                case "FACESCAR": return T("기술병 얼굴 흉터", "Artificer Face Scar");
+                case "GILLS": return T("물살이 아가미", "Rivulet Gills");
+                case "TAILSPECKLES": return T("창술가 꼬리 무늬", "Spearmaster Tail Speckles");
+                case "ASCENSION": return T("성자 승천", "Saint Ascension");
+                case "PIXEL": return T("표식 / 픽셀", "The Mark / Pixel");
                 default: return part;
             }
         }
@@ -644,6 +663,9 @@ namespace RainWorldDesktopPet.UI
             double luminance = background.R * 0.299 + background.G * 0.587 + background.B * 0.114;
             return luminance > 150.0 ? Color.Black : Color.White;
         }
+
+        private static string T(string korean, string english)
+        { return UiLocalization.Text(korean, english); }
 
         private sealed class SpriteChoice
         {

@@ -89,7 +89,9 @@ namespace RainWorldDesktopPet.Core
             string missing;
             if (!requested.IsAvailable(atlas, out missing))
             {
-                AssetStatus += " Selected Slugcat uses procedural fallback for missing " + missing + ".";
+                AssetStatus += UiLocalization.Text(
+                    " 선택한 슬러그캣의 일부 자산이 없어 절차형 외형을 사용합니다: " + missing + ".",
+                    " Selected Slugcat uses procedural fallback for missing " + missing + ".");
             }
             Graphics = new SlugcatGraphics(Slugcat, requested, atlas);
             baseAssetStatus = AssetStatus;
@@ -135,7 +137,8 @@ namespace RainWorldDesktopPet.Core
             reason = null;
             if (atlas == null)
             {
-                reason = "The original Rain World atlas is unavailable.";
+                reason = UiLocalization.Text("Rain World 원본 atlas를 사용할 수 없습니다.",
+                    "The original Rain World atlas is unavailable.");
                 return false;
             }
             try
@@ -408,7 +411,8 @@ namespace RainWorldDesktopPet.Core
         {
             string missing;
             bool available = SlugcatVisualProfiles.Get(skin).IsAvailable(atlas, out missing);
-            reason = available ? null : "Missing local Downpour asset: " + missing;
+            reason = available ? null : UiLocalization.Text(
+                "로컬 Downpour 자산이 없습니다: ", "Missing local Downpour asset: ") + missing;
             return available;
         }
 
@@ -447,7 +451,8 @@ namespace RainWorldDesktopPet.Core
             if (string.IsNullOrWhiteSpace(part) ||
                 !DmsSpriteGroups.Required.ContainsKey(part))
             {
-                reason = "Unknown DMS part: " + (part ?? "<null>");
+                reason = UiLocalization.Text("알 수 없는 DMS 파츠: ", "Unknown DMS part: ") +
+                    (part ?? "<null>");
                 return false;
             }
             if (string.IsNullOrWhiteSpace(id))
@@ -460,17 +465,21 @@ namespace RainWorldDesktopPet.Core
             DmsSkinDefinition skin = dmsSkins == null ? null : dmsSkins.Find(id);
             if (skin == null)
             {
-                reason = "DMS spritesheet is no longer installed: " + id;
+                reason = UiLocalization.Text("DMS 스프라이트 시트가 더 이상 설치되어 있지 않습니다: ",
+                    "DMS spritesheet is no longer installed: ") + id;
                 return false;
             }
             if (!skin.IsModActive)
             {
-                reason = "The source mod is installed but disabled in Rain World Remix: " + skin.ModName;
+                reason = UiLocalization.Text(
+                    "원본 모드가 설치되어 있지만 Rain World Remix에서 비활성화되어 있습니다: ",
+                    "The source mod is installed but disabled in Rain World Remix: ") + skin.ModName;
                 return false;
             }
             if (!skin.HasPart(part))
             {
-                reason = skin.Name + " does not provide a complete " + part + " sprite group.";
+                reason = UiLocalization.Text(skin.Name + "에 완전한 " + part + " 스프라이트 그룹이 없습니다.",
+                    skin.Name + " does not provide a complete " + part + " sprite group.");
                 return false;
             }
             dmsPartSelections[part] = skin.Id;
@@ -498,12 +507,15 @@ namespace RainWorldDesktopPet.Core
             DmsSkinDefinition skin = dmsSkins == null ? null : dmsSkins.Find(id);
             if (skin == null)
             {
-                reason = "DMS spritesheet is no longer installed: " + id;
+                reason = UiLocalization.Text("DMS 스프라이트 시트가 더 이상 설치되어 있지 않습니다: ",
+                    "DMS spritesheet is no longer installed: ") + id;
                 return false;
             }
             if (!skin.IsModActive)
             {
-                reason = "The source mod is installed but disabled in Rain World Remix: " + skin.ModName;
+                reason = UiLocalization.Text(
+                    "원본 모드가 설치되어 있지만 Rain World Remix에서 비활성화되어 있습니다: ",
+                    "The source mod is installed but disabled in Rain World Remix: ") + skin.ModName;
                 return false;
             }
             ClearDmsParts();
@@ -544,8 +556,11 @@ namespace RainWorldDesktopPet.Core
                 string ignored;
                 SetDmsSkin(selectedDmsId, out ignored);
             }
-            AssetStatus = baseAssetStatus + " Workshop: " + workshopCatalog.Mods.Count +
-                " mods, " + DmsSkins.Count + " DMS sheets.";
+            AssetStatus = baseAssetStatus + UiLocalization.Text(
+                " Workshop: 모드 " + workshopCatalog.Mods.Count + "개, DMS 시트 " +
+                    DmsSkins.Count + "개.",
+                " Workshop: " + workshopCatalog.Mods.Count + " mods, " +
+                    DmsSkins.Count + " DMS sheets.");
         }
 
         private string CurrentSlugcatId()

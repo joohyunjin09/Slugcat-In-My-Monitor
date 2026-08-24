@@ -15,6 +15,7 @@ using RainWorldDesktopPet.Desktop;
 using RainWorldDesktopPet.Physics;
 using RainWorldDesktopPet.RainWorld;
 using RainWorldDesktopPet.Graphics;
+using RainWorldDesktopPet.UI;
 using RainWorldDesktopPet.Workshop;
 
 namespace RainWorldDesktopPet.Tests
@@ -68,6 +69,8 @@ namespace RainWorldDesktopPet.Tests
             Run("Monitor floor corners survive post-connection penetration", MonitorCornerSurvivesConnectionPenetration);
             Run("Swept high-speed travel cannot tunnel through a small window", FastHorizontalSmallWindowDoesNotTunnel);
             Run("Dragging passes through window walls", DraggingPassesThroughWindowWalls);
+            Run("Slugcat dragging blocks desktop pointer interactions",
+                SlugcatDraggingBlocksDesktopInteractions);
             Run("AI produces VirtualInput without moving physics directly", AiDoesNotMoveCreature);
             Run("Futile atlas metadata parses frame geometry", AtlasMetadataParses);
             Run("DMS part atlas overrides and restores original sprites", DmsPartAtlasOverrideRestoresBase);
@@ -844,6 +847,26 @@ namespace RainWorldDesktopPet.Tests
                 "grabbed chunk should cross the other window's right wall");
             True(slugcat.BodyChunks[0].WallSurfaceId == 0,
                 "dragging should not retain a window wall contact");
+        }
+
+        private static void SlugcatDraggingBlocksDesktopInteractions()
+        {
+            int overlayStyle = LayeredOverlayWindow.BuildOverlayExtendedStyle(
+                0);
+            True((overlayStyle & NativeMethods.WS_EX_TRANSPARENT) != 0,
+                "the full-desktop overlay must remain click-through to other applications");
+            True(LayeredOverlayWindow.ShouldSuppressLeftButton(
+                    NativeMethods.WM_LBUTTONDOWN, false, true),
+                "the initial press on a Slugcat must be suppressed");
+            True(LayeredOverlayWindow.ShouldSuppressLeftButton(
+                    NativeMethods.WM_LBUTTONUP, true, false),
+                "the release completing a Slugcat drag must be suppressed");
+            True(!LayeredOverlayWindow.ShouldSuppressLeftButton(
+                    NativeMethods.WM_LBUTTONUP, false, true),
+                "an unrelated release must continue to the underlying application");
+            True(!LayeredOverlayWindow.ShouldSuppressLeftButton(
+                    NativeMethods.WM_LBUTTONDOWN, false, false),
+                "a click outside every Slugcat must reach the underlying application");
         }
 
         private static void AiDoesNotMoveCreature()

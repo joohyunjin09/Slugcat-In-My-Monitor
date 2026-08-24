@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using System.Threading;
 using System.Windows.Forms;
+using RainWorldDesktopPet.Core;
 using RainWorldDesktopPet.Desktop;
 using RainWorldDesktopPet.RainWorld;
 using RainWorldDesktopPet.UI;
@@ -31,7 +32,9 @@ namespace RainWorldDesktopPet
                 };
                 AppDomain.CurrentDomain.UnhandledException += delegate(object sender, UnhandledExceptionEventArgs eventArgs)
                 {
-                    LogException(eventArgs.ExceptionObject as Exception ?? new Exception("Unknown unhandled exception"));
+                    LogException(eventArgs.ExceptionObject as Exception ?? new Exception(
+                        UiLocalization.Text("알 수 없는 처리되지 않은 오류",
+                            "Unknown unhandled error")));
                 };
 
                 string explicitPath = ReadOption(args, "--rain-world");
@@ -54,17 +57,24 @@ namespace RainWorldDesktopPet
         private static RainWorldInstallation AskForInstallation(RainWorldLocator locator)
         {
             MessageBox.Show(
-                "Rain World 설치 경로를 자동으로 찾지 못했습니다. 다음 창에서 RainWorld.exe가 있는 폴더를 선택해 주세요.",
+                UiLocalization.Text(
+                    "Rain World 설치 경로를 자동으로 찾지 못했습니다. 다음 창에서 RainWorld.exe가 있는 폴더를 선택해 주세요.",
+                    "The Rain World installation could not be found automatically. Select the folder that contains RainWorld.exe in the next window."),
                 "Slugcat in My Monitor", MessageBoxButtons.OK, MessageBoxIcon.Information);
             using (FolderBrowserDialog dialog = new FolderBrowserDialog())
             {
-                dialog.Description = "Rain World installation folder";
+                dialog.Description = UiLocalization.Text(
+                    "Rain World 설치 폴더를 선택하세요.", "Select the Rain World installation folder.");
                 dialog.ShowNewFolderButton = false;
                 if (dialog.ShowDialog() != DialogResult.OK) return null;
                 if (!locator.IsValid(dialog.SelectedPath))
                 {
-                    MessageBox.Show("선택한 폴더에서 RainWorld.exe와 RainWorld_Data를 찾지 못했습니다.",
-                        "Invalid Rain World folder", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    MessageBox.Show(UiLocalization.Text(
+                            "선택한 폴더에서 RainWorld.exe와 RainWorld_Data를 찾지 못했습니다.",
+                            "RainWorld.exe and RainWorld_Data were not found in the selected folder."),
+                        UiLocalization.Text("잘못된 Rain World 설치 폴더",
+                            "Invalid Rain World installation folder"),
+                        MessageBoxButtons.OK, MessageBoxIcon.Error);
                     return null;
                 }
                 return locator.Locate(dialog.SelectedPath);

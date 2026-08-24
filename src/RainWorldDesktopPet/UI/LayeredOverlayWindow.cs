@@ -1,7 +1,9 @@
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Drawing;
+using System.Runtime.InteropServices;
 using System.Windows.Forms;
 using RainWorldDesktopPet.Core;
 using RainWorldDesktopPet.Desktop;
@@ -53,6 +55,8 @@ namespace RainWorldDesktopPet.UI
         private readonly string startDmsSkinId;
         private GameLoop gameLoop;
         private GameLoop grabbedGameLoop;
+        private readonly NativeMethods.LowLevelMouseProc mouseHookCallback;
+        private IntPtr mouseHook;
         private SettingsWindow settingsWindow;
         private SkinEditorWindow skinEditor;
         private Rectangle virtualDesktopBounds;
@@ -75,6 +79,7 @@ namespace RainWorldDesktopPet.UI
             this.installation = installation;
             this.startSlugcat = startSlugcat;
             this.startDmsSkinId = startDmsSkinId;
+            mouseHookCallback = MouseHookCallback;
             FormBorderStyle = FormBorderStyle.None;
             ShowInTaskbar = false;
             TopMost = true;
@@ -92,9 +97,9 @@ namespace RainWorldDesktopPet.UI
             renderTimer.Tick += RenderTimerTick;
 
             ContextMenuStrip menu = new ContextMenuStrip();
-            ToolStripMenuItem settingsItem = new ToolStripMenuItem("Open Settings");
+            ToolStripMenuItem settingsItem = new ToolStripMenuItem(T("설정 열기", "Open Settings"));
             settingsItem.Click += OpenSettings;
-            debugItem = new ToolStripMenuItem("Debug Overlay");
+            debugItem = new ToolStripMenuItem(T("디버그 오버레이", "Debug Overlay"));
             debugItem.CheckOnClick = true;
             debugItem.Checked = startDebug;
             debugItem.CheckedChanged += delegate
@@ -104,7 +109,7 @@ namespace RainWorldDesktopPet.UI
                 if (compositionHost != null) compositionHost.ResetSurfaces();
                 RefreshSettingsWindow();
             };
-            pauseItem = new ToolStripMenuItem("Pause All Slugcats");
+            pauseItem = new ToolStripMenuItem(T("모든 슬러그캣 일시 정지", "Pause All Slugcats"));
             pauseItem.CheckOnClick = true;
             pauseItem.CheckedChanged += delegate
             {
@@ -112,28 +117,28 @@ namespace RainWorldDesktopPet.UI
                     gameLoops[i].Paused = pauseItem.Checked;
                 RefreshSettingsWindow();
             };
-            retryRenderItem = new ToolStripMenuItem("Retry Rendering");
+            retryRenderItem = new ToolStripMenuItem(T("렌더링 재시도", "Retry Rendering"));
             retryRenderItem.Enabled = false;
             retryRenderItem.Click += RetryRendering;
-            skinEditorItem = new ToolStripMenuItem("Skin Editor (Experimental)");
+            skinEditorItem = new ToolStripMenuItem(T("스킨 편집기 (실험적)", "Skin Editor (Experimental)"));
             skinEditorItem.Click += ToggleSkinEditor;
-            ToolStripMenuItem exitItem = new ToolStripMenuItem("Exit");
+            ToolStripMenuItem exitItem = new ToolStripMenuItem(T("종료", "Exit"));
             exitItem.Click += delegate { Close(); };
-            slugcatMenu = new ToolStripMenuItem("Character and Ability");
+            slugcatMenu = new ToolStripMenuItem(T("캐릭터와 능력", "Character and Ability"));
             for (int i = 0; i < SlugcatProfiles.All.Count; i++)
             {
                 SlugcatProfile profile = SlugcatProfiles.All[i];
                 slugcatMenu.DropDownItems.Add(CreateSlugcatItem(
                     SlugcatProfiles.SelectionLabel(profile.Id), profile.Id, startSlugcat));
             }
-            refreshWorkshopItem = new ToolStripMenuItem("Refresh Workshop mods");
+            refreshWorkshopItem = new ToolStripMenuItem(T("Workshop 모드 새로 고침", "Refresh Workshop Mods"));
             refreshWorkshopItem.Click += RefreshWorkshopItemClick;
-            activeSlugcatsMenu = new ToolStripMenuItem("Slugcats");
-            spawnItem = new ToolStripMenuItem("Add Slugcat");
+            activeSlugcatsMenu = new ToolStripMenuItem(T("슬러그캣", "Slugcats"));
+            spawnItem = new ToolStripMenuItem(T("슬러그캣 추가", "Add Slugcat"));
             spawnItem.Click += SpawnSlugcat;
-            ToolStripMenuItem nextItem = new ToolStripMenuItem("Select Next Slugcat");
+            ToolStripMenuItem nextItem = new ToolStripMenuItem(T("다음 슬러그캣 선택", "Select Next Slugcat"));
             nextItem.Click += SelectNextSlugcat;
-            removeItem = new ToolStripMenuItem("Remove Selected Slugcat");
+            removeItem = new ToolStripMenuItem(T("선택한 슬러그캣 삭제", "Remove Selected Slugcat"));
             removeItem.Click += RemoveSelectedSlugcat;
             activeSlugcatsMenu.DropDownItems.Add(spawnItem);
             activeSlugcatsMenu.DropDownItems.Add(nextItem);
@@ -178,18 +183,31 @@ namespace RainWorldDesktopPet.UI
             get
             {
                 CreateParams parameters = base.CreateParams;
-                parameters.ExStyle |= NativeMethods.WS_EX_NOREDIRECTIONBITMAP |
-                                      NativeMethods.WS_EX_LAYERED | NativeMethods.WS_EX_TRANSPARENT |
-                                      NativeMethods.WS_EX_TOOLWINDOW | NativeMethods.WS_EX_TOPMOST |
-                                      NativeMethods.WS_EX_NOACTIVATE;
+                parameters.ExStyle = BuildOverlayExtendedStyle(parameters.ExStyle);
                 return parameters;
             }
+        }
+
+        internal static int BuildOverlayExtendedStyle(int inheritedStyle)
+        {
+            // The overlay covers the entire virtual desktop. Keeping it fully
+            // transparent to input is required for buttons owned by other
+            // processes; HTTRANSPARENT alone only reliably walks windows in
+            // this UI thread.
+            return inheritedStyle |
+                   NativeMethods.WS_EX_TRANSPARENT |
+                   NativeMethods.WS_EX_NOREDIRECTIONBITMAP |
+                   NativeMethods.WS_EX_LAYERED |
+                   NativeMethods.WS_EX_TOOLWINDOW |
+                   NativeMethods.WS_EX_TOPMOST |
+                   NativeMethods.WS_EX_NOACTIVATE;
         }
 
         protected override void OnHandleCreated(EventArgs e)
         {
             base.OnHandleCreated(e);
             ConfigureVirtualDesktop();
+            InstallMouseHook();
             compositionHost = new DirectCompositionHost(Handle, virtualDesktopBounds);
             collisionWorld.Refresh(Handle);
             surfaceRefreshClock.Restart();
@@ -198,7 +216,7 @@ namespace RainWorldDesktopPet.UI
             {
                 string reason;
                 if (!gameLoop.SetDmsSkin(startDmsSkinId, out reason))
-                    trayIcon.ShowBalloonTip(5000, "DMS skin unavailable", reason, ToolTipIcon.Warning);
+                    trayIcon.ShowBalloonTip(5000, T("DMS 스킨을 사용할 수 없음", "DMS Skin Unavailable"), reason, ToolTipIcon.Warning);
             }
         }
 
@@ -206,6 +224,8 @@ namespace RainWorldDesktopPet.UI
         {
             renderingEnabled = false;
             renderTimer.Stop();
+            UninstallMouseHook();
+            ReleaseGrabInput();
             if (settingsWindow != null && !settingsWindow.IsDisposed) settingsWindow.Close();
             if (skinEditor != null && !skinEditor.IsDisposed) skinEditor.Close();
             for (int i = 0; i < gameLoops.Count; i++) gameLoops[i].Dispose();
@@ -320,8 +340,10 @@ namespace RainWorldDesktopPet.UI
                 renderTimer.Stop();
                 retryRenderItem.Enabled = true;
                 RefreshSettingsWindow();
-                trayIcon.ShowBalloonTip(5000, "Slugcat rendering paused",
-                    exception.Message + " Use Retry rendering from the tray menu.", ToolTipIcon.Error);
+                trayIcon.ShowBalloonTip(5000,
+                    T("슬러그캣 렌더링 일시 정지", "Slugcat Rendering Paused"),
+                    exception.Message + T(" 트레이 메뉴에서 렌더링 재시도를 선택하세요.",
+                        " Use Retry Rendering from the tray menu."), ToolTipIcon.Error);
             }
             finally
             {
@@ -348,7 +370,9 @@ namespace RainWorldDesktopPet.UI
                 Program.LogException(exception);
                 retryRenderItem.Enabled = true;
                 RefreshSettingsWindow();
-                trayIcon.ShowBalloonTip(5000, "Slugcat retry failed", exception.Message, ToolTipIcon.Error);
+                trayIcon.ShowBalloonTip(5000,
+                    T("슬러그캣 렌더링 재시도 실패", "Slugcat Rendering Retry Failed"),
+                    exception.Message, ToolTipIcon.Error);
             }
         }
 
@@ -433,34 +457,89 @@ namespace RainWorldDesktopPet.UI
 
         private void PollDragInput()
         {
+            // A press consumed by WH_MOUSE_LL is intentionally absent from the
+            // normal Windows button state. While the hook owns a Slugcat drag,
+            // only its matching WM_LBUTTONUP may end that drag.
+            if (mouseCaptured) return;
             bool currentlyDown = (NativeMethods.GetAsyncKeyState(NativeMethods.VK_LBUTTON) & 0x8000) != 0;
-            if (currentlyDown && !leftButtonDown && gameLoop != null)
+            leftButtonDown = currentlyDown;
+        }
+
+        private void InstallMouseHook()
+        {
+            if (mouseHook != IntPtr.Zero) return;
+            mouseHook = NativeMethods.SetWindowsHookEx(NativeMethods.WH_MOUSE_LL,
+                mouseHookCallback, NativeMethods.GetModuleHandle(null), 0);
+            if (mouseHook == IntPtr.Zero)
+                throw new Win32Exception(Marshal.GetLastWin32Error(),
+                    "Unable to install the Slugcat mouse input hook.");
+        }
+
+        private void UninstallMouseHook()
+        {
+            IntPtr hook = mouseHook;
+            mouseHook = IntPtr.Zero;
+            if (hook != IntPtr.Zero) NativeMethods.UnhookWindowsHookEx(hook);
+        }
+
+        private IntPtr MouseHookCallback(int code, IntPtr message, IntPtr data)
+        {
+            if (code >= 0)
             {
-                Vec2 point = CurrentCursorPoint();
-                GameLoop hit = FindSlugcatAt(point);
-                if (hit != null)
+                int mouseMessage = unchecked((int)message.ToInt64());
+                try
                 {
-                    SelectSlugcat(hit);
-                    if (hit.BeginGrab(point))
+                    if (mouseMessage == NativeMethods.WM_LBUTTONDOWN ||
+                        mouseMessage == NativeMethods.WM_LBUTTONDBLCLK)
                     {
-                        grabbedGameLoop = hit;
-                        mouseCaptured = true;
+                        NativeMethods.LowLevelMouseHookData hookData =
+                            (NativeMethods.LowLevelMouseHookData)Marshal.PtrToStructure(data,
+                                typeof(NativeMethods.LowLevelMouseHookData));
+                        Vec2 point = new Vec2(hookData.Point.X, hookData.Point.Y);
+                        GameLoop hit = FindSlugcatAt(point);
+                        if (hit != null && BeginGrab(hit, point)) return new IntPtr(1);
+                    }
+                    else if (mouseMessage == NativeMethods.WM_LBUTTONUP && mouseCaptured)
+                    {
+                        ReleaseGrabInput();
+                        leftButtonDown = false;
+                        return new IntPtr(1);
                     }
                 }
+                catch (Exception exception)
+                {
+                    Program.LogException(exception);
+                    ReleaseGrabInput();
+                }
             }
-            else if (!currentlyDown && leftButtonDown && mouseCaptured)
-            {
-                mouseCaptured = false;
-                if (grabbedGameLoop != null) grabbedGameLoop.EndGrab();
-                grabbedGameLoop = null;
-            }
-            leftButtonDown = currentlyDown;
+            return NativeMethods.CallNextHookEx(mouseHook, code, message, data);
+        }
+
+        private bool BeginGrab(GameLoop hit, Vec2 point)
+        {
+            SelectSlugcat(hit);
+            if (!hit.BeginGrab(point)) return false;
+            grabbedGameLoop = hit;
+            mouseCaptured = true;
+            leftButtonDown = true;
+            return true;
         }
 
         protected override void WndProc(ref Message message)
         {
+            if (message.Msg == NativeMethods.WM_LBUTTONUP && mouseCaptured)
+            {
+                ReleaseGrabInput();
+                leftButtonDown = false;
+            }
+            else if ((message.Msg == NativeMethods.WM_CAPTURECHANGED ||
+                message.Msg == NativeMethods.WM_CANCELMODE) && mouseCaptured)
+            {
+                ReleaseGrabInput();
+            }
             if (message.Msg == NativeMethods.WM_DISPLAYCHANGE || message.Msg == NativeMethods.WM_DPICHANGED)
             {
+                ReleaseGrabInput();
                 try
                 {
                     ConfigureVirtualDesktop();
@@ -478,6 +557,22 @@ namespace RainWorldDesktopPet.UI
                 return;
             }
             base.WndProc(ref message);
+        }
+
+        internal static bool ShouldSuppressLeftButton(int mouseMessage,
+            bool draggingSlugcat, bool slugcatUnderPointer)
+        {
+            if (mouseMessage == NativeMethods.WM_LBUTTONUP) return draggingSlugcat;
+            return (mouseMessage == NativeMethods.WM_LBUTTONDOWN ||
+                mouseMessage == NativeMethods.WM_LBUTTONDBLCLK) && slugcatUnderPointer;
+        }
+
+        private void ReleaseGrabInput()
+        {
+            GameLoop grabbed = grabbedGameLoop;
+            grabbedGameLoop = null;
+            mouseCaptured = false;
+            if (grabbed != null) grabbed.EndGrab();
         }
 
         private GameLoop FindSlugcatAt(Vec2 point)
@@ -502,8 +597,9 @@ namespace RainWorldDesktopPet.UI
         {
             if (gameLoops.Count >= MaximumSlugcats)
             {
-                trayIcon.ShowBalloonTip(3000, "Slugcat limit",
-                    "Up to " + MaximumSlugcats + " slugcats can be active.", ToolTipIcon.Info);
+                trayIcon.ShowBalloonTip(3000, T("슬러그캣 수 제한", "Slugcat Limit"),
+                    T("슬러그캣은 최대 " + MaximumSlugcats + "마리까지 실행할 수 있습니다.",
+                        "Up to " + MaximumSlugcats + " Slugcats can be active."), ToolTipIcon.Info);
                 return;
             }
             try
@@ -513,7 +609,8 @@ namespace RainWorldDesktopPet.UI
             catch (Exception exception)
             {
                 Program.LogException(exception);
-                trayIcon.ShowBalloonTip(4000, "Spawn failed", exception.Message, ToolTipIcon.Error);
+                trayIcon.ShowBalloonTip(4000, T("슬러그캣 추가 실패", "Failed to Add Slugcat"),
+                    exception.Message, ToolTipIcon.Error);
             }
         }
 
@@ -531,9 +628,7 @@ namespace RainWorldDesktopPet.UI
             int index = gameLoops.IndexOf(removed);
             if (ReferenceEquals(grabbedGameLoop, removed))
             {
-                grabbedGameLoop.EndGrab();
-                grabbedGameLoop = null;
-                mouseCaptured = false;
+                ReleaseGrabInput();
             }
             gameLoops.RemoveAt(index);
             removed.Dispose();
@@ -569,7 +664,8 @@ namespace RainWorldDesktopPet.UI
             {
                 GameLoop loop = gameLoops[i];
                 ToolStripMenuItem item = new ToolStripMenuItem(
-                    "Slugcat " + (i + 1) + " · " + loop.SelectedSlugcat.DisplayName);
+                    T("슬러그캣 ", "Slugcat ") + (i + 1) + " · " +
+                    SlugcatProfiles.SelectionLabel(loop.SelectedSlugcat.Id));
                 item.Tag = loop;
                 item.Checked = ReferenceEquals(loop, gameLoop);
                 item.Click += delegate(object itemSender, EventArgs args)
@@ -579,10 +675,11 @@ namespace RainWorldDesktopPet.UI
                 };
                 activeSlugcatsMenu.DropDownItems.Add(item);
             }
-            activeSlugcatsMenu.Text = "Slugcats (" + gameLoops.Count + ")";
+            activeSlugcatsMenu.Text = T("슬러그캣", "Slugcats") + " (" + gameLoops.Count + ")";
             spawnItem.Enabled = gameLoops.Count < MaximumSlugcats;
             removeItem.Enabled = gameLoops.Count > 1;
-            trayIcon.Text = "SlugcatInMyMonitor · Active Slugcats: " + gameLoops.Count;
+            trayIcon.Text = T("SlugcatInMyMonitor · 실행 중: " + gameLoops.Count + "마리",
+                "SlugcatInMyMonitor · Active: " + gameLoops.Count);
             RefreshSettingsWindow();
         }
 
@@ -631,7 +728,7 @@ namespace RainWorldDesktopPet.UI
             {
                 skinEditor = null;
                 Program.LogException(exception);
-                trayIcon.ShowBalloonTip(5000, "Skin editor failed",
+                trayIcon.ShowBalloonTip(5000, T("스킨 편집기 실행 실패", "Skin Editor Failed"),
                     exception.Message, ToolTipIcon.Error);
             }
         }
@@ -673,8 +770,8 @@ namespace RainWorldDesktopPet.UI
                 for (int i = 0; i < gameLoops.Count; i++)
                 {
                     GameLoop loop = gameLoops[i];
-                    names[i] = "Slugcat " + (i + 1) + " · " +
-                        loop.SelectedSlugcat.DisplayName;
+                    names[i] = T("슬러그캣 ", "Slugcat ") + (i + 1) + " · " +
+                        SlugcatProfiles.SelectionLabel(loop.SelectedSlugcat.Id);
                 }
                 return names;
             }
@@ -716,12 +813,16 @@ namespace RainWorldDesktopPet.UI
             if (skinEditor != null && !skinEditor.IsDisposed) skinEditor.RefreshFromGame();
         }
 
+        internal void SettingsSetLanguage(UiLanguage language)
+        { UiLocalization.SetLanguage(language); }
+
         internal string SettingsRefreshWorkshop()
         {
             RefreshAllWorkshopIntegrations();
             return gameLoop == null
-                ? "No Slugcat is selected."
-                : gameLoop.DmsSkins.Count + " Dress My Slugcat spritesheets found.";
+                ? T("선택한 슬러그캣이 없습니다.", "No Slugcat is selected.")
+                : T("Dress My Slugcat 스프라이트 시트 " + gameLoop.DmsSkins.Count + "개를 찾았습니다.",
+                    gameLoop.DmsSkins.Count + " Dress My Slugcat spritesheets found.");
         }
 
         internal void SettingsOpenAppearanceEditor()
@@ -743,13 +844,13 @@ namespace RainWorldDesktopPet.UI
             try
             {
                 string status = SettingsRefreshWorkshop();
-                trayIcon.ShowBalloonTip(2500, "Workshop refreshed",
+                trayIcon.ShowBalloonTip(2500, T("Workshop 새로 고침 완료", "Workshop Refreshed"),
                     status, ToolTipIcon.Info);
             }
             catch (Exception exception)
             {
                 Program.LogException(exception);
-                trayIcon.ShowBalloonTip(5000, "Workshop refresh failed", exception.Message,
+                trayIcon.ShowBalloonTip(5000, T("Workshop 새로 고침 실패", "Workshop Refresh Failed"), exception.Message,
                     ToolTipIcon.Warning);
             }
         }
@@ -768,5 +869,8 @@ namespace RainWorldDesktopPet.UI
             int y = (short)((packed >> 16) & 0xffff);
             return new Vec2(x, y);
         }
+
+        private static string T(string korean, string english)
+        { return UiLocalization.Text(korean, english); }
     }
 }
