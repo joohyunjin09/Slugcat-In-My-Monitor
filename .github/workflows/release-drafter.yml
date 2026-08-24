@@ -3,21 +3,65 @@ name: Release Drafter
 on:
   push:
     branches:
+      - develop
       - main
   workflow_dispatch:
 
 permissions:
+  actions: write
   contents: write
   pull-requests: read
 
+concurrency:
+  group: release-drafter-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
-  update-release-draft:
-    name: Update next release draft
+  update-draft:
+    if: github.ref_name == 'develop'
+    name: Update release draft from develop
     runs-on: ubuntu-latest
     steps:
-      - name: Draft release notes and version
+      - name: Update draft release notes and version
         uses: release-drafter/release-drafter@v7
         with:
           config-name: release-drafter.yml
+          commitish: develop
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  publish-release:
+    if: github.ref_name == 'main'
+    name: Publish release and start packaging
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish the next release
+        id: drafter
+        uses: release-drafter/release-drafter@v7
+        with:
+          config-name: release-drafter.yml
+          commitish: main
+          publish: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Validate the published tag
+        id: release
+        shell: bash
+        env:
+          DRAFTER_TAG: ${{ steps.drafter.outputs.tag_name }}
+        run: |
+          if [[ ! "$DRAFTER_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?$ ]]; then
+            echo "Invalid release tag: $DRAFTER_TAG" >&2
+            exit 1
+          fi
+          echo "tag=$DRAFTER_TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Start the Windows release build
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          gh workflow run release.yml --repo "$GITHUB_REPOSITORY" --ref main \
+            --field version="$RELEASE_TAG"

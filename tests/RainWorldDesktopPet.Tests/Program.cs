@@ -3,6 +3,9 @@ using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Imaging;
 using System.IO;
+using System.Linq;
+using System.Diagnostics;
+using System.Threading;
 using RainWorldDesktopPet.AI;
 using RainWorldDesktopPet.Core;
 using RainWorldDesktopPet.Creature;
@@ -10,6 +13,8 @@ using RainWorldDesktopPet.Desktop;
 using RainWorldDesktopPet.Physics;
 using RainWorldDesktopPet.RainWorld;
 using RainWorldDesktopPet.Graphics;
+using RainWorldDesktopPet.Audio;
+using RainWorldDesktopPet.Workshop;
 
 namespace RainWorldDesktopPet.Tests
 {
@@ -25,7 +30,8 @@ namespace RainWorldDesktopPet.Tests
                 {
                     RenderPreview(args[1], args.Length >= 3 ? ReadVariant(args[2]) : SlugcatVariant.Survivor,
                         args.Length >= 4 ? args[3] : "walk",
-                        args.Length >= 5 ? ReadSkin(args[4]) : SlugcatSkin.Default);
+                        args.Length >= 5 ? ReadSkin(args[4]) : SlugcatSkin.Default,
+                        args.Length >= 6 ? args[5] : null);
                     return 0;
                 }
                 catch (Exception exception)
@@ -39,6 +45,13 @@ namespace RainWorldDesktopPet.Tests
             Run("FixedTimeStep uses 40 Hz independently of render rate", FixedStepUsesFortyHertz);
             Run("Desktop world transform scales original X/Y travel uniformly", DesktopWorldTransformScalesTravelUniformly);
             Run("Original horizontal acceleration and friction match input order", OriginalHorizontalInputParity);
+            Run("Crawl reversal uses Player's 0.75 dynamicRunSpeed branch",
+                CrawlReverseUsesOriginalDynamicRunSpeed);
+            Run("Normal Flip and belly-reversal Flip keep distinct angular forces",
+                FlipAngularForceUsesOriginalEntryKind);
+            Run("Backflip entry keeps Player.Jump launch values and state transition",
+                BackflipEntryMatchesOriginalJumpBranch);
+            Run("Down input changes standing intent before physical Crawl", OriginalPostureTransitionUsesPhysics);
             Run("Both BodyChunks resolve against one immutable tick snapshot", BodyChunksShareFrozenSnapshot);
             Run("60/144/240 Hz rendering preserves identical physics and animation", RefreshRatesPreservePhysicsAndAnimation);
             Run("Original free-fall curve remains per-tick at 40 Hz", OriginalFreeFallCurve);
@@ -62,11 +75,13 @@ namespace RainWorldDesktopPet.Tests
             Run("Rain World locator validates an explicit installation", LocatorValidatesExplicitPath);
             Run("Required autonomous behavior states are present", RequiredBehaviorsExist);
             Run("Jump and DropDown utility states are reachable", UtilityActionsAreReachable);
-            Run("Wall contact reaches ClimbWindow through VirtualInput", WallContactReachesClimbMovement);
+            Run("Wall contact reaches gravity-driven WallClimb through VirtualInput", WallContactReachesClimbMovement);
             Run("WallClimb hands use alternating wall targets", WallClimbHandsTargetTheWall);
             Run("Sleep curl pulls both hands to the original target", SleepCurlHandsShareOriginalTarget);
             Run("Moving window walls carry a climbing Slugcat", MovingWindowWallCarriesClimber);
             Run("Moving windows carry both chunks for fast motion in every direction", MovingWindowCarriesConnectedBody);
+            Run("Desktop window enumeration publishes snapshots asynchronously",
+                DesktopRefreshIsAsynchronous);
             Run("Transient HWND enumeration misses retain then expire surfaces", TransientWindowMissesUseGracePeriod);
             Run("Stale limb grips release when their HWND surface disappears", StaleLimbGripReleases);
             Run("Occluded windows do not create hidden surfaces", OccludedWindowsAreClipped);
@@ -119,14 +134,31 @@ namespace RainWorldDesktopPet.Tests
             Run("Runtime skin switching preserves Player physics", RuntimeSkinSwitchPreservesPhysics);
             Run("Rivulet gills use six procedural parts and shared interpolation", RivuletGillsUseOriginalProceduralLayout);
             Run("Spearmaster uses its original tail profile and speckle mapping", SpearmasterTailProfileAndSpeckles);
+            Run("PlayerGraphics arm reflection matches y-up signed distance",
+                ArmScaleReflectionMatchesFutileCoordinates);
             Run("Skin face and head families follow PlayerGraphics branches", SkinFaceFamiliesMatchPlayerGraphics);
+            Run("Push To Meow lifts and closes faces while standing and crawling",
+                PushToMeowFaceAnimationUsesOriginalFaceStates);
             Run("Every visual profile remains valid through movement and stun states", AllVisualProfilesRemainStableAcrossStates);
+            AbilityParityReplayTests.Register(Run);
 
             RainWorldInstallation localInstallation = new RainWorldLocator().Locate(null);
             if (localInstallation == null)
                 Console.WriteLine("SKIP  Local embedded original atlas (Rain World installation not found)");
             else
-            Run("Local embedded original atlas loads without DMS", delegate { EmbeddedOriginalAtlasLoads(localInstallation); });
+            {
+                Run("Local embedded original atlas loads without DMS", delegate { EmbeddedOriginalAtlasLoads(localInstallation); });
+                Run("Local FireSmoke uses the original noise textures", delegate
+                {
+                    OriginalFireSmokeAssetsLoad(localInstallation);
+                });
+                Run("Local FireSmoke GPU worker completes asynchronously", delegate
+                {
+                    OriginalFireSmokeGpuWorkerCompletes(localInstallation);
+                });
+                Run("Installed Workshop mods parse without loading their DLLs",
+                    delegate { LocalWorkshopIntegrationsParse(localInstallation); });
+            }
 
             Console.WriteLine(failures == 0
                 ? "All RainWorldDesktopPet tests passed."
@@ -135,7 +167,7 @@ namespace RainWorldDesktopPet.Tests
         }
 
         private static void RenderPreview(string outputPath, SlugcatVariant variant, string scenario,
-            SlugcatSkin skin)
+            SlugcatSkin skin, string dmsSkinId)
         {
             RainWorldInstallation installation = new RainWorldLocator().Locate(null);
             if (installation == null) throw new InvalidOperationException("Rain World installation was not found.");
@@ -173,10 +205,23 @@ namespace RainWorldDesktopPet.Tests
                 proceduralGraphics.Step(ai.Attention, world);
             }
 
+            WorkshopCatalog workshop = null;
+            DmsSkinCatalog dms = null;
             using (SpriteRenderer renderer = new SpriteRenderer(set))
             using (Bitmap bitmap = new Bitmap(560, 420, PixelFormat.Format32bppPArgb))
             using (System.Drawing.Graphics drawing = System.Drawing.Graphics.FromImage(bitmap))
             {
+                if (!string.IsNullOrWhiteSpace(dmsSkinId))
+                {
+                    WorkshopLog log = new WorkshopLog(Path.Combine(Path.GetTempPath(),
+                        "SlugcatInMyMonitor-tests", "preview.log"), false);
+                    workshop = new WorkshopCatalog(installation, log);
+                    dms = new DmsSkinCatalog(workshop, log);
+                    DmsSkinDefinition dmsSkin = dms.Find(dmsSkinId);
+                    if (dmsSkin == null) throw new InvalidOperationException(
+                        "DMS spritesheet unavailable: " + dmsSkinId);
+                    renderer.SetDmsSkin(dmsSkin);
+                }
                 drawing.Clear(Color.Transparent);
                 SlugcatPose pose = proceduralGraphics.BuildPose(1.0, ai.Attention);
                 Vec2 origin = pose.ToRenderedWorld((pose.Chest + pose.Hips) * 0.5) -
@@ -186,10 +231,159 @@ namespace RainWorldDesktopPet.Tests
                 if (!Directory.Exists(directory)) Directory.CreateDirectory(directory);
                 bitmap.Save(outputPath, ImageFormat.Png);
             }
+            if (dms != null) dms.Dispose();
+            if (workshop != null) workshop.Dispose();
             Console.WriteLine("Preview written to " + Path.GetFullPath(outputPath));
             Console.WriteLine(loader.Status);
             Console.WriteLine("Scenario " + scenario);
             Console.WriteLine("Skin " + skin);
+            Console.WriteLine("DMS " + (dmsSkinId ?? "none"));
+        }
+
+        private static void LocalWorkshopIntegrationsParse(RainWorldInstallation installation)
+        {
+            string logPath = Path.Combine(Path.GetTempPath(), "SlugcatInMyMonitor-tests",
+                "workshop.log");
+            WorkshopLog log = new WorkshopLog(logPath, false);
+            using (WorkshopCatalog workshop = new WorkshopCatalog(installation, log))
+            {
+                RainWorldMod pushMod = workshop.FindById("pushtomeow");
+                if (pushMod != null)
+                {
+                    PushToMeowLibrary push = new PushToMeowLibrary(workshop, log, 12345);
+                    True(push.IsAvailable == pushMod.IsActive,
+                        "Push To Meow playback availability must follow its Remix active state");
+                    string[] ids = { "White", "Yellow", "Red", "Gourmand", "Artificer",
+                        "Rivulet", "Spear", "Saint" };
+                    foreach (string id in ids)
+                    {
+                        MeowVoiceSet voice = push.GetVoice(id);
+                        True(voice != null && voice.ShortVariations.Count > 0 &&
+                            voice.LongVariations.Count > 0, id + " must have short and long variations");
+                        True(voice.ShortVariations.All(item => item.DurationSeconds > 0.0) &&
+                            voice.LongVariations.All(item => item.DurationSeconds > 0.0),
+                            id + " WAV durations must be decoded");
+                    }
+                    if (push.IsAvailable)
+                    {
+                        MeowSoundVariation variation = push.Choose("White", true);
+                        True(variation != null, "active Push To Meow has a Survivor clip");
+                        variation.PlaybackVolume = 0.01f;
+                        using (WorkshopAudioPlayer player = new WorkshopAudioPlayer(log))
+                        {
+                            Stopwatch enqueue = Stopwatch.StartNew();
+                            True(player.TryPlay(variation),
+                                "Push To Meow request enters its worker queue");
+                            enqueue.Stop();
+                            True(enqueue.ElapsedMilliseconds < 100,
+                                "Push To Meow file/device I/O stays off the caller thread");
+                            Stopwatch deadline = Stopwatch.StartNew();
+                            while (deadline.ElapsedMilliseconds < 3000 &&
+                                !player.LastEvent.StartsWith("playback started",
+                                    StringComparison.OrdinalIgnoreCase) &&
+                                !player.LastEvent.StartsWith("playback failed",
+                                    StringComparison.OrdinalIgnoreCase))
+                                System.Threading.Thread.Sleep(10);
+                            True(player.LastEvent.StartsWith("playback started",
+                                StringComparison.OrdinalIgnoreCase), player.LastEvent);
+                        }
+                    }
+                }
+
+                if (workshop.FindById("dressmyslugcat") != null)
+                {
+                    using (DmsSkinCatalog dms = new DmsSkinCatalog(workshop, log))
+                    {
+                        True(dms.Skins.Count > 0, "installed DMS must expose at least one valid spritesheet");
+                        string[] officialParts = { "HEAD", "FACE", "BODY", "ARMS", "HIPS",
+                            "LEGS", "TAIL", "FACESCAR", "GILLS", "TAILSPECKLES",
+                            "ASCENSION", "PIXEL" };
+                        Equal(officialParts.Length, DmsSpriteGroups.SelectableParts.Length,
+                            "Skin Editor exposes every official DMS part");
+                        for (int partIndex = 0; partIndex < officialParts.Length; partIndex++)
+                            True(string.Equals(officialParts[partIndex],
+                                DmsSpriteGroups.SelectableParts[partIndex],
+                                StringComparison.OrdinalIgnoreCase),
+                                "DMS part order " + officialParts[partIndex]);
+                        foreach (DmsSkinDefinition skin in dms.Skins)
+                            True(skin.AvailableParts.Any(), skin.Id + " must contain a complete DMS sprite group");
+
+                        DmsSkinDefinition headSkin = dms.Skins.FirstOrDefault(skin =>
+                            skin.IsModActive && skin.HasPart("HEAD"));
+                        DmsSkinDefinition bodySkin = dms.Skins.FirstOrDefault(skin =>
+                            skin.IsModActive && skin.HasPart("BODY") && skin != headSkin);
+                        if (headSkin != null)
+                        {
+                            using (SpriteRenderer renderer = new SpriteRenderer(null))
+                            {
+                                renderer.SetDmsPart("HEAD", headSkin);
+                                True(renderer.GetDmsPart("HEAD") == headSkin,
+                                    "HEAD has one explicit source");
+                                if (bodySkin != null)
+                                {
+                                    renderer.SetDmsPart("BODY", bodySkin);
+                                    renderer.SetDmsPart("HEAD", null);
+                                    True(renderer.GetDmsPart("HEAD") == null,
+                                        "Vanilla clears the previous HEAD reference");
+                                    True(renderer.GetDmsPart("BODY") == bodySkin,
+                                        "an intentional BODY selection remains independent");
+                                }
+                                renderer.SetDmsSkin(headSkin);
+                                True(renderer.GetDmsPart("BODY") ==
+                                    (headSkin.HasPart("BODY") ? headSkin : null),
+                                    "atomic whole-set compatibility leaves no previous BODY skin");
+                            }
+                        }
+
+                        AtlasSprite sprite;
+                        DmsSkinDefinition saintRaincoat = dms.Find("homeobox.raincoatsaint");
+                        if (saintRaincoat != null)
+                            True(saintRaincoat.TryGetSprite("HeadB0", "Saint", DmsSpriteSide.None,
+                                out sprite), "Saint HeadB sprites must map to the generic DMS HeadA family");
+
+                        DmsSkinDefinition template = dms.Find("dressmyslugcat.template");
+                        if (template != null)
+                            True(template.TryGetSprite("FaceC0", "Artificer", DmsSpriteSide.None,
+                                out sprite), "Artificer FaceC sprites must map to the generic FaceA family");
+
+                        DmsSkinDefinition bow = dms.Find("InanimateSwagsanity.Bow");
+                        if (bow != null)
+                        {
+                            True(bow.TryGetSprite("HeadA0", "White", DmsSpriteSide.None, out sprite),
+                                "valid parts from a partly broken installed atlas set must remain available");
+                            True(!bow.TryGetSprite("HipsA", "White", DmsSpriteSide.None, out sprite),
+                                "an invalid atlas pair must fall back instead of exposing corrupt sprites");
+                        }
+
+                        DmsSkinDefinition rivulet = dms.Find("VNNYS.RIVL.REDRWN");
+                        if (rivulet != null)
+                        {
+                            True(rivulet.TryGetSprite("LizardScaleA3", "Rivulet", DmsSpriteSide.None,
+                                out sprite), "valid Rivulet gills from an installed DMS skin must load");
+                            True(!rivulet.TryGetSprite("TailTexture", "Rivulet", DmsSpriteSide.None,
+                                out sprite), "a corrupt optional tail atlas must preserve the base tail");
+                        }
+                    }
+                }
+
+                List<RainWorldMod> removedPush = workshop.Mods.Where(mod =>
+                    string.Equals(mod.Id, "pushtomeow", StringComparison.OrdinalIgnoreCase)).ToList();
+                foreach (RainWorldMod mod in removedPush) workshop.Mods.Remove(mod);
+                PushToMeowLibrary absentPush = new PushToMeowLibrary(workshop, log, 24680);
+                True(!absentPush.IsInstalled && !absentPush.IsAvailable,
+                    "missing Push To Meow must leave automatic meowing disabled");
+                foreach (RainWorldMod mod in removedPush) workshop.Mods.Add(mod);
+
+                List<RainWorldMod> removedDms = workshop.Mods.Where(mod =>
+                    string.Equals(mod.Id, "dressmyslugcat", StringComparison.OrdinalIgnoreCase)).ToList();
+                foreach (RainWorldMod mod in removedDms) workshop.Mods.Remove(mod);
+                using (DmsSkinCatalog absentDms = new DmsSkinCatalog(workshop, log))
+                {
+                    True(!absentDms.IsFrameworkInstalled && absentDms.Skins.Count == 0,
+                        "missing Dress My Slugcat must leave the base appearance available");
+                }
+                foreach (RainWorldMod mod in removedDms) workshop.Mods.Add(mod);
+            }
         }
 
         private static void Run(string name, Action test)
@@ -259,10 +453,181 @@ namespace RainWorldDesktopPet.Tests
             crawler.BodyChunks[0].ContactFloor = true;
             crawler.BodyChunks[1].ContactFloor = true;
             crawler.Movement.ApplyInput(new VirtualInput(1, 1, false, false), world);
-            Near(1.0, crawler.BodyChunks[0].Velocity.X, 0.000001,
-                "Crawl with vertical input dynamicRunSpeed upper");
-            Near(1.0, crawler.BodyChunks[1].Velocity.X, 0.000001,
-                "Crawl with vertical input dynamicRunSpeed lower");
+            Near(1.2, crawler.BodyChunks[0].Velocity.X, 0.000001,
+                "first down tick remains physical Stand upper");
+            Near(1.2, crawler.BodyChunks[1].Velocity.X, 0.000001,
+                "first down tick remains physical Stand lower");
+            Equal((int)BodyModeIndex.Stand, (int)crawler.State.BodyMode,
+                "down input does not select Crawl directly");
+        }
+
+        private static void CrawlReverseUsesOriginalDynamicRunSpeed()
+        {
+            DesktopCollisionWorld world = new DesktopCollisionWorld(new WindowEnumerator());
+            world.RefreshFromSnapshots(new DesktopWindowSnapshot[0]);
+            Slugcat crawler = new Slugcat(new Vec2(300.0, 300.0), SlugcatId.White);
+            crawler.BodyChunks[0].Position = new Vec2(310.0, 300.0);
+            crawler.BodyChunks[1].Position = new Vec2(300.0, 300.0);
+            crawler.State.BodyMode = BodyModeIndex.Crawl;
+            crawler.State.Standing = false;
+            for (int tick = 0; tick < 2; tick++)
+            {
+                crawler.BodyChunks[0].ContactFloor = true;
+                crawler.BodyChunks[1].ContactFloor = true;
+                crawler.Movement.ApplyInput(new VirtualInput(-1, 0, false, false), world);
+            }
+            Near(-1.875, crawler.BodyChunks[0].Velocity.X, 0.000001,
+                "Crawl reverse upper cap is 2.5 * .75");
+            Near(-1.875, crawler.BodyChunks[1].Velocity.X, 0.000001,
+                "Crawl reverse lower cap is 2.5 * .75");
+            True(crawler.State.Animation != AnimationIndex.CrawlTurn,
+                "dynamicRunSpeed reduction precedes the six-tick CrawlTurn gate");
+        }
+
+        private static void FlipAngularForceUsesOriginalEntryKind()
+        {
+            DesktopCollisionWorld world = new DesktopCollisionWorld(new WindowEnumerator());
+            world.RefreshFromSnapshots(new DesktopWindowSnapshot[0]);
+            Slugcat normal = CreateFlipForForceTest(false);
+            Slugcat reversedSlide = CreateFlipForForceTest(true);
+            normal.Movement.ApplyInput(VirtualInput.Neutral, world);
+            reversedSlide.Movement.ApplyInput(VirtualInput.Neutral, world);
+            Near(-0.38, normal.BodyChunks[0].Velocity.X, 0.000001,
+                "ordinary backflip upper angular force");
+            Near(0.38, normal.BodyChunks[1].Velocity.X, 0.000001,
+                "ordinary backflip lower angular force");
+            Near(-0.95, reversedSlide.BodyChunks[0].Velocity.X, 0.000001,
+                "belly reversal keeps the original 2.5 multiplier");
+            Near(0.95, reversedSlide.BodyChunks[1].Velocity.X, 0.000001,
+                "belly reversal lower angular force");
+        }
+
+        private static Slugcat CreateFlipForForceTest(bool fromSlide)
+        {
+            Slugcat slugcat = new Slugcat(new Vec2(0.0, 17.0), SlugcatId.White);
+            slugcat.BodyChunks[0].Position = Vec2.Zero;
+            slugcat.BodyChunks[1].Position = new Vec2(0.0, 17.0);
+            slugcat.BodyChunks[0].Velocity = Vec2.Zero;
+            slugcat.BodyChunks[1].Velocity = Vec2.Zero;
+            slugcat.State.Animation = AnimationIndex.Flip;
+            slugcat.State.BodyMode = BodyModeIndex.Default;
+            slugcat.State.SlideDirection = 1;
+            slugcat.State.FlipFromSlide = fromSlide;
+            slugcat.State.AerobicLevel = 0.0;
+            return slugcat;
+        }
+
+        private static void BackflipEntryMatchesOriginalJumpBranch()
+        {
+            DesktopCollisionWorld world = new DesktopCollisionWorld(new WindowEnumerator());
+            world.RefreshFromSnapshots(new DesktopWindowSnapshot[0]);
+            Slugcat slugcat = new Slugcat(new Vec2(0.0, 17.0), SlugcatId.White);
+            slugcat.BodyChunks[0].Position = Vec2.Zero;
+            slugcat.BodyChunks[1].Position = new Vec2(0.0, 17.0);
+            slugcat.BodyChunks[0].ContactFloor = true;
+            slugcat.BodyChunks[1].ContactFloor = true;
+            slugcat.State.BodyMode = BodyModeIndex.Stand;
+            slugcat.State.Standing = true;
+            slugcat.State.SlideDirection = 1;
+            slugcat.State.SlideCounter = 3;
+            VirtualInput jump = new VirtualInput(-1, 0, true, false);
+            jump.ResolveEdges(VirtualInput.Neutral);
+            slugcat.Movement.ApplyInput(jump, world);
+            True(slugcat.State.Animation == AnimationIndex.Flip,
+                "standing skid jump enters Flip");
+            True(!slugcat.State.FlipFromSlide,
+                "ordinary backflip is distinct from belly-slide reversal");
+            Near(-9.0, slugcat.BodyChunks[0].Velocity.Y, 0.000001,
+                "backflip upper vertical assignment");
+            Near(-7.0, slugcat.BodyChunks[1].Velocity.Y, 0.000001,
+                "backflip lower vertical assignment");
+            Near(5.0, slugcat.Movement.JumpBoost, 0.000001,
+                "backflip stores five jumpBoost ticks");
+            True(!slugcat.State.Grounded &&
+                slugcat.State.BodyMode == BodyModeIndex.Default,
+                "backflip clears grounded Stand state in the launch tick");
+        }
+
+        private static void DesktopRefreshIsAsynchronous()
+        {
+            DesktopCollisionWorld world = new DesktopCollisionWorld(new WindowEnumerator());
+            long before = world.CurrentSnapshot.Version;
+            Stopwatch stopwatch = Stopwatch.StartNew();
+            world.RequestRefresh(IntPtr.Zero);
+            stopwatch.Stop();
+            True(stopwatch.ElapsedMilliseconds < 100,
+                "RequestRefresh must only enqueue Win32/DWM work");
+            Stopwatch deadline = Stopwatch.StartNew();
+            bool applied = false;
+            while (deadline.ElapsedMilliseconds < 3000 && !applied)
+            {
+                applied = world.TryApplyPendingRefresh();
+                if (!applied) System.Threading.Thread.Sleep(10);
+            }
+            True(applied, "background desktop snapshot completed");
+            True(world.CurrentSnapshot.Version > before,
+                "completed snapshot is applied on the caller tick");
+        }
+
+        private static void ArmScaleReflectionMatchesFutileCoordinates()
+        {
+            SlugcatPose pose = new SlugcatPose();
+            pose.BodyMode = BodyModeIndex.Default;
+            pose.Chest = new Vec2(100.0, 80.0);
+            pose.Hips = new Vec2(100.0, 120.0);
+            pose.Hands[0] = new Vec2(65.0, 85.0);
+            pose.Hands[1] = new Vec2(135.0, 115.0);
+            Near(-1.0, SpriteRenderer.ComputeArmScaleY(pose, 0), 0.000001,
+                "screen-left hand becomes positive signed distance before y reflection");
+            Near(1.0, SpriteRenderer.ComputeArmScaleY(pose, 1), 0.000001,
+                "screen-right hand becomes negative signed distance before y reflection");
+
+            pose.Chest = new Vec2(80.0, 100.0);
+            pose.Hips = new Vec2(120.0, 100.0);
+            pose.Hands[0] = new Vec2(90.0, 65.0);
+            pose.Hands[1] = new Vec2(110.0, 135.0);
+            Near(1.0, SpriteRenderer.ComputeArmScaleY(pose, 0), 0.000001,
+                "upward spear-hand pose keeps the Futile reflection sign");
+            Near(-1.0, SpriteRenderer.ComputeArmScaleY(pose, 1), 0.000001,
+                "downward spear-hand pose keeps the Futile reflection sign");
+        }
+
+        private static void OriginalPostureTransitionUsesPhysics()
+        {
+            DesktopCollisionWorld world = new DesktopCollisionWorld(new WindowEnumerator());
+            world.Refresh(IntPtr.Zero);
+            Slugcat slugcat = new Slugcat(new Vec2(300.0, 300.0));
+            slugcat.State.BodyMode = BodyModeIndex.Stand;
+            for (int tick = 0; tick < 5; tick++)
+            {
+                slugcat.BodyChunks[0].ContactFloor = false;
+                slugcat.BodyChunks[1].ContactFloor = true;
+                slugcat.Movement.ApplyInput(new VirtualInput(0, 1, false, false), world);
+                if (tick == 0)
+                {
+                    True(!slugcat.State.Standing, "down edge clears Player.standing intent");
+                    Equal((int)BodyModeIndex.Stand, (int)slugcat.State.BodyMode,
+                        "first down frame keeps the physical Stand mode");
+                    True(slugcat.State.Animation != AnimationIndex.DownOnFours,
+                        "first down frame is not the final crawl transition");
+                }
+            }
+            Equal((int)AnimationIndex.DownOnFours, (int)slugcat.State.Animation,
+                "contact counters enter DownOnFours after the original gate");
+
+            slugcat.BodyChunks[0].Position = slugcat.BodyChunks[1].Position;
+            slugcat.BodyChunks[1].ContactFloor = true;
+            slugcat.Movement.ApplyInput(new VirtualInput(0, 1, false, false), world);
+            Equal((int)BodyModeIndex.Crawl, (int)slugcat.State.BodyMode,
+                "BodyChunk geometry establishes Crawl");
+
+            slugcat.BodyChunks[1].ContactFloor = true;
+            slugcat.Movement.ApplyInput(new VirtualInput(0, -1, false, false), world);
+            True(slugcat.State.Standing, "up edge restores Player.standing intent");
+            Equal((int)BodyModeIndex.Crawl, (int)slugcat.State.BodyMode,
+                "StandUp begins while the body is still physically low");
+            Equal((int)AnimationIndex.StandUp, (int)slugcat.State.Animation,
+                "low body enters StandUp instead of swapping to standing sprite");
         }
 
         private static void BodyChunksShareFrozenSnapshot()
@@ -777,8 +1142,8 @@ namespace RainWorldDesktopPet.Tests
             slugcat.Movement.ApplyInput(input, world);
             True(slugcat.State.BodyMode == BodyModeIndex.WallClimb,
                 "movement must interpret climb VirtualInput without direct AI movement");
-            True(slugcat.BodyChunks[0].Velocity.Y < 0.0 && slugcat.BodyChunks[1].Velocity.Y < 0.0,
-                "wall climb should produce upward screen-space velocity");
+            True(slugcat.BodyChunks[0].Velocity.Y >= 0.0 && slugcat.BodyChunks[1].Velocity.Y >= 0.0,
+                "wall slide must not inject upward screen-space velocity");
         }
 
         private static void OriginalFaceFrameSelection()
@@ -1566,6 +1931,54 @@ namespace RainWorldDesktopPet.Tests
                 "drop-through should push both chunks downward");
         }
 
+        private static void OriginalFireSmokeAssetsLoad(RainWorldInstallation installation)
+        {
+            string status;
+            using (FireSmokeShaderAssets assets = FireSmokeShaderAssets.TryLoad(installation,
+                out status))
+            {
+                True(assets != null, status);
+                double first = assets.SampleNoise(0.123, 0.456);
+                double second = assets.SampleNoise2(0.789, 0.234);
+                True(first >= 0.0 && first <= 1.0,
+                    "original Palettes/noise red channel is sampleable");
+                True(second >= 0.0 && second <= 1.0,
+                    "original Palettes/noise2 red channel is sampleable");
+            }
+        }
+
+        private static void OriginalFireSmokeGpuWorkerCompletes(RainWorldInstallation installation)
+        {
+            string assetStatus;
+            using (FireSmokeShaderAssets assets = FireSmokeShaderAssets.TryLoad(installation,
+                out assetStatus))
+            {
+                True(assets != null, assetStatus);
+                string gpuStatus;
+                using (FireSmokeGpuRenderer gpu = FireSmokeGpuRenderer.TryCreate(assets,
+                    out gpuStatus))
+                {
+                    True(gpu != null, gpuStatus);
+                    object owner = new object();
+                    gpu.Queue(owner, 0, 7, new Vec2(320.0, 240.0), 20.0, 128.0,
+                        Vec2.Zero, 1.0, 1920, 1080, 0.8);
+                    Stopwatch wait = Stopwatch.StartNew();
+                    FireSmokeGpuRenderer.CompletedMask completed = null;
+                    while (wait.ElapsedMilliseconds < 2000 &&
+                        !gpu.TryTakeCompleted(out completed)) Thread.Sleep(5);
+                    True(completed != null, "GPU worker should finish a FireSmoke mask");
+                    True(ReferenceEquals(owner, completed.Owner), "GPU result owner");
+                    Equal(0, completed.Layer, "GPU result layer");
+                    Equal(7, completed.Generation, "GPU result generation");
+                    True(completed.Pixels != null && completed.Pixels.Length ==
+                        FireSmokeGpuRenderer.RasterSize * FireSmokeGpuRenderer.RasterSize * 4,
+                        "GPU result pixel buffer");
+                    True(completed.Pixels.Where(delegate(byte value) { return value != 0; }).Any(),
+                        "GPU FireSmoke shader should produce visible original-mask pixels");
+                }
+            }
+        }
+
         private static void EmbeddedOriginalAtlasLoads(RainWorldInstallation installation)
         {
             RainWorldAssetLoader loader = new RainWorldAssetLoader(installation);
@@ -1594,6 +2007,17 @@ namespace RainWorldDesktopPet.Tests
                 AtlasSprite specialFace;
                 True(set.TryGet("FaceDead", out specialFace), "dead face element");
                 True(set.TryGet("FaceStunned", out specialFace), "stunned face element");
+                for (int i = 1; i <= 3; i++)
+                {
+                    AtlasSprite bioSpear;
+                    True(set.TryGet("BioSpear" + i, out bioSpear),
+                        "embedded original BioSpear" + i);
+                    True(bioSpear.Atlas.ImagePath.EndsWith("#rainWorld",
+                        StringComparison.OrdinalIgnoreCase) ||
+                        bioSpear.Atlas.ImagePath.EndsWith("#rainworldmsc",
+                            StringComparison.OrdinalIgnoreCase),
+                        "BioSpear must resolve from the installed original atlas");
+                }
                 for (int i = 0; i < SlugcatVisualProfiles.All.Count; i++)
                 {
                     SlugcatVisualProfile profile = SlugcatVisualProfiles.All[i];
@@ -1738,13 +2162,13 @@ namespace RainWorldDesktopPet.Tests
                 Near(expectedLengths[i], graphics.Tail.Segments[i].Length, 0.000001,
                     "Spearmaster tail length " + i);
             }
-            Near(8.0, pose.TailRootRadius, 0.000001, "Spearmaster mesh root width");
+            Near(6.0, pose.TailRootRadius, 0.000001, "Spearmaster mesh root width");
             Near(0.76, pose.VisualBodyScale, 0.000001, "Spearmaster body scale");
             Near(0.76, pose.VisualHipsScale, 0.000001, "Spearmaster hips scale");
             Near(0.85, Math.Abs(pose.HeadScaleX), 0.000001, "Spearmaster head scale");
             Near(0.6, pose.ArmShoulderScale, 0.000001, "Spearmaster shoulder factor");
             Vec2[] mesh = SpriteRenderer.BuildOriginalTailMeshVertices(pose);
-            Near(16.0, Vec2.Distance(mesh[0], mesh[1]), 0.000001,
+            Near(12.0, Vec2.Distance(mesh[0], mesh[1]), 0.000001,
                 "Spearmaster continuous mesh root diameter");
             Equal(19, pose.ExtraParts.Length, "16 tail speckles plus three pearl sprites");
             for (int i = 0; i < 15; i++)
@@ -1792,6 +2216,41 @@ namespace RainWorldDesktopPet.Tests
                 "Saint head uses HeadB in every movement state");
             True(state.FaceElement.StartsWith("FaceB", StringComparison.Ordinal),
                 "Saint normal face uses the closed-eye FaceB family");
+        }
+
+        private static void PushToMeowFaceAnimationUsesOriginalFaceStates()
+        {
+            SlugcatPose pose = new SlugcatPose();
+            pose.SelectedSlugcat = SlugcatId.White;
+            pose.CurrentSkin = SlugcatSkin.Default;
+            pose.Conscious = true;
+            pose.Animation = AnimationIndex.None;
+            pose.BodyMode = BodyModeIndex.Stand;
+            pose.Chest = new Vec2(100.0, 130.0);
+            pose.Hips = new Vec2(100.0, 150.0);
+            pose.Head = new Vec2(100.0, 100.0);
+            pose.Facing = 1;
+
+            OriginalFaceState standingNormal = SpriteRenderer.ResolveOriginalFaceState(pose);
+            pose.LookDirection = Vec2.Up;
+            pose.Blink = true;
+            OriginalFaceState standingMeow = SpriteRenderer.ResolveOriginalFaceState(pose);
+            True(standingMeow.FaceElement.StartsWith("FaceB", StringComparison.Ordinal),
+                "standing meow should select the closed-eye FaceB sprite");
+            Near(standingNormal.FacePosition.Y - 3.0, standingMeow.FacePosition.Y,
+                0.0001, "standing meow should raise the face by the original look offset");
+
+            pose.BodyMode = BodyModeIndex.Crawl;
+            pose.LookDirection = Vec2.Zero;
+            pose.Blink = false;
+            OriginalFaceState crawlNormal = SpriteRenderer.ResolveOriginalFaceState(pose);
+            pose.LookDirection = Vec2.Up;
+            pose.Blink = true;
+            OriginalFaceState crawlMeow = SpriteRenderer.ResolveOriginalFaceState(pose);
+            True(crawlNormal.FaceElement == "FaceA4", "normal crawl face sprite");
+            True(crawlMeow.FaceElement == "FaceB4", "crawl meow closed-eye face sprite");
+            Near(crawlNormal.FacePosition.Y - 3.0, crawlMeow.FacePosition.Y,
+                0.0001, "crawl meow should preserve the original upward face offset");
         }
 
         private static void AllVisualProfilesRemainStableAcrossStates()
@@ -2391,9 +2850,9 @@ namespace RainWorldDesktopPet.Tests
             Slugcat hunter = CreateAirSlugcat(SlugcatVariant.Hunter, out world);
             for (int tick = 0; tick < 12; tick++)
                 hunter.Step(new VirtualInput(1, 0, false, false), world, Vec2.Zero, Vec2.Zero);
-            Near(3.6, hunter.BodyChunks[0].Velocity.X, 0.000001,
-                "Player dynamicRunSpeed is 3.6 in ordinary air for Hunter too");
-            True(hunter.BodyChunks[0].Velocity.X < 3.6 * hunter.Appearance.RunSpeedFactor,
+            Near(4.0, hunter.BodyChunks[0].Velocity.X, 0.000001,
+                "Player UpdateBodyMode dynamicRunSpeed is 4 in ordinary air for Hunter too");
+            True(hunter.BodyChunks[0].Velocity.X < 4.0 * hunter.Appearance.RunSpeedFactor,
                 "ground runspeedFac must not leak into air control");
         }
 
@@ -2437,6 +2896,16 @@ namespace RainWorldDesktopPet.Tests
                 "original lethal result becomes maximum impact stun");
             True(high.LastTerrainImpact.DesktopResult == DesktopPetImpactResult.MaximumStun,
                 "desktop impact result is MaximumStun");
+            SoundEvent[] highSounds = high.DrainSoundEvents();
+            bool emittedHardImpact = false;
+            for (int index = 0; index < highSounds.Length; index++)
+            {
+                emittedHardImpact |= highSounds[index].Id == "Slugcat_Terrain_Impact_Hard";
+                True(highSounds[index].Id != "UI_Slugcat_Stunned_Init",
+                    "lethal-speed safety impact does not queue the death-like stun-init audio");
+            }
+            True(emittedHardImpact,
+                "lethal-speed safety impact retains the normal hard collision audio");
         }
 
         private static void TerrainFirstContactUsesDirection()
@@ -2679,7 +3148,7 @@ namespace RainWorldDesktopPet.Tests
 
         private static double ExpectedOriginalAirInput(double velocity, int direction)
         {
-            const double speed = 3.6;
+            const double speed = 4.0;
             double amount = 2.4 * SimulationConstants.SurfaceFriction;
             if (direction < 0)
             {

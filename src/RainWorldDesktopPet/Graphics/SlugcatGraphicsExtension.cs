@@ -45,16 +45,20 @@ namespace RainWorldDesktopPet.Graphics
 
     internal static class SlugcatGraphicsExtensionFactory
     {
-        public static ISlugcatGraphicsExtension[] Create(SlugcatVisualProfile profile,
+        public static ISlugcatGraphicsExtension[] Create(SlugcatGraphicsProfile profile,
             Slugcat slugcat, RainWorldAtlasSet atlas)
         {
-            if (profile.Skin == SlugcatSkin.Rivulet)
-                return new ISlugcatGraphicsExtension[] { new RivuletGillsExtension(slugcat, atlas) };
-            if (profile.Skin == SlugcatSkin.Artificer)
-                return new ISlugcatGraphicsExtension[] { new ArtificerScarExtension() };
-            if (profile.Skin == SlugcatSkin.Spearmaster)
-                return new ISlugcatGraphicsExtension[] { new SpearmasterTailSpecklesExtension() };
-            return new ISlugcatGraphicsExtension[0];
+            switch (profile.ExtensionKind)
+            {
+                case SlugcatGraphicsExtensionKind.RivuletGills:
+                    return new ISlugcatGraphicsExtension[] { new RivuletGillsExtension(slugcat, atlas) };
+                case SlugcatGraphicsExtensionKind.ArtificerScar:
+                    return new ISlugcatGraphicsExtension[] { new ArtificerScarExtension() };
+                case SlugcatGraphicsExtensionKind.SpearmasterSpeckles:
+                    return new ISlugcatGraphicsExtension[] { new SpearmasterTailSpecklesExtension(slugcat) };
+                default:
+                    return new ISlugcatGraphicsExtension[0];
+            }
         }
     }
 
@@ -267,6 +271,13 @@ namespace RainWorldDesktopPet.Graphics
 
     public sealed class SpearmasterTailSpecklesExtension : ISlugcatGraphicsExtension
     {
+        private readonly Slugcat slugcat;
+
+        public SpearmasterTailSpecklesExtension(Slugcat slugcat)
+        {
+            this.slugcat = slugcat;
+        }
+
         public string Name { get { return "TailSpeckles+CosmeticPearl"; } }
         public int SpriteCount { get { return 19; } }
         public void Step(Slugcat slugcat, Vec2 lookDirection) { }
@@ -274,14 +285,23 @@ namespace RainWorldDesktopPet.Graphics
         public int BuildPose(SlugcatPose pose, int outputIndex, double timeStacker)
         {
             int first = outputIndex;
+            SpearmasterAbilityController ability =
+                slugcat.AbilityController as SpearmasterAbilityController;
+            double spearProgress = ability == null ? 0.0 : ability.SpearProgress;
+            int selectedRow = ability == null ? 0 : ability.SpearRow;
+            int selectedLine = ability == null ? 0 : ability.SpearLine;
+            SpineSample selectedSpine = new SpineSample();
+            Vec2 selectedPosition = Vec2.Zero;
             for (int row = 0; row < 5; row++)
             {
                 double fraction = row / 4.0;
                 double along = MathUtil.Lerp(0.4, 0.95, Math.Pow(fraction, 0.8));
                 SpineSample spine = SampleSpine(pose, along);
                 double depth = 0.8 * Math.Sqrt(fraction);
+                double growthTint = (0.8 - depth) * spearProgress;
                 Color tint = LerpColor(pose.VisualBodyColor,
-                    LerpColor(Color.White, pose.VisualBodyColor, 0.3), 0.2 + depth);
+                    LerpColor(Color.White, pose.VisualBodyColor, 0.3),
+                    0.2 + depth + growthTint);
                 for (int line = 0; line < 3; line++)
                 {
                     double around = (line + (row % 2 == 0 ? 0.5 : 0.0)) / 2.0;
@@ -302,6 +322,24 @@ namespace RainWorldDesktopPet.Graphics
                     part.Rotation = VecToDegrees(spine.Direction);
                     part.ScaleX = LerpMap(Math.Abs(around), 0.4, 1.0, 1.0, 0.0);
                     part.ScaleY = 1.0;
+                    if (ability != null && spearProgress > 0.0)
+                    {
+                        if (row == selectedRow && line == selectedLine)
+                        {
+                            part.ScaleX *= 1.0 + spearProgress * 2.0;
+                            part.ScaleY *= 1.0 + spearProgress * 2.0;
+                            selectedSpine = spine;
+                            selectedPosition = part.RenderPosition;
+                        }
+                        else if ((row == selectedRow + 1 && line == selectedLine) ||
+                            (row == selectedRow - 1 && line == selectedLine) ||
+                            (row == selectedRow && line == selectedLine + 1) ||
+                            (row == selectedRow && line == selectedLine - 1))
+                        {
+                            part.ScaleX *= 1.0 + spearProgress;
+                            part.ScaleY *= 1.0 + spearProgress;
+                        }
+                    }
                     part.AnchorX = 0.5;
                     part.AnchorY = 0.5;
                     part.Tint = tint;
@@ -312,6 +350,24 @@ namespace RainWorldDesktopPet.Graphics
 
             ExtraGraphicsPartPose spear = pose.ExtraParts[outputIndex++];
             ResetHidden(spear, 27, "TailSpeckles", "BioSpear1");
+            if (ability != null && spearProgress > 0.0)
+            {
+                spear.Element = "BioSpear" + (ability.SpearType % 3 + 1);
+                spear.LastPosition = selectedPosition;
+                spear.CurrentPosition = selectedPosition;
+                spear.RenderPosition = selectedPosition;
+                spear.SpritePosition = selectedPosition;
+                spear.ConnectionPosition = selectedSpine.Position;
+                Vec2 direction = selectedSpine.Perpendicular;
+                // Original checks y-up > .35; desktop simulation is y-down.
+                if (direction.Normalized.Y < -0.35) direction *= -1.0;
+                spear.Rotation = VecToDegrees(direction);
+                spear.ScaleX = 1.0;
+                spear.ScaleY = -spearProgress * 0.5;
+                spear.AnchorX = 0.5;
+                spear.AnchorY = 0.0;
+                spear.Visible = true;
+            }
             for (int i = 0; i < 3; i++)
             {
                 ExtraGraphicsPartPose pearl = pose.ExtraParts[outputIndex++];
@@ -360,7 +416,9 @@ namespace RainWorldDesktopPet.Graphics
             SpineSample sample = new SpineSample();
             sample.Position = Vec2.Lerp(previous, current, local);
             sample.Direction = direction;
-            sample.Perpendicular = direction.Perpendicular;
+            // Custom.PerpendicularVector(-y,x) converted from y-up to desktop
+            // y-down is the negative of Vec2.Perpendicular.
+            sample.Perpendicular = -direction.Perpendicular;
             sample.Radius = MathUtil.Lerp(pose.TailRadii[previousIndex],
                 pose.TailRadii[currentIndex], local);
             return sample;

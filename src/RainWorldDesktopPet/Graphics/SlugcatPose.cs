@@ -76,6 +76,11 @@ namespace RainWorldDesktopPet.Graphics
         public bool Conscious = true;
         public bool Dead;
         public bool Blink;
+        public bool IsMeowing;
+        public bool MeowIsShort;
+        public double MeowProgress;
+        public double MeowDurationSeconds;
+        public string MeowAsset;
         public bool IsAirborne;
         public bool IsRising;
         public bool IsFalling;
@@ -122,9 +127,13 @@ namespace RainWorldDesktopPet.Graphics
         public double LandingCompression;
         public Vec2 CharacterOrigin;
         public double CharacterRenderScale = SimulationConstants.CharacterRenderScale;
+        public SlugcatId SelectedSlugcat;
         public SlugcatSkin CurrentSkin;
         public string OriginalSlugcatId = "White";
         public string VisualProfileName = "Default";
+        public string MovementProfileDebug = string.Empty;
+        public string AbilityDebug = string.Empty;
+        public string AudioProfileDebug = string.Empty;
         public int BaseSpriteCount = 12;
         public int ExtraSpriteCount;
         public string GraphicsExtensions = "none";

@@ -29,6 +29,37 @@ namespace RainWorldDesktopPet.Desktop
 
         internal delegate bool EnumWindowsProc(IntPtr handle, IntPtr parameter);
 
+        internal const int WHDR_DONE = 0x00000001;
+        internal const int WHDR_PREPARED = 0x00000002;
+        internal const int WHDR_BEGINLOOP = 0x00000004;
+        internal const int WHDR_ENDLOOP = 0x00000008;
+        internal const int WAVE_FORMAT_PCM = 1;
+
+        [StructLayout(LayoutKind.Sequential)]
+        internal struct WAVEFORMATEX
+        {
+            internal ushort wFormatTag;
+            internal ushort nChannels;
+            internal uint nSamplesPerSec;
+            internal uint nAvgBytesPerSec;
+            internal ushort nBlockAlign;
+            internal ushort wBitsPerSample;
+            internal ushort cbSize;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        internal struct WAVEHDR
+        {
+            internal IntPtr lpData;
+            internal int dwBufferLength;
+            internal int dwBytesRecorded;
+            internal IntPtr dwUser;
+            internal int dwFlags;
+            internal int dwLoops;
+            internal IntPtr lpNext;
+            internal IntPtr reserved;
+        }
+
         [StructLayout(LayoutKind.Sequential)]
         internal struct Point
         {
@@ -112,6 +143,39 @@ namespace RainWorldDesktopPet.Desktop
         [DllImport("gdi32.dll")]
         [return: MarshalAs(UnmanagedType.Bool)]
         internal static extern bool DeleteDC(IntPtr deviceContext);
+
+        [DllImport("winmm.dll")]
+        internal static extern int waveOutOpen(
+            out IntPtr hWaveOut,
+            IntPtr uDeviceID,
+            ref WAVEFORMATEX lpFormat,
+            IntPtr dwCallback,
+            IntPtr dwInstance,
+            int fdwOpen);
+
+        [DllImport("winmm.dll")]
+        internal static extern int waveOutPrepareHeader(
+            IntPtr hWaveOut,
+            IntPtr lpWaveHdr,
+            int uSize);
+
+        [DllImport("winmm.dll")]
+        internal static extern int waveOutWrite(
+            IntPtr hWaveOut,
+            IntPtr lpWaveHdr,
+            int uSize);
+
+        [DllImport("winmm.dll")]
+        internal static extern int waveOutUnprepareHeader(
+            IntPtr hWaveOut,
+            IntPtr lpWaveHdr,
+            int uSize);
+
+        [DllImport("winmm.dll")]
+        internal static extern int waveOutReset(IntPtr hWaveOut);
+
+        [DllImport("winmm.dll")]
+        internal static extern int waveOutClose(IntPtr hWaveOut);
 
         [DllImport("gdi32.dll")]
         internal static extern int GetDeviceCaps(IntPtr deviceContext, int index);

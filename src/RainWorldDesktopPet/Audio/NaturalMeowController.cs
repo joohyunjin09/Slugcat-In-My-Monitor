@@ -1,0 +1,212 @@
+using System;
+using RainWorldDesktopPet.AI;
+using RainWorldDesktopPet.Core;
+using RainWorldDesktopPet.Graphics;
+using RainWorldDesktopPet.Workshop;
+
+namespace RainWorldDesktopPet.Audio
+{
+    public sealed class NaturalMeowController : IDisposable
+    {
+        private const double MinimumCooldownSeconds = 22.0;
+        private readonly PushToMeowLibrary library;
+        private readonly WorkshopAudioPlayer audio;
+        private readonly WorkshopLog log;
+        private readonly Random random;
+        private double nextCandidateTime;
+        private double playbackStartTime = double.NegativeInfinity;
+        private double playbackEndTime = double.NegativeInfinity;
+        private double animationStartTime = double.NegativeInfinity;
+        private double animationEndTime = double.NegativeInfinity;
+        private double blinkEndTime = double.NegativeInfinity;
+        private double spearmasterTailSwitchTime = double.NegativeInfinity;
+        private double lastMeowEndTime = double.NegativeInfinity;
+        private DesktopBehavior previousBehavior;
+        private bool previousMouseAttention;
+        private bool previousGrabbed;
+        private bool shortMeow;
+        private bool fadeStarted;
+        private string currentSlugcatId;
+        private MeowSoundVariation currentVariation;
+
+        public NaturalMeowController(PushToMeowLibrary library, WorkshopLog log, int seed)
+        {
+            this.library = library;
+            this.log = log ?? new WorkshopLog(false);
+            random = new Random(seed);
+            audio = new WorkshopAudioPlayer(this.log);
+            nextCandidateTime = 25.0 + random.NextDouble() * 90.0;
+        }
+
+        public bool IsAvailable { get { return library != null && library.IsAvailable; } }
+        public bool IsMeowing(double now) { return currentVariation != null && now < playbackEndTime; }
+        public double PlaybackEndTime { get { return playbackEndTime; } }
+        public string CurrentAsset { get { return currentVariation == null ? null : currentVariation.FilePath; } }
+
+        public void Step(double now, string slugcatId, DesktopBehavior behavior, double stillness,
+            double mouseDistance, bool mouseAttention, bool grabbed, bool conscious)
+        {
+            if (!IsAvailable) return;
+            if (currentVariation != null && !fadeStarted &&
+                now >= playbackEndTime - 0.075)
+            {
+                // The original room mixer lets the voice release naturally.
+                // MCI needs an explicit short release to avoid the click/noise
+                // caused by stopping a waveform on an arbitrary sample.
+                audio.FadeOut(75);
+                fadeStarted = true;
+            }
+            if (currentVariation != null && now >= playbackEndTime)
+            {
+                audio.Stop();
+                currentVariation = null;
+                lastMeowEndTime = now;
+                ScheduleNormal(now, behavior, stillness);
+            }
+
+            bool interactionEnded = (previousMouseAttention && !mouseAttention) ||
+                                    (previousGrabbed && !grabbed);
+            bool woke = previousBehavior == DesktopBehavior.Sleep && behavior != DesktopBehavior.Sleep;
+            bool specialFinished = IsSpecial(previousBehavior) && !IsSpecial(behavior);
+            if (interactionEnded || woke || specialFinished)
+            {
+                double contextual = now + 3.0 + random.NextDouble() * (interactionEnded ? 12.0 : 20.0);
+                double earliest = lastMeowEndTime + MinimumCooldownSeconds;
+                nextCandidateTime = Math.Min(nextCandidateTime, Math.Max(contextual, earliest));
+            }
+
+            previousBehavior = behavior;
+            previousMouseAttention = mouseAttention;
+            previousGrabbed = grabbed;
+            if (currentVariation != null || !conscious || grabbed || now < nextCandidateTime ||
+                now < lastMeowEndTime + MinimumCooldownSeconds) return;
+
+            double chance = 0.38;
+            if (stillness > 100.0) chance += 0.25;
+            if (mouseDistance < 130.0) chance += 0.20;
+            if (behavior == DesktopBehavior.Idle || behavior == DesktopBehavior.Sit) chance += 0.14;
+            if (behavior == DesktopBehavior.Sleep) chance -= 0.32;
+            if (behavior == DesktopBehavior.Walk || behavior == DesktopBehavior.Explore) chance -= 0.10;
+            chance = MathUtil.Clamp(chance, 0.05, 0.92);
+            if (random.NextDouble() <= chance)
+            {
+                bool preferLong = interactionEnded || woke || (stillness > 180.0 && random.NextDouble() < 0.45);
+                Start(now, slugcatId, !preferLong && random.NextDouble() < 0.76);
+            }
+            else
+            {
+                nextCandidateTime = now + 8.0 + random.NextDouble() * 28.0;
+            }
+        }
+
+        private void Start(double now, string slugcatId, bool isShort)
+        {
+            MeowSoundVariation variation = library.Choose(slugcatId, isShort);
+            if (variation == null || !audio.TryPlay(variation))
+            {
+                nextCandidateTime = now + 30.0 + random.NextDouble() * 60.0;
+                return;
+            }
+            currentVariation = variation;
+            currentSlugcatId = slugcatId;
+            shortMeow = isShort;
+            fadeStarted = false;
+            playbackStartTime = now;
+            playbackEndTime = now + Math.Max(0.08,
+                variation.DurationSeconds / Math.Max(0.1f, variation.PlaybackPitch));
+            // DoMeowAnim queues LookAtPoint and Blink after 33 ms. LookAtNothing
+            // runs 160/260 ms later, while Player.Blink(9/11) remains active
+            // for its own original 40 Hz tick count.
+            animationStartTime = now + 0.033;
+            animationEndTime = animationStartTime + (isShort ? 0.160 : 0.260);
+            blinkEndTime = animationStartTime +
+                (isShort ? 9.0 : 11.0) * SimulationConstants.LogicStepSeconds;
+            spearmasterTailSwitchTime = now + 0.080 + random.NextDouble() * 0.060;
+            nextCandidateTime = playbackEndTime + MinimumCooldownSeconds;
+            log.Info("PushToMeow", "Playing " + slugcatId + " " + (isShort ? "short" : "long") +
+                " variation " + variation.AssetName + " (" +
+                (playbackEndTime - playbackStartTime).ToString("0.000") + "s, pitch " +
+                variation.PlaybackPitch.ToString("0.00") + ", volume " +
+                variation.PlaybackVolume.ToString("0.00") + ")");
+        }
+
+        private void ScheduleNormal(double now, DesktopBehavior behavior, double stillness)
+        {
+            double minimum = 35.0;
+            double range = 135.0;
+            if (behavior == DesktopBehavior.Idle || behavior == DesktopBehavior.Sit || stillness > 120.0)
+            {
+                minimum = 24.0;
+                range = 95.0;
+            }
+            else if (behavior == DesktopBehavior.Sleep)
+            {
+                minimum = 70.0;
+                range = 150.0;
+            }
+            nextCandidateTime = now + minimum + random.NextDouble() * range;
+        }
+
+        public void ApplyPose(SlugcatPose pose, double now)
+        {
+            if (pose == null || !IsMeowing(now)) return;
+            double duration = Math.Max(0.001, playbackEndTime - playbackStartTime);
+            double progress = MathUtil.Clamp01((now - playbackStartTime) / duration);
+            pose.IsMeowing = true;
+            pose.MeowProgress = progress;
+            pose.MeowDurationSeconds = duration;
+            pose.MeowIsShort = shortMeow;
+            pose.MeowAsset = currentVariation.AssetName;
+
+            // DoMeowAnim waits 33 ms before LookAtPoint. The face resolver
+            // turns that look vector into the original three-pixel upward
+            // Face sprite offset for both normal and Crawl poses.
+            if (now >= animationStartTime && now < animationEndTime)
+            {
+                pose.LookDirection = new Vec2(0.0, -1.0);
+            }
+            // Blink(9/11) is intentionally independent of LookAtNothing. It
+            // selects FaceB (closed eyes) for the remaining original ticks.
+            if (now >= animationStartTime && now < blinkEndTime)
+            {
+                pose.Blink = true;
+            }
+
+            // The DLL gives Spearmaster's physical tail alternating up/down velocity.
+            // The desktop renderer translates that to a damped, segment-weighted wiggle.
+            if (string.Equals(currentSlugcatId, "Spear", StringComparison.OrdinalIgnoreCase) &&
+                pose.Tail != null)
+            {
+                double elapsed = Math.Max(0.0, now - playbackStartTime);
+                double lead = MathUtil.Clamp01(elapsed / Math.Max(0.001,
+                    spearmasterTailSwitchTime - playbackStartTime));
+                double returnDuration = Math.Max(0.001, animationEndTime - spearmasterTailSwitchTime);
+                double returnPhase = MathUtil.Clamp01((elapsed - spearmasterTailSwitchTime) /
+                    returnDuration);
+                for (int index = 0; index < pose.Tail.Length; index++)
+                {
+                    // Push To Meow gives each tail segment one upward impulse,
+                    // then a delayed downward impulse at 80--140 ms. Render it
+                    // as a two-stage displacement rather than a perpetual sine.
+                    double segment = (index - 1.0) * 1.5;
+                    double vertical = lead * (-segment * 2.25) +
+                        returnPhase * (segment * 2.0);
+                    double horizontal = -pose.Facing * (index + 1.0) /
+                        Math.Max(1.0, pose.Tail.Length) * 1.2 * (1.0 - returnPhase);
+                    pose.Tail[index] += new Vec2(horizontal, vertical);
+                }
+            }
+        }
+
+        private static bool IsSpecial(DesktopBehavior behavior)
+        {
+            return behavior == DesktopBehavior.Jump || behavior == DesktopBehavior.ClimbWindow ||
+                   behavior == DesktopBehavior.DropDown || behavior == DesktopBehavior.BalanceNearEdge;
+        }
+
+        public void Dispose()
+        {
+            audio.Dispose();
+        }
+    }
+}

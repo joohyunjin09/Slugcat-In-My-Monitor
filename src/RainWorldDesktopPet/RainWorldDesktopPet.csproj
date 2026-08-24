@@ -48,12 +48,28 @@
     <Reference Include="System.Windows.Forms" />
     <Reference Include="System.Web.Extensions" />
     <Reference Include="System.Xml" />
+    <Reference Include="SharpDX">
+      <HintPath>..\..\third_party\SharpDX\SharpDX.dll</HintPath>
+    </Reference>
+    <Reference Include="SharpDX.D3DCompiler">
+      <HintPath>..\..\third_party\SharpDX\SharpDX.D3DCompiler.dll</HintPath>
+    </Reference>
+    <Reference Include="SharpDX.Direct3D11">
+      <HintPath>..\..\third_party\SharpDX\SharpDX.Direct3D11.dll</HintPath>
+    </Reference>
+    <Reference Include="SharpDX.DXGI">
+      <HintPath>..\..\third_party\SharpDX\SharpDX.DXGI.dll</HintPath>
+    </Reference>
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="Audio\NaturalMeowController.cs" />
+    <Compile Include="Audio\PushToMeowLibrary.cs" />
+    <Compile Include="Audio\WaveAudio.cs" />
     <Compile Include="AI\AttentionSystem.cs" />
     <Compile Include="AI\DesktopPetAI.cs" />
     <Compile Include="AI\UtilityEvaluator.cs" />
     <Compile Include="Core\FixedTimeStep.cs" />
+    <Compile Include="Core\AppSettings.cs" />
     <Compile Include="Core\GameLoop.cs" />
     <Compile Include="Core\DesktopWorldTransform.cs" />
     <Compile Include="Core\DesktopRecovery.cs" />
@@ -61,7 +77,9 @@
     <Compile Include="Core\SimulationConstants.cs" />
     <Compile Include="Core\Vec2.cs" />
     <Compile Include="Creature\Slugcat.cs" />
+    <Compile Include="Creature\SlugcatAbilities.cs" />
     <Compile Include="Creature\SlugcatMovement.cs" />
+    <Compile Include="Creature\OriginalSlugcatMovement.cs" />
     <Compile Include="Creature\SlugcatState.cs" />
     <Compile Include="Creature\SlugcatVariant.cs" />
     <Compile Include="Creature\VirtualInput.cs" />
@@ -73,6 +91,7 @@
     <Compile Include="Desktop\WindowEnumerator.cs" />
     <Compile Include="Graphics\BodyPart.cs" />
     <Compile Include="Graphics\DirectCompositionHost.cs" />
+    <Compile Include="Graphics\FireSmokeGpuRenderer.cs" />
     <Compile Include="Graphics\Limb.cs" />
     <Compile Include="Graphics\ProceduralTail.cs" />
     <Compile Include="Graphics\ParityDiagnostics.cs" />
@@ -86,6 +105,8 @@
     <Compile Include="Physics\BodyChunkConnection.cs" />
     <Compile Include="Physics\DesktopCollisionSnapshot.cs" />
     <Compile Include="Physics\DesktopCollisionWorld.cs" />
+    <Compile Include="Physics\DesktopSpear.cs" />
+    <Compile Include="Physics\DesktopRope.cs" />
     <Compile Include="Physics\TerrainImpactData.cs" />
     <Compile Include="Physics\TailSegment.cs" />
     <Compile Include="Program.cs" />
@@ -94,14 +115,22 @@
     <Compile Include="RainWorld\DxtDecoder.cs" />
     <Compile Include="RainWorld\DmsSpriteCatalog.cs" />
     <Compile Include="RainWorld\EmbeddedUnityAtlasProvider.cs" />
+    <Compile Include="RainWorld\FireSmokeShaderAssets.cs" />
     <Compile Include="RainWorld\RainWorldAssetLoader.cs" />
     <Compile Include="RainWorld\RainWorldAtlasLoader.cs" />
     <Compile Include="RainWorld\RainWorldInstallation.cs" />
     <Compile Include="RainWorld\RainWorldLocator.cs" />
     <Compile Include="RainWorld\UnitySerializedFileReader.cs" />
+    <Compile Include="RainWorld\UnityFsBundleReader.cs" />
     <Compile Include="UI\LayeredOverlayWindow.cs" />
     <Compile Include="UI\SettingsWindow.cs" />
     <Compile Include="UI\SkinEditorWindow.cs" />
+    <Compile Include="Audio\SoundEvent.cs" />
+    <Compile Include="Audio\RainWorldAudioEngine.cs" />
+    <Compile Include="Workshop\DmsSkinCatalog.cs" />
+    <Compile Include="Workshop\WorkshopCatalog.cs" />
+    <Compile Include="Workshop\WorkshopAssetCache.cs" />
+    <Compile Include="Workshop\WorkshopLog.cs" />
   </ItemGroup>
   <ItemGroup>
     <None Include="App.config" />

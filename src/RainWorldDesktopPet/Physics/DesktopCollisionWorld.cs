@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Drawing;
+using System.Threading;
 using RainWorldDesktopPet.Core;
 using RainWorldDesktopPet.Desktop;
 using RainWorldDesktopPet.Graphics;
@@ -9,6 +10,13 @@ namespace RainWorldDesktopPet.Physics
 {
     public sealed class DesktopCollisionWorld
     {
+        private sealed class PendingRefresh
+        {
+            public IList<DesktopWindowSnapshot> Windows;
+            public IList<MonitorInfo> Monitors;
+            public bool EnumerationSucceeded;
+        }
+
         private sealed class CachedWindow
         {
             public long Id;
@@ -43,6 +51,9 @@ namespace RainWorldDesktopPet.Physics
         private IList<MonitorInfo> monitors;
         private long snapshotVersion;
         private DesktopCollisionSnapshot currentSnapshot;
+        private readonly object refreshSync = new object();
+        private PendingRefresh pendingRefresh;
+        private int refreshInFlight;
 
         public DesktopCollisionWorld(WindowEnumerator windowEnumerator)
         {
@@ -60,6 +71,63 @@ namespace RainWorldDesktopPet.Physics
         {
             IList<DesktopWindowSnapshot> windows = windowEnumerator.Enumerate(overlayHandle);
             RefreshFromSnapshots(windows, windowEnumerator.LastEnumerationSucceeded, true);
+        }
+
+        // EnumWindows, DWM queries and monitor topology reads can occasionally
+        // wait on another desktop process. Keep that work outside the fixed/UI
+        // loop and publish one immutable input snapshot at a time.
+        public void RequestRefresh(IntPtr overlayHandle)
+        {
+            if (Interlocked.CompareExchange(ref refreshInFlight, 1, 0) != 0) return;
+            try
+            {
+                ThreadPool.QueueUserWorkItem(delegate
+                {
+                    PendingRefresh result = new PendingRefresh();
+                    try
+                    {
+                        result.Windows = windowEnumerator.Enumerate(overlayHandle);
+                        result.EnumerationSucceeded = windowEnumerator.LastEnumerationSucceeded;
+                        result.Monitors = MonitorManager.GetMonitors();
+                    }
+                    catch
+                    {
+                        result.Windows = new DesktopWindowSnapshot[0];
+                        result.EnumerationSucceeded = false;
+                        result.Monitors = null;
+                    }
+                    lock (refreshSync) pendingRefresh = result;
+                });
+            }
+            catch
+            {
+                Interlocked.Exchange(ref refreshInFlight, 0);
+                throw;
+            }
+        }
+
+        public bool TryApplyPendingRefresh()
+        {
+            PendingRefresh result;
+            lock (refreshSync)
+            {
+                result = pendingRefresh;
+                if (result == null) return false;
+                pendingRefresh = null;
+            }
+            // Missing windows expire through the normal grace count. Avoiding
+            // IsWindow/DWM revalidation here is what keeps application calls
+            // completely off the simulation thread.
+            try
+            {
+                RefreshFromSnapshots(result.Windows, result.EnumerationSucceeded,
+                    false, result.Monitors);
+                return true;
+            }
+            finally
+            {
+                Interlocked.Exchange(ref refreshInFlight, 0);
+            }
         }
 
         public void RefreshFromSnapshots(IList<DesktopWindowSnapshot> windows)
@@ -373,10 +441,17 @@ namespace RainWorldDesktopPet.Physics
         public void Resolve(BodyChunk chunk, DesktopCollisionSnapshot snapshot,
             long ignoredHorizontalSurfaceId, double surfaceFriction)
         {
+            Resolve(chunk, snapshot, ignoredHorizontalSurfaceId, surfaceFriction,
+                SimulationConstants.Bounce);
+        }
+
+        public void Resolve(BodyChunk chunk, DesktopCollisionSnapshot snapshot,
+            long ignoredHorizontalSurfaceId, double surfaceFriction, double bounce)
+        {
             if (snapshot == null) throw new ArgumentNullException("snapshot");
             ResolveHorizontal(chunk, snapshot.Surfaces, ignoredHorizontalSurfaceId,
-                surfaceFriction);
-            ResolveVertical(chunk, snapshot.Surfaces, surfaceFriction);
+                surfaceFriction, bounce);
+            ResolveVertical(chunk, snapshot.Surfaces, surfaceFriction, bounce);
             chunk.CollisionSnapshotVersion = snapshot.Version;
         }
 
@@ -451,7 +526,7 @@ namespace RainWorldDesktopPet.Physics
 
         private static void ResolveHorizontal(BodyChunk chunk,
             IList<DesktopSurface> tickSurfaces, long ignoredSurfaceId,
-            double surfaceFriction)
+            double surfaceFriction, double bounce)
         {
             DesktopSurface best = null;
             double bestTop = double.MaxValue;
@@ -515,8 +590,8 @@ namespace RainWorldDesktopPet.Physics
 
             chunk.Position.Y = best.Top - chunk.Radius;
             chunk.FloorImpactSpeed = Math.Max(chunk.FloorImpactSpeed, impactSpeed);
-            double rebound = impactSpeed * SimulationConstants.Bounce;
-            double stopThreshold = 1.0 + 9.0 * (1.0 - SimulationConstants.Bounce);
+            double rebound = impactSpeed * bounce;
+            double stopThreshold = 1.0 + 9.0 * (1.0 - bounce);
             if (rebound < SimulationConstants.GravityPerTick || rebound < stopThreshold)
             {
                 chunk.Velocity.Y = 0.0;
@@ -534,7 +609,7 @@ namespace RainWorldDesktopPet.Physics
         }
 
         private static void ResolveVertical(BodyChunk chunk,
-            IList<DesktopSurface> tickSurfaces, double surfaceFriction)
+            IList<DesktopSurface> tickSurfaces, double surfaceFriction, double bounce)
         {
             DesktopSurface best = null;
             bool positiveMotion = false;
@@ -588,8 +663,8 @@ namespace RainWorldDesktopPet.Physics
 
             chunk.Position.X = bestWall + (positiveMotion ? -chunk.Radius : chunk.Radius);
             chunk.Velocity.X = (positiveMotion ? -1.0 : 1.0) *
-                impactSpeed * SimulationConstants.Bounce;
-            double stopThreshold = 1.0 + 9.0 * (1.0 - SimulationConstants.Bounce);
+                impactSpeed * bounce;
+            double stopThreshold = 1.0 + 9.0 * (1.0 - bounce);
             if (Math.Abs(chunk.Velocity.X) < stopThreshold) chunk.Velocity.X = 0.0;
             chunk.Velocity.Y *= MathUtil.Clamp(surfaceFriction * 2.0, 0.0, 1.0);
             chunk.ContactRight = positiveMotion;

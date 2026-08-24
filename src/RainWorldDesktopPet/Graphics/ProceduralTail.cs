@@ -10,7 +10,7 @@ namespace RainWorldDesktopPet.Graphics
         private readonly TailSegment[] segments;
 
         public ProceduralTail(Vec2 hips)
-            : this(hips, SlugcatVisualProfiles.Default.Tail)
+            : this(hips, SlugcatGraphicsProfiles.White.Tail)
         {
         }
 
