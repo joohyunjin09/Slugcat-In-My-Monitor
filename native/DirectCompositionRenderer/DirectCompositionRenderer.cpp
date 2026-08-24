@@ -55,15 +55,19 @@ float Noise(float2 value) { float2 cell=floor(value),f=frac(value);
     float c=Hash(cell+float2(0,1)),d=Hash(cell+1);
     return lerp(lerp(a,b,f.x),lerp(c,d,f.x),f.y); }
 float4 PSMain(PixelInput input) : SV_TARGET { float2 p=input.uv*2-1;
-    float dist=saturate(1-length(p)); float2 screen=input.position.xy;
-    float h=Noise(screen*.052+input.seed*float2(7,13));
-    h*=Noise(screen*.117+input.seed*float2(19,3));
+    float dist=saturate(1-length(p)); float2 stableUv=input.uv;
+    float h=Noise(stableUv*3.35+input.seed*float2(7,13));
+    h*=Noise(stableUv*7.5+input.seed*float2(19,3));
     float inside=.3+.5*input.color.a;
     h=lerp(h*dist,h+(1-h)*inside,dist);
-    h-=Noise(screen*.151+input.seed*float2(5,23))*lerp(.7,.3,input.color.a);
+    h-=Noise(stableUv*9.65+input.seed*float2(5,23))*lerp(.7,.3,input.color.a);
     h+=.25*dist;
-    clip(h*input.color.a-.35);
-    return float4(input.color.rgb*input.color.a,input.color.a); }
+    float cutoff=h*input.color.a;
+    float edge=max(fwidth(cutoff)*1.5,.008);
+    float coverage=smoothstep(.35-edge,.35+edge,cutoff);
+    clip(coverage-.01);
+    float alpha=input.color.a*coverage;
+    return float4(input.color.rgb*alpha,alpha); }
 )";
 
     struct Renderer
