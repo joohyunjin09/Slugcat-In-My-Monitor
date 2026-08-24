@@ -21,7 +21,6 @@ namespace RainWorldDesktopPet.Desktop
         internal const int WM_LBUTTONUP = 0x0202;
         internal const int WM_CAPTURECHANGED = 0x0215;
         internal const int WM_MOUSEMOVE = 0x0200;
-        internal const int WM_HOTKEY = 0x0312;
         internal const int WM_DISPLAYCHANGE = 0x007E;
         internal const int WM_DPICHANGED = 0x02E0;
         internal const int HTTRANSPARENT = -1;
@@ -30,11 +29,6 @@ namespace RainWorldDesktopPet.Desktop
         internal const int DWMWA_CLOAKED = 14;
         internal const uint GA_ROOT = 2;
         internal const uint MONITOR_DEFAULTTONEAREST = 2;
-        internal const uint MOD_NOREPEAT = 0x4000;
-        internal const int VK_F1 = 0x70;
-        internal const int VK_F2 = 0x71;
-        internal const int VK_F3 = 0x72;
-        internal const int VK_F4 = 0x73;
         internal const int VK_LBUTTON = 0x01;
         internal const int VK_RBUTTON = 0x02;
         internal const int VK_MBUTTON = 0x04;
@@ -227,14 +221,6 @@ namespace RainWorldDesktopPet.Desktop
         [DllImport("user32.dll")]
         [return: MarshalAs(UnmanagedType.Bool)]
         internal static extern bool ReleaseCapture();
-
-        [DllImport("user32.dll", SetLastError = true)]
-        [return: MarshalAs(UnmanagedType.Bool)]
-        internal static extern bool RegisterHotKey(IntPtr handle, int id, uint modifiers, int virtualKey);
-
-        [DllImport("user32.dll", SetLastError = true)]
-        [return: MarshalAs(UnmanagedType.Bool)]
-        internal static extern bool UnregisterHotKey(IntPtr handle, int id);
 
         [DllImport("user32.dll")]
         [return: MarshalAs(UnmanagedType.Bool)]

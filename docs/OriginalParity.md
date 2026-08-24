@@ -377,7 +377,7 @@ no longer clipped by a 560×420 pet-following HWND.
 
 ## Debug and regression evidence
 
-F1 debug output contains simulation Hz/tick/step/time/accumulator/timeStacker, frame당 simulation
+The tray `Debug Overlay` output contains simulation Hz/tick/step/time/accumulator/timeStacker, frame당 simulation
 step 수, measured render FPS/monitor refresh, both chunks의 pos/last/render/velocity/contact 및
 surface id/kind, 현재 monitor id/bounds/work-area/taskbar/floor, gravity/air/connection/X
 multiplier, surface LTRB/previous/current rect/velocity/miss, 이전/현재 air input과 두 chunk의
