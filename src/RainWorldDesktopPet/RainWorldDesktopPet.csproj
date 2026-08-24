@@ -6,7 +6,7 @@
     <ProjectGuid>{5366F87C-7531-4776-A723-1B43D0E48987}</ProjectGuid>
     <OutputType>WinExe</OutputType>
     <RootNamespace>RainWorldDesktopPet</RootNamespace>
-    <AssemblyName>RainWorldDesktopPet</AssemblyName>
+    <AssemblyName>SlugcatInMyMonitor</AssemblyName>
     <TargetFrameworkVersion>v4.8</TargetFrameworkVersion>
     <TargetFrameworkProfile></TargetFrameworkProfile>
     <FileAlignment>512</FileAlignment>

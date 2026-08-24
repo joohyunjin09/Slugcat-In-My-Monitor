@@ -1,4 +1,4 @@
-# Slugcat in My Monitor
+# SlugcatInMyMonitor
 
 로컬 Rain World 설치본의 **원작 플레이어 atlas**를 읽어 Windows 바탕화면에서 독립 실행되는 Shimeji 스타일 Slugcat 펫입니다. Rain World `v1.11.8`의 `Assembly-CSharp.dll`을 정적 분석해 확인한 40 Hz 루프, 두 `BodyChunk`, 거리 제약, `TailSegment`, `Limb`, `PlayerGraphics` 구조를 데스크톱 환경에 맞게 재구현합니다.
 
@@ -27,7 +27,7 @@ RainWorld.exe, Steam 게임 프로세스, Unity Player, BepInEx를 실행하거�
 
 ## 원작 Slugcat
 
-DMS 스킨 에디터는 실행 파일 주변의 `skins`, 개발 저장소의 `assets/skins`,
+DMS 스킨 에디터는 실행 파일과 같은 폴더 또는 그 주변의 `skins`, 개발 저장소의 `assets/skins`,
 `%LOCALAPPDATA%\SlugcatInMyMonitor\skins`, Rain World의 로컬 mod 폴더에서
 `metadata.json`과 파츠별 PNG/TXT 아틀라스 쌍을 검색합니다. 검색된 세트를 선택하면
 원본 `rainWorld` 아틀라스의 해당 파츠 위에 실제 프레임을 오버라이드합니다.
@@ -57,20 +57,28 @@ Downpour가 설치되어 `rainworldmsc`의 필수 element가 모두 확인되면
 .\build.ps1
 
 # 기본 Survivor
-.\artifacts\Release\RainWorldDesktopPet.exe
+.\artifacts\Release\SlugcatInMyMonitor.exe
 
 # 원작 캐릭터 선택과 디버그 표시
-.\artifacts\Release\RainWorldDesktopPet.exe --slugcat gourmand --debug
+.\artifacts\Release\SlugcatInMyMonitor.exe --slugcat gourmand --debug
 
 # Player 물리는 유지하고 Downpour 외형만 선택
-.\artifacts\Release\RainWorldDesktopPet.exe --skin rivulet --debug
+.\artifacts\Release\SlugcatInMyMonitor.exe --skin rivulet --debug
 
 # 자동 탐색이 실패할 때 설치 경로 지정
-.\artifacts\Release\RainWorldDesktopPet.exe `
+.\artifacts\Release\SlugcatInMyMonitor.exe `
   --rain-world "C:\Program Files (x86)\Steam\steamapps\common\Rain World"
 ```
 
 빌드 스크립트는 필요한 경우 Microsoft의 .NET Framework 4.8 reference-assembly NuGet 패키지를 `.tools/`에 내려받습니다. 실행 프로그램 자체에는 외부 런타임 패키지가 없습니다.
+
+## 개발 및 릴리즈
+
+일반 변경은 `feature/*` 또는 `fix/*`에서 작업한 뒤 `develop`으로 합칩니다.
+배포할 변경이 모이면 `develop`에서 `main`으로 한 번의 PR을 만들고,
+Release Drafter가 갱신한 초안 릴리즈를 게시합니다. 게시 후 Windows ZIP과
+SHA-256 파일이 해당 GitHub Release에 자동으로 첨부됩니다. 자세한 규칙은
+[`CONTRIBUTING.md`](CONTRIBUTING.md)를 참고하세요.
 
 ### 조작
 

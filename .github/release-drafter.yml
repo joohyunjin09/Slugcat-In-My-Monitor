@@ -1,0 +1,83 @@
+name-template: "SlugcatInMyMonitor v$RESOLVED_VERSION"
+tag-template: "v$RESOLVED_VERSION"
+tag-prefix: "v"
+change-template: "- $TITLE (#$NUMBER) @$AUTHOR"
+change-title-escapes: "\\<*_&"
+sort-by: merged_at
+sort-direction: descending
+
+categories:
+  - type: pre-exclude
+    when:
+      label: skip-changelog
+
+  - title: "Breaking changes"
+    exclusive: true
+    semver-increment: major
+    when:
+      - label: major
+      - conventional:
+          breaking: true
+
+  - title: "Features"
+    exclusive: true
+    semver-increment: minor
+    when:
+      - labels:
+          - feature
+          - enhancement
+      - conventional:
+          type: feat
+
+  - title: "Fixes"
+    exclusive: true
+    semver-increment: patch
+    when:
+      - labels:
+          - bug
+          - fix
+      - conventional:
+          types:
+            - fix
+            - hotfix
+
+  - title: "Documentation"
+    exclusive: true
+    semver-increment: patch
+    when:
+      - label: documentation
+      - conventional:
+          type: docs
+      - paths:
+          - "docs/**"
+          - "**/*.md"
+
+  - title: "Build and maintenance"
+    exclusive: true
+    semver-increment: patch
+    when:
+      - conventional:
+          types:
+            - build
+            - chore
+            - ci
+            - refactor
+            - test
+      - paths:
+          - ".github/**"
+          - "*.ps1"
+
+  - title: "Other changes"
+    semver-increment: patch
+
+template: |
+  ## Changes
+
+  $CHANGES
+
+  ## Installation
+
+  Download `SlugcatInMyMonitor-v$RESOLVED_VERSION-win-x64.zip`, extract it,
+  and run `SlugcatInMyMonitor.exe`.
+
+  The `.sha256` file can be used to verify the downloaded ZIP.
