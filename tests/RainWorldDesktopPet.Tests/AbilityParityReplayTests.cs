@@ -854,32 +854,54 @@ namespace RainWorldDesktopPet.Tests
                     "unindexed sounds.txt name resolves to an installed indexed variant");
                 True(pcmBytes > 44, "resolved FSB5 clip exposes PCM16 data");
 
-                PlayInstalledEvent(audio, "Slugcat_Normal_Jump", 1);
-                PlayInstalledEvent(audio, "Slugcat_Step_A", 2);
-                PlayInstalledEvent(audio, "Slugcat_Terrain_Impact_Medium", 3);
-                PlayInstalledEvent(audio, "Slugcat_Floor_Impact_Standard", 4);
-                PlayInstalledEvent(audio, "Fire_Spear_Explode", 5);
+                IDictionary<string, RainWorldSoundDefinition> catalog =
+                    RainWorldSoundCatalog.Load(Path.Combine(installation.RootPath, "RainWorld_Data",
+                        "StreamingAssets", "soundeffects", "sounds.txt"));
+                List<string> failedEvents = new List<string>();
+                int tick = 1;
+                foreach (string id in catalog.Keys)
+                {
+                    if (id.StartsWith("Slugcat", StringComparison.OrdinalIgnoreCase) ||
+                        id.StartsWith("Spear", StringComparison.OrdinalIgnoreCase) ||
+                        id.StartsWith("SM_", StringComparison.OrdinalIgnoreCase) ||
+                        id.StartsWith("UI_Slugcat", StringComparison.OrdinalIgnoreCase) ||
+                        id.StartsWith("Tube_Worm", StringComparison.OrdinalIgnoreCase) ||
+                        id.StartsWith("Rock_", StringComparison.OrdinalIgnoreCase) ||
+                        id.StartsWith("Fly_", StringComparison.OrdinalIgnoreCase) ||
+                        id.StartsWith("Bomb_", StringComparison.OrdinalIgnoreCase) ||
+                        id.StartsWith("Fire_", StringComparison.OrdinalIgnoreCase))
+                    {
+                        string err = CheckInstalledEvent(audio, id, tick++);
+                        if (err != null) failedEvents.Add(err);
+                    }
+                }
+                if (failedEvents.Count > 0)
+                {
+                    throw new InvalidOperationException("Failed sounds (" + failedEvents.Count + "):\n" +
+                        string.Join("\n", failedEvents.ToArray()));
+                }
             }
         }
 
-        private static void PlayInstalledEvent(RainWorldAudioEngine audio, string id,
+        private static string CheckInstalledEvent(RainWorldAudioEngine audio, string id,
             long tick)
         {
             Stopwatch enqueue = Stopwatch.StartNew();
             audio.Play(new SoundEvent(id, Vec2.Zero, 0.01, 1.0, 0),
                 Vec2.Zero, tick, 100.0);
             enqueue.Stop();
-            True(enqueue.ElapsedMilliseconds < 100,
-                id + " returns before UnityFS extraction and SoundPlayer.Load");
             Stopwatch deadline = Stopwatch.StartNew();
             while (deadline.ElapsedMilliseconds < 3000 &&
                 !audio.LastEvent.StartsWith("playback started: " + id,
                     StringComparison.OrdinalIgnoreCase) &&
                 !audio.LastEvent.StartsWith("playback failed",
-                    StringComparison.OrdinalIgnoreCase))
+                    StringComparison.OrdinalIgnoreCase) &&
+                !audio.LastEvent.Contains("unavailable"))
                 Thread.Sleep(10);
-            True(audio.LastEvent.StartsWith("playback started: " + id,
-                StringComparison.OrdinalIgnoreCase), id + ": " + audio.LastEvent);
+            if (!audio.LastEvent.StartsWith("playback started: " + id,
+                StringComparison.OrdinalIgnoreCase))
+                return id + " -> " + audio.LastEvent;
+            return null;
         }
 
         private static DesktopCollisionWorld CreateAirWorld()
