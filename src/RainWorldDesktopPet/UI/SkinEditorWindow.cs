@@ -64,7 +64,7 @@ namespace RainWorldDesktopPet.UI
 
             Label experimentalNotice = new Label
             {
-                Text = "Experimental: Skin customization is still under development. Presets and results may change.",
+                Text = "Experimental: Only Dress My Slugcat (DMS) sprite sets are supported. Other Workshop mods are not loaded.",
                 Dock = DockStyle.Fill,
                 BackColor = Color.FromArgb(255, 244, 204),
                 ForeColor = Color.FromArgb(95, 69, 0),

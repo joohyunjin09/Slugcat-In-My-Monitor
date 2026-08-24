@@ -1,6 +1,9 @@
 SlugcatInMyMonitor - DMS skin folder
 ========================================
 
+Only Dress My Slugcat (DMS) sprite sets are supported. SlugBase characters,
+regions, gameplay mods, DLL mods, and other general Workshop mods are not loaded.
+
 Place each Dress My Slugcat sprite set in its own subfolder here, then open
 "Slugcat Appearance Editor" from the tray menu. Use "Reload Sprites" if the
 editor was already open.

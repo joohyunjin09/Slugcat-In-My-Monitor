@@ -3,6 +3,7 @@ name: Release Drafter
 on:
   push:
     branches:
+      - develop
       - main
   workflow_dispatch:
 
@@ -11,59 +12,50 @@ permissions:
   contents: write
   pull-requests: read
 
+concurrency:
+  group: release-drafter-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
+  update-draft:
+    if: github.ref_name == 'develop'
+    name: Update release draft from develop
+    runs-on: ubuntu-latest
+    steps:
+      - name: Update draft release notes and version
+        uses: release-drafter/release-drafter@v7
+        with:
+          config-name: release-drafter.yml
+          commitish: develop
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   publish-release:
+    if: github.ref_name == 'main'
     name: Publish release and start packaging
     runs-on: ubuntu-latest
     steps:
-      - name: Detect the first stable release
-        id: baseline
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          if gh release list --repo "$GITHUB_REPOSITORY" --exclude-drafts --limit 100 \
-            --json tagName --jq '.[].tagName' |
-            grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+'; then
-            echo "first=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "first=true" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Publish the prepared v0.1.0 release
-        if: steps.baseline.outputs.first == 'true'
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh release edit v0.1.0 --repo "$GITHUB_REPOSITORY" --draft=false --latest
-
-      - name: Draft and publish the next release
-        if: steps.baseline.outputs.first != 'true'
+      - name: Publish the next release
         id: drafter
         uses: release-drafter/release-drafter@v7
         with:
           config-name: release-drafter.yml
+          commitish: main
           publish: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Resolve the published tag
+      - name: Validate the published tag
         id: release
         shell: bash
         env:
-          FIRST_RELEASE: ${{ steps.baseline.outputs.first }}
           DRAFTER_TAG: ${{ steps.drafter.outputs.tag_name }}
         run: |
-          if [[ "$FIRST_RELEASE" == "true" ]]; then
-            tag="v0.1.0"
-          else
-            tag="$DRAFTER_TAG"
-          fi
-          if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?$ ]]; then
-            echo "Invalid release tag: $tag" >&2
+          if [[ ! "$DRAFTER_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?$ ]]; then
+            echo "Invalid release tag: $DRAFTER_TAG" >&2
             exit 1
           fi
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "tag=$DRAFTER_TAG" >> "$GITHUB_OUTPUT"
 
       - name: Start the Windows release build
         shell: bash

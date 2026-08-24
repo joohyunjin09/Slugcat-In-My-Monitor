@@ -52,6 +52,8 @@ Downpour가 설치되어 필요한 atlas를 찾을 수 있으면 아래 외형�
 > [!WARNING]
 > 스킨 설정 시스템은 현재 테스트 목적으로 개발 중인 임시 기능입니다.
 > UI, 프리셋 형식, 지원 범위와 결과가 이후 버전에서 변경될 수 있습니다.
+> 외부 및 Steam Workshop 스킨은 **Dress My Slugcat(DMS) 형식만 지원**합니다.
+> SlugBase 캐릭터, 지역, 게임플레이 및 DLL 기반 Workshop 모드는 불러오지 않습니다.
 
 ![실험적 Slugcat 스킨 패널](docs/media/readme/skinPanel.png)
 
@@ -59,8 +61,8 @@ Downpour가 설치되어 필요한 atlas를 찾을 수 있으면 아래 외형�
 꼬리와 The Mark의 스프라이트 또는 색상을 바꿀 수 있습니다. 설정을 복사하거나
 프리셋 파일로 저장하고 다시 불러오는 기능도 제공합니다.
 
-Dress My Slugcat 형식의 스킨은 `metadata.json`과 파츠별 PNG/TXT atlas 쌍으로
-구성됩니다. 프로그램은 다음 위치에서 스킨을 검색합니다.
+지원되는 Dress My Slugcat 형식의 스킨은 `metadata.json`과 파츠별 PNG/TXT atlas
+쌍으로 구성됩니다. 프로그램은 다음 위치에서 DMS 스킨을 검색합니다.
 
 - 실행 파일 주변의 `skins` 폴더
 - 개발 저장소의 `assets/skins`
