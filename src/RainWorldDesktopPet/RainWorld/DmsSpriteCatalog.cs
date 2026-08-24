@@ -70,11 +70,18 @@ namespace RainWorldDesktopPet.RainWorld
     public sealed class DmsSpriteCatalog : IDisposable
     {
         private readonly RainWorldInstallation installation;
+        private readonly string applicationDirectory;
         private readonly List<DmsSpriteSet> sets = new List<DmsSpriteSet>();
 
         public DmsSpriteCatalog(RainWorldInstallation installation)
+            : this(installation, AppDomain.CurrentDomain.BaseDirectory)
+        {
+        }
+
+        internal DmsSpriteCatalog(RainWorldInstallation installation, string applicationDirectory)
         {
             this.installation = installation;
+            this.applicationDirectory = applicationDirectory;
             Reload();
         }
 
@@ -90,7 +97,8 @@ namespace RainWorldDesktopPet.RainWorld
             string local = Path.Combine(Environment.GetFolderPath(
                 Environment.SpecialFolder.LocalApplicationData), "SlugcatInMyMonitor", "skins");
             AddDirectory(roots, local);
-            AddAncestorSkinRoots(roots, AppDomain.CurrentDomain.BaseDirectory);
+            AddDirectory(roots, applicationDirectory);
+            AddAncestorSkinRoots(roots, applicationDirectory);
             if (installation != null)
             {
                 AddDirectory(roots, Path.Combine(installation.RootPath, "mods"));

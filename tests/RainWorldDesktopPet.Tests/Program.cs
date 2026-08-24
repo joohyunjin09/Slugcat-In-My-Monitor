@@ -56,6 +56,7 @@ namespace RainWorldDesktopPet.Tests
             Run("AI produces VirtualInput without moving physics directly", AiDoesNotMoveCreature);
             Run("Futile atlas metadata parses frame geometry", AtlasMetadataParses);
             Run("DMS part atlas overrides and restores original sprites", DmsPartAtlasOverrideRestoresBase);
+            Run("DMS sprites beside the executable are discovered", DmsSpritesBesideExecutableAreDiscovered);
             Run("Customize colors reach each rendered sprite part", PartColorsReachRenderedPose);
             Run("Rain World locator validates an explicit installation", LocatorValidatesExplicitPath);
             Run("Required autonomous behavior states are present", RequiredBehaviorsExist);
@@ -616,6 +617,36 @@ namespace RainWorldDesktopPet.Tests
                     set.ClearPartOverride("Body");
                     True(set.TryGet("BodyA", out sprite) && sprite.Atlas.ImagePath == basePng,
                         "Default must restore the original atlas sprite");
+                }
+            }
+            finally
+            {
+                if (Directory.Exists(root)) Directory.Delete(root, true);
+            }
+        }
+
+        private static void DmsSpritesBesideExecutableAreDiscovered()
+        {
+            string root = Path.Combine(Path.GetTempPath(), "slugcat-dms-root-test-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(root);
+            string json = "{\"frames\":{\"HeadA0.png\":{\"frame\":{\"x\":0,\"y\":0,\"w\":8,\"h\":8}," +
+                "\"rotated\":false,\"spriteSourceSize\":{\"x\":0,\"y\":0,\"w\":8,\"h\":8}," +
+                "\"sourceSize\":{\"w\":8,\"h\":8}}}}";
+            try
+            {
+                using (Bitmap bitmap = new Bitmap(8, 8))
+                    bitmap.Save(Path.Combine(root, "head.png"), ImageFormat.Png);
+                File.WriteAllText(Path.Combine(root, "head.txt"), json);
+                File.WriteAllText(Path.Combine(root, "metadata.json"),
+                    "{\"id\":\"portable\",\"name\":\"Portable skin\"}");
+
+                using (DmsSpriteCatalog catalog = new DmsSpriteCatalog(null, root))
+                {
+                    Equal(1, catalog.Sets.Count,
+                        "a sprite set placed directly beside the executable");
+                    True(catalog.Sets[0].Id == "portable" &&
+                         catalog.Sets[0].DirectoryPath == root,
+                        "the executable-root sprite set keeps its metadata and path");
                 }
             }
             finally
@@ -2135,7 +2166,7 @@ namespace RainWorldDesktopPet.Tests
                  pose.TailMeshVertexCount == SpriteRenderer.OriginalTailMeshVertexCount,
                 "procedural fallback also renders the one continuous tail mesh");
             Near(0.0, Vec2.Distance(pose.TailTip, pose.TailMeshVertices[14]),
-                0.000001, "F1 mesh diagnostics expose the point tip");
+                0.000001, "debug mesh diagnostics expose the point tip");
             Near(0.0, Vec2.Distance(before, slugcat.Center), 0.000001,
                 "debug rendering must not mutate player physics");
         }

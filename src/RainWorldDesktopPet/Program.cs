@@ -55,7 +55,7 @@ namespace RainWorldDesktopPet
         {
             MessageBox.Show(
                 "Rain World 설치 경로를 자동으로 찾지 못했습니다. 다음 창에서 RainWorld.exe가 있는 폴더를 선택해 주세요.",
-                "Slugcat in My Monitor", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                "SlugcatInMyMonitor", MessageBoxButtons.OK, MessageBoxIcon.Information);
             using (FolderBrowserDialog dialog = new FolderBrowserDialog())
             {
                 dialog.Description = "Rain World installation folder";

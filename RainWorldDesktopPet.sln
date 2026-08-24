@@ -3,7 +3,7 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio 2013
 VisualStudioVersion = 12.0.21005.1
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RainWorldDesktopPet", "src\RainWorldDesktopPet\RainWorldDesktopPet.csproj", "{5366F87C-7531-4776-A723-1B43D0E48987}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SlugcatInMyMonitor", "src\RainWorldDesktopPet\RainWorldDesktopPet.csproj", "{5366F87C-7531-4776-A723-1B43D0E48987}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RainWorldDesktopPet.Tests", "tests\RainWorldDesktopPet.Tests\RainWorldDesktopPet.Tests.csproj", "{D199D1C1-37EF-4BD5-9CC8-52DB77E0E35B}"
 EndProject

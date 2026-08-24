@@ -2,8 +2,12 @@ name: CI
 
 on:
   pull_request:
+    branches:
+      - develop
+      - main
   push:
     branches:
+      - develop
       - main
   workflow_dispatch:
 
@@ -31,10 +35,10 @@ jobs:
       - name: Upload Windows build
         uses: actions/upload-artifact@v4
         with:
-          name: Slugcat-In-My-Monitor-${{ github.sha }}
+          name: SlugcatInMyMonitor-${{ github.sha }}
           if-no-files-found: error
           path: |
-            artifacts/Release/RainWorldDesktopPet.exe
-            artifacts/Release/RainWorldDesktopPet.exe.config
+            artifacts/Release/SlugcatInMyMonitor.exe
+            artifacts/Release/SlugcatInMyMonitor.exe.config
             README.md
             LICENSE

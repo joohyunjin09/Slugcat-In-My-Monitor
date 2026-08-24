@@ -45,7 +45,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\RainWorldDesktopPet\RainWorldDesktopPet.csproj">
       <Project>{5366F87C-7531-4776-A723-1B43D0E48987}</Project>
-      <Name>RainWorldDesktopPet</Name>
+      <Name>SlugcatInMyMonitor</Name>
     </ProjectReference>
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />

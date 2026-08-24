@@ -1,8 +1,11 @@
-Slugcat in My Monitor - DMS skin folder
+SlugcatInMyMonitor - DMS skin folder
 ========================================
 
 Place each Dress My Slugcat sprite set in its own subfolder here, then open
-the app and press F2. Use "Reload sprites" if the editor was already open.
+"Slugcat Appearance Editor" from the tray menu. Use "Reload Sprites" if the
+editor was already open.
+For portable use, one sprite set may also be placed directly beside
+SlugcatInMyMonitor.exe. The skins subfolder layout is recommended.
 
 Example:
 

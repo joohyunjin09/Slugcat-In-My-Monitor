@@ -2,7 +2,7 @@
 
 ## Runtime boundary
 
-`RainWorldDesktopPet.exe` is a .NET Framework 4.8 Windows application. It does not reference or load `Assembly-CSharp.dll`, UnityEngine, BepInEx, RainWorld.exe, or Steam APIs. The local DLL was used only as a static analysis reference while implementing the independent simulation.
+`SlugcatInMyMonitor.exe` is a .NET Framework 4.8 Windows application. It does not reference or load `Assembly-CSharp.dll`, UnityEngine, BepInEx, RainWorld.exe, or Steam APIs. The local DLL was used only as a static analysis reference while implementing the independent simulation.
 
 At runtime the app performs two read-only operations against a Rain World installation:
 

@@ -93,7 +93,7 @@ Godot input event
 | 클릭 통과 | 부분 구현 | bounding rectangle polygon | 빈 투명 영역도 입력을 막으며 정밀 hit-test가 아님 |
 | Alt+Tab/taskbar/no-activate | 미구현/미검증 | 관련 Win32 style 없음 | 명시적 window style 필요 |
 | 다중 모니터/DPI | 미구현 | 900×600 고정 viewport | 전역 물리 좌표계와 per-monitor 렌더 필요 |
-| F1 디버그 표시 | 미구현 | 임시 실루엣 외 debug overlay 없음 | 요구된 state/target/surface 표기 필요 |
+| 디버그 표시 | 미구현 | 임시 실루엣 외 debug overlay 없음 | 요구된 state/target/surface 표기 필요 |
 | 장시간 성능 설계 | 부분 구현 | 작은 배열은 재사용 | 매 tick 임시 배열/polygon과 OS 호출 발생 |
 | 화면 밖 recovery | 미구현 | local viewport x만 clamp | monitor topology 변경까지 처리해야 함 |
 
@@ -270,7 +270,7 @@ C#에서는 `GrabConstraint`와 timestamped sample ring buffer를 두고, `SetCa
 | reference-tick 감쇠를 `pow`로 환산 | 패턴 재사용 | 원본 tick/계수 확인 후 이름 있는 config로 저장 |
 | Verlet tail integration | 알고리즘 골격 재사용 | segment별 radius/length, surface collision, history 보정, render history 분리 |
 | 몸통 축에서 head/right basis 계산 | pose helper로 재사용 | 원본 `PlayerGraphics` offset/anchor 규칙으로 교체 |
-| debug 선/원 실루엣과 layer 순서 | 적극 재사용 | F1 debug renderer로 분리, 최종 sprite renderer와 병행 |
+| debug 선/원 실루엣과 layer 순서 | 적극 재사용 | debug renderer로 분리, 최종 sprite renderer와 병행 |
 | 가까운 chunk 선택 | 재사용 | pose-aware capsule/circle hit-test와 global desktop 좌표계 적용 |
 | drag 동안 입력 영역 확장 | UX 개념 재사용 | Win32 mouse capture와 정확한 hit-test로 구현 |
 | PNG IHDR 및 atlas frame bounds 검증 | 검증 패턴 재사용 | C# asset validation 계층으로 포팅 가능; Rain World atlas schema는 별도 분석 |
@@ -741,7 +741,7 @@ DrainEvents()
 
 - alpha composition, no-activate, click-through/capture
 - monitor별 DPI와 topology change
-- F1 debug overlay
+- tray menu debug overlay
 - crash isolation, settings, asset error UX
 - soak/performance 측정
 
