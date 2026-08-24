@@ -133,6 +133,8 @@ namespace RainWorldDesktopPet.Tests
                 ArtificerSmokeEmitsGpuEffectCommands);
             Run("Artificer flash expands the independent GPU effect bounds",
                 ArtificerFlashExpandsGpuEffectBounds);
+            Run("Artificer self-destruct effects use the large GPU bounds",
+                ArtificerSelfDestructUsesGpuEffectBounds);
             Run("Unused Stand and Walk hands retract like SlugcatHand", UnusedHandsRetract);
             Run("Crawl hands use original velocity-relative targets", CrawlHandsUseOriginalTargets);
             Run("SlugcatHand connection constraint prevents arm separation", ArmConstraintPreventsSeparation);
@@ -2367,6 +2369,40 @@ namespace RainWorldDesktopPet.Tests
                 Equal(1, count, "flash GPU command count");
                 True(commands[0].Seed < 0.0f,
                     "negative command seed selects the radial-light shader");
+            }
+        }
+
+        private static void ArtificerSelfDestructUsesGpuEffectBounds()
+        {
+            Slugcat slugcat = new Slugcat(new Vec2(100.0, 80.0));
+            AbilityEffect explosion = new AbilityEffect(AbilityEffectKind.Explosion,
+                new Vec2(100.0, 80.0), Vec2.Zero, 7, 350.0);
+            explosion.LastLife = explosion.Life = 0.5;
+            slugcat.AddEffect(explosion);
+            AbilityEffect spikes = new AbilityEffect(AbilityEffectKind.ExplosionSpikes,
+                new Vec2(100.0, 80.0), Vec2.Zero, 7, 170.0);
+            spikes.LastLife = spikes.Life = 0.5;
+            slugcat.AddEffect(spikes);
+            AbilityEffect wave = AbilityEffect.CreateShockWave(
+                new Vec2(100.0, 80.0), 430.0, 0.045, 5);
+            wave.LastLife = wave.Life = 0.5;
+            slugcat.AddEffect(wave);
+            SlugcatPose pose = new SlugcatPose();
+            pose.CharacterRenderScale = 2.2;
+            pose.TimeStacker = 1.0;
+            using (SpriteRenderer renderer = new SpriteRenderer(null))
+            {
+                RectangleF bounds = renderer.CalculateGpuEffectBounds(slugcat, pose);
+                True(bounds.Width > 1300.0f && bounds.Height > 1300.0f,
+                    "self-destruct shockwave bounds");
+                DirectCompositionHost.GpuSmokeEffect[] commands =
+                    new DirectCompositionHost.GpuSmokeEffect[4];
+                int count = 0;
+                renderer.CollectGpuSmokeEffects(slugcat, pose,
+                    new RenderSpace(Rectangle.Ceiling(bounds)), commands, ref count);
+                Equal(3, count, "self-destruct GPU command count");
+                True(commands[0].Seed == -4.0f && commands[1].Seed == -5.0f &&
+                    commands[2].Seed == -3.0f, "self-destruct shader command kinds");
             }
         }
 

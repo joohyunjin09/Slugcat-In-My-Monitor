@@ -1396,16 +1396,7 @@ namespace RainWorldDesktopPet.Graphics
                 double life = MathUtil.Lerp(effect.LastLife, effect.Life, interpolation);
                 if (effect.Kind == AbilityEffectKind.ShockWave)
                 {
-                    double progress = MathUtil.Clamp01(life);
-                    double shaderScale = Math.Sqrt(progress) * effect.Radius / 8.0;
-                    Color shaderColor = Color.FromArgb(255,
-                        MathUtil.Clamp((int)Math.Round(255.0 *
-                            Math.Pow(progress, 0.1)), 0, 255),
-                        MathUtil.Clamp((int)Math.Round(255.0 *
-                            effect.Intensity), 0, 255),
-                        MathUtil.Clamp((int)Math.Round(255.0 * progress), 0, 255));
-                    DrawEffectShaderSprite(graphics, shockWaveShaderMask, position,
-                        0.0, shaderScale * 16.0, shaderColor);
+                    continue;
                 }
                 else if (effect.Kind == AbilityEffectKind.ExplosionLight)
                 {
@@ -1415,19 +1406,7 @@ namespace RainWorldDesktopPet.Graphics
                 }
                 else if (effect.Kind == AbilityEffectKind.ExplosionSpikes)
                 {
-                    double progress = MathUtil.Clamp01(1.0 - life);
-                    double radius = effect.Radius * Math.Sin(progress * Math.PI * 0.5);
-                    using (Pen spikes = CreateRoundPen(Color.FromArgb(
-                        MathUtil.Clamp((int)(190 * life), 0, 255), 255, 255, 255), 1.4f))
-                    {
-                        for (int spike = 0; spike < 14; spike++)
-                        {
-                            Vec2 direction = new Vec2(Math.Cos(spike * Math.PI * 2.0 / 14.0),
-                                Math.Sin(spike * Math.PI * 2.0 / 14.0));
-                            graphics.DrawLine(spikes, (position + direction * 30.0).ToPointF(),
-                                (position + direction * radius).ToPointF());
-                        }
-                    }
+                    continue;
                 }
                 else if (effect.Kind == AbilityEffectKind.SootMark)
                 {
@@ -1463,6 +1442,10 @@ namespace RainWorldDesktopPet.Graphics
                     // Submitted after the CPU sprite surface through the
                     // Direct3D effect path. Do not draw a GDI fallback here;
                     // that would restore the expensive GPU/CPU round trip.
+                    continue;
+                }
+                else if (effect.Kind == AbilityEffectKind.Explosion)
+                {
                     continue;
                 }
                 else
@@ -1504,6 +1487,54 @@ namespace RainWorldDesktopPet.Graphics
                     light.FrontAlpha = 1.0f - (1.0f - lightAlpha) * (1.0f - lightAlpha);
                     light.Seed = -1.0f;
                     target[count++] = light;
+                    continue;
+                }
+                if (effect.Kind == AbilityEffectKind.ShockWave)
+                {
+                    double progress = MathUtil.Clamp01(life);
+                    DirectCompositionHost.GpuSmokeEffect wave =
+                        new DirectCompositionHost.GpuSmokeEffect();
+                    wave.CenterX = (float)center.X;
+                    wave.CenterY = (float)center.Y;
+                    wave.BackSize = (float)(Math.Sqrt(progress) * effect.Radius *
+                        2.0 * renderScale);
+                    wave.BackRed = (float)Math.Pow(progress, 0.1);
+                    wave.BackGreen = (float)MathUtil.Clamp01(effect.Intensity);
+                    wave.BackBlue = (float)progress;
+                    wave.BackAlpha = 1.0f;
+                    wave.Seed = -3.0f;
+                    target[count++] = wave;
+                    continue;
+                }
+                if (effect.Kind == AbilityEffectKind.Explosion)
+                {
+                    double progress = MathUtil.Clamp01(1.0 - life);
+                    DirectCompositionHost.GpuSmokeEffect explosion =
+                        new DirectCompositionHost.GpuSmokeEffect();
+                    explosion.CenterX = (float)center.X;
+                    explosion.CenterY = (float)center.Y;
+                    explosion.BackSize = (float)(effect.Radius * progress *
+                        2.0 * renderScale);
+                    explosion.BackRed = explosion.BackGreen = explosion.BackBlue = 1.0f;
+                    explosion.BackAlpha = (float)MathUtil.Clamp01(160.0 / 255.0 * life);
+                    explosion.Seed = -4.0f;
+                    target[count++] = explosion;
+                    continue;
+                }
+                if (effect.Kind == AbilityEffectKind.ExplosionSpikes)
+                {
+                    double progress = MathUtil.Clamp01(1.0 - life);
+                    double radius = effect.Radius * Math.Sin(progress * Math.PI * 0.5);
+                    DirectCompositionHost.GpuSmokeEffect spikes =
+                        new DirectCompositionHost.GpuSmokeEffect();
+                    spikes.CenterX = (float)center.X;
+                    spikes.CenterY = (float)center.Y;
+                    spikes.BackSize = (float)(Math.Max(30.0, radius) *
+                        2.0 * renderScale);
+                    spikes.BackRed = spikes.BackGreen = spikes.BackBlue = 1.0f;
+                    spikes.BackAlpha = (float)MathUtil.Clamp01(190.0 / 255.0 * life);
+                    spikes.Seed = -5.0f;
+                    target[count++] = spikes;
                     continue;
                 }
                 if (effect.Kind != AbilityEffectKind.Smoke &&
@@ -1562,6 +1593,22 @@ namespace RainWorldDesktopPet.Graphics
                 {
                     size = Math.Sqrt(Math.Max(0.0, life)) * effect.Radius *
                         2.0 * renderScale;
+                }
+                else if (effect.Kind == AbilityEffectKind.ShockWave)
+                {
+                    size = Math.Sqrt(MathUtil.Clamp01(life)) * effect.Radius *
+                        2.0 * renderScale;
+                }
+                else if (effect.Kind == AbilityEffectKind.Explosion)
+                {
+                    size = effect.Radius * MathUtil.Clamp01(1.0 - life) *
+                        2.0 * renderScale;
+                }
+                else if (effect.Kind == AbilityEffectKind.ExplosionSpikes)
+                {
+                    double progress = MathUtil.Clamp01(1.0 - life);
+                    double radius = effect.Radius * Math.Sin(progress * Math.PI * 0.5);
+                    size = Math.Max(30.0, radius) * 2.0 * renderScale;
                 }
                 else if (effect.Kind == AbilityEffectKind.Smoke ||
                     effect.Kind == AbilityEffectKind.FlashingSmoke)

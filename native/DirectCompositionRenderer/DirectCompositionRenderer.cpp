@@ -55,6 +55,19 @@ float Noise(float2 value) { float2 cell=floor(value),f=frac(value);
     float c=Hash(cell+float2(0,1)),d=Hash(cell+1);
     return lerp(lerp(a,b,f.x),lerp(c,d,f.x),f.y); }
 float4 PSMain(PixelInput input) : SV_TARGET { float2 p=input.uv*2-1;
+    if (input.seed<-4.5) { float radius=length(p);
+        float angle=atan2(p.y,p.x); float spoke=pow(abs(cos(angle*7)),36);
+        float inner=smoothstep(.16,.2,radius);
+        float outer=1-smoothstep(.96,1,radius);
+        float alpha=spoke*inner*outer*input.color.a;
+        return float4(input.color.rgb*alpha,alpha); }
+    if (input.seed<-3.5) { float radial=saturate(1-length(p));
+        float alpha=pow(radial,.55)*input.color.a;
+        return float4(input.color.rgb*alpha,alpha); }
+    if (input.seed<-2.5) { float radius=length(p);
+        float ring=exp(-pow((radius-.76)/.055,2));
+        float alpha=ring*input.color.a;
+        return float4(input.color.rgb*alpha,alpha); }
     if (input.seed<0) { float radial=saturate(1-length(p));
         float shape=input.seed<-1.5 ? radial*radial : pow(radial,.65);
         float alpha=shape*input.color.a;
@@ -231,11 +244,11 @@ float4 PSMain(PixelInput input) : SV_TARGET { float2 p=input.uv*2-1;
             std::vector<EffectVertex> vertices;
             if (SUCCEEDED(draw)) { vertices.reserve(count*12);
                 for (UINT i=0;i<count;++i) { const auto& e=effects[i];
-                    bool light=e.Seed<0;
                     AddQuad(vertices,e.CenterX,e.CenterY,e.BackSize,e.Rotation,e.BackRed,
-                        e.BackGreen,e.BackBlue,e.BackAlpha,light?-1:e.Seed,width,height);
+                        e.BackGreen,e.BackBlue,e.BackAlpha,e.Seed,width,height);
                     AddQuad(vertices,e.CenterX,e.CenterY,e.FrontSize,e.Rotation,e.FrontRed,
-                        e.FrontGreen,e.FrontBlue,e.FrontAlpha,light?-2:e.Seed+.37f,width,height); }
+                        e.FrontGreen,e.FrontBlue,e.FrontAlpha,
+                        e.Seed==-1?-2:e.Seed+.37f,width,height); }
                 D3D11_MAPPED_SUBRESOURCE mapped={};
                 draw=Context->Map(EffectVertexBuffer.Get(),0,D3D11_MAP_WRITE_DISCARD,0,&mapped);
                 if (SUCCEEDED(draw)) { std::memcpy(mapped.pData,vertices.data(),
