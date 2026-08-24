@@ -1,8 +1,8 @@
 # SlugcatInMyMonitor
 
-<video src="docs/media/readme/example.mp4" controls muted loop width="100%"></video>
+[![여러 Slugcat이 바탕화면을 돌아다니는 예시 영상](docs/media/readme/example-preview.gif)](docs/media/readme/example.mp4)
 
-[▶ 예시 영상 직접 보기](docs/media/readme/example.mp4)
+미리보기를 클릭하면 원본 MP4 영상을 볼 수 있습니다.
 
 Rain World의 Slugcat이 Windows 바탕화면을 돌아다니는 데스크톱 펫입니다.
 Slugcat은 모니터와 실제 창의 경계를 바닥이나 벽처럼 이용하고, 걷기·점프·낙하·벽
