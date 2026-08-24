@@ -4,7 +4,6 @@ using System.Drawing;
 using System.IO;
 using System.Diagnostics;
 using System.Threading;
-using RainWorldDesktopPet.Audio;
 using RainWorldDesktopPet.AI;
 using RainWorldDesktopPet.Core;
 using RainWorldDesktopPet.Creature;
@@ -27,7 +26,6 @@ namespace RainWorldDesktopPet.Tests
         public string AbilityState;
         public int SpearCount;
         public int EffectCount;
-        public SoundEvent[] Sounds;
     }
 
     internal static class AbilityInputReplay
@@ -50,8 +48,7 @@ namespace RainWorldDesktopPet.Tests
                     BodyMode = slugcat.State.BodyMode,
                     AbilityState = slugcat.AbilityController.DebugState,
                     SpearCount = slugcat.Spears.Count,
-                    EffectCount = slugcat.AbilityEffects.Count,
-                    Sounds = slugcat.DrainSoundEvents()
+                    EffectCount = slugcat.AbilityEffects.Count
                 });
             }
             return result;
@@ -64,7 +61,7 @@ namespace RainWorldDesktopPet.Tests
         {
             run("Exactly eight characters share one ordered profile selector",
                 UnifiedEightCharacterProfiles);
-            run("Character switching clears previous ability objects and sounds",
+            run("Character switching clears previous ability objects",
                 CharacterSwitchClearsAbilityState);
             run("Artificer replay matches explosive-jump chunk assignments",
                 ArtificerExplosiveJumpReplay);
@@ -82,8 +79,6 @@ namespace RainWorldDesktopPet.Tests
                 SpearmasterThrowReplay);
             run("Spearmaster AI holds without a target and traverses explicit action states",
                 SpearmasterAiActionStateReplay);
-            run("Spear wall bounce sound is owned by one contact-state transition",
-                SpearBounceTransitionReplay);
             run("Rivulet replay uses stats-driven ground jump and shared air control",
                 RivuletMovementReplay);
             run("Movement launch momentum produces character-specific trajectories",
@@ -94,14 +89,6 @@ namespace RainWorldDesktopPet.Tests
                 GourmandRollReplay);
             run("Gourmand exhaustion uses aerobicLevel recovery and slowMovementStun",
                 GourmandExhaustionReplay);
-            run("Local sounds.txt maps ability SoundIDs and PLAYALL metadata",
-                LocalAbilitySoundCatalog);
-            run("Death and game-over SoundIDs are suppressed before playback",
-                DeathSoundsAreSuppressed);
-            run("Installed UnityFS jump family decodes and queues without blocking",
-                LocalUnityFsAudioPlayback);
-            run("Sound setting defaults ON, persists, and gates future events",
-                SoundSettingPersistenceAndGate);
         }
 
         private static void UnifiedEightCharacterProfiles()
@@ -162,12 +149,9 @@ namespace RainWorldDesktopPet.Tests
             artificer.Step(new VirtualInput(1, -1, true, true), world,
                 Vec2.Zero, Vec2.Zero);
             True(artificer.AbilityEffects.Count > 0, "Artificer effects were created");
-            True(artificer.DrainSoundEvents().Length > 0, "Artificer sound was created");
-            artificer.EmitSound("Fire_Spear_Explode", artificer.Center, 1.0, 1.0, 1);
             artificer.SetSelectedSlugcat(SlugcatId.Yellow);
             Equal(0, artificer.AbilityEffects.Count, "effects after switch");
             Equal(0, artificer.Spears.Count, "spears after switch");
-            Equal(0, artificer.DrainSoundEvents().Length, "queued sounds after switch");
             True(artificer.AbilityController is DefaultAbilityController,
                 "Yellow uses the base controller");
 
@@ -227,13 +211,7 @@ namespace RainWorldDesktopPet.Tests
             Near(8.0, slugcat.Movement.JumpBoost, 0.000001,
                 "up explosive jump stores the original jumpBoost");
             True(replay[0].Animation == AnimationIndex.Flip, "Flip animation");
-            True(ContainsSound(replay[0].Sounds, "Fire_Spear_Explode"),
-                "original explosion SoundID");
             Equal(19, replay[0].EffectCount, "light + eight smoke + ten sparks");
-            Near(slugcat.BodyChunks[0].Position.X, replay[0].Sounds[0].Position.X,
-                0.000001, "explosive-jump sound uses firstChunk x");
-            Near(slugcat.BodyChunks[0].Position.Y, replay[0].Sounds[0].Position.Y,
-                0.000001, "explosive-jump sound uses firstChunk y");
         }
 
         private static void ArtificerParryReplay()
@@ -248,8 +226,6 @@ namespace RainWorldDesktopPet.Tests
             Equal(40, ability.ParryCooldown, "parry cooldown");
             True(HasEffect(slugcat, AbilityEffectKind.ShockWave),
                 "parry shockwave exists");
-            True(ContainsSound(replay[0].Sounds, "Fire_Spear_Explode"),
-                "parry sound event");
         }
 
         private static void ArtificerEffectLifecycleReplay()
@@ -359,10 +335,6 @@ namespace RainWorldDesktopPet.Tests
                 "new needle remains connected for feeding/umbilical state");
             Near(1.25, ability.HeldSpear.DamageBonus, 0.000001,
                 "SpearMaster throwing skill damage bonus");
-            True(ContainsSound(replay[23].Sounds, "SM_Spear_Pull"),
-                "pull sound starts at the first >=.1 branch");
-            True(ContainsSound(replay[79].Sounds, "SM_Spear_Grab"),
-                "grab sound matches creation tick");
             Equal(9, replay[79].EffectCount, "four drips plus five sparks");
         }
 
@@ -402,8 +374,6 @@ namespace RainWorldDesktopPet.Tests
             True(spear.HasUmbilical && spear.Umbilical.Length >= 10 &&
                 spear.Umbilical.Length <= 19,
                 "connected needle creates Spear.Umbilical with 10..19 segments");
-            True(ContainsSound(throwReplay[0].Sounds, "Slugcat_Throw_Spear"),
-                "Spear.Thrown uses the original throw SoundID");
             Near(48.0, spear.Chunk.Velocity.X, 0.000001,
                 "Spearmaster horizontal skill multiplies 40 by 1.2");
             Near(-1.05045, spear.Chunk.Velocity.Y, 0.00001,
@@ -412,9 +382,6 @@ namespace RainWorldDesktopPet.Tests
             double beforePositionY = spear.Chunk.Position.Y;
             IList<AbilityReplayTick> flightReplay = AbilityInputReplay.Run(slugcat,
                 world, new[] { VirtualInput.Neutral });
-            True(ContainsSound(flightReplay[0].Sounds,
-                "Spear_Thrown_Through_Air_LOOP"),
-                "thrown needle starts the original flight loop SoundID");
             Near((beforeY + 0.45) * 0.999, spear.Chunk.Velocity.Y, 0.00001,
                 "Spear.Update cancels half of PhysicalObject .9 gravity");
             Near(beforePositionY + spear.Chunk.Velocity.Y, spear.Chunk.Position.Y,
@@ -564,39 +531,6 @@ namespace RainWorldDesktopPet.Tests
                 "visited Recovering");
         }
 
-        private static void SpearBounceTransitionReplay()
-        {
-            MonitorInfo monitor = new MonitorInfo("SPEAR-WALL",
-                new Rectangle(0, 0, 1200, 1000),
-                new Rectangle(0, 0, 1200, 1000), true);
-            DesktopCollisionWorld world = CreateWorld(monitor,
-                new DesktopWindowSnapshot[0]);
-            DesktopSurface rightWall = null;
-            for (int i = 0; i < world.Surfaces.Count; i++)
-                if (world.Surfaces[i].Kind == DesktopSurfaceKind.MonitorRightBoundary)
-                    rightWall = world.Surfaces[i];
-            True(rightWall != null, "monitor right wall exists");
-            DesktopSpear spear = new DesktopSpear(new Vec2(
-                rightWall.WallX - 300.0,
-                (rightWall.Top + rightWall.Bottom) * 0.5), 1);
-            spear.Throw(new Vec2(48.0, 0.0), Vec2.Right);
-            int transitionCount = 0;
-            int bounceSoundCount = 0;
-            for (int tick = 0; tick < 80; tick++)
-            {
-                if (spear.Step(world)) transitionCount++;
-                if (spear.LastImpactSound == "Spear_Bounce_Off_Wall")
-                    bounceSoundCount++;
-            }
-            True(spear.Mode == DesktopSpearMode.Free ||
-                spear.Mode == DesktopSpearMode.StuckInGround,
-                "long-range failed stick becomes Weapon.Mode.Free");
-            Equal(1, bounceSoundCount,
-                "retained/repeated terrain contact cannot replay bounce sound");
-            True(transitionCount <= 2,
-                "only bounce and optional eventual ground-rest transitions emit sounds");
-        }
-
         private static void RivuletMovementReplay()
         {
             DesktopCollisionWorld airWorld = CreateAirWorld();
@@ -720,10 +654,6 @@ namespace RainWorldDesktopPet.Tests
                 "second tongue update attaches to desktop terrain");
             True(ability.LastElasticityExcess <= 0.000001,
                 "newly attached rope is slack and applies no anchor pull");
-            True(ContainsSound(shoot[0].Sounds, "Tube_Worm_Shoot_Tongue"),
-                "shoot sound tick");
-            True(ContainsSound(shoot[1].Sounds, "Tube_Worm_Tongue_Hit_Terrain"),
-                "terrain hit sound tick");
             True(ability.Rope.Length == 20, "PlayerGraphics uses twenty rope segments");
 
             IList<AbilityReplayTick> release = AbilityInputReplay.Run(saint, world,
@@ -739,46 +669,9 @@ namespace RainWorldDesktopPet.Tests
                 "jump release preserves the original Retracting state for the frame");
             Near(-8.0, release[1].ChestVelocity.Y, 0.000001, "release chest velocity");
             Near(-7.0, release[1].HipsVelocity.Y, 0.000001, "release hips velocity");
-            True(ContainsSound(release[1].Sounds, "Tube_Worm_Detach_Tongue_Terrain"),
-                "detach sound");
-            True(ContainsSound(release[1].Sounds, "Slugcat_Normal_Jump"),
-                "release jump sound");
             saint.Step(VirtualInput.Neutral, world, Vec2.Zero, Vec2.Zero);
             True(ability.Mode == SaintTongueMode.Retracted,
                 "following Tongue.Update completes retraction");
-        }
-
-        private static void SoundSettingPersistenceAndGate()
-        {
-            string path = Path.Combine(Path.GetTempPath(),
-                "slugcat-settings-" + Guid.NewGuid().ToString("N") + ".txt");
-            try
-            {
-                AppSettings settings = AppSettings.Load(path);
-                True(settings.SoundEnabled, "missing settings file defaults Sound ON");
-                settings.SoundEnabled = false;
-                settings.Save();
-                True(!AppSettings.Load(path).SoundEnabled,
-                    "SoundEnabled survives reload");
-
-                using (RainWorldAudioEngine audio = new RainWorldAudioEngine(null))
-                {
-                    audio.SetEnabled(false);
-                    audio.Play(new SoundEvent("Slugcat_Normal_Jump", Vec2.Zero,
-                        1.0, 1.0, 0), Vec2.Zero, 1, 100.0);
-                    Equal("sound disabled", audio.LastEvent,
-                        "disabled events are consumed without playback");
-                    audio.SetEnabled(true);
-                    audio.Play(new SoundEvent("Slugcat_Normal_Jump", Vec2.Zero,
-                        1.0, 1.0, 0), Vec2.Zero, 2, 100.0);
-                    True(audio.LastEvent.StartsWith("Slugcat_Normal_Jump"),
-                        "re-enabled audio begins with the next event");
-                }
-            }
-            finally
-            {
-                if (File.Exists(path)) File.Delete(path);
-            }
         }
 
         private static void GourmandRollReplay()
@@ -829,124 +722,6 @@ namespace RainWorldDesktopPet.Tests
                 "missing desktop item types do not create fake recipes");
         }
 
-        private static void LocalAbilitySoundCatalog()
-        {
-            RainWorldInstallation installation = new RainWorldLocator().Locate(null);
-            if (installation == null) return;
-            string path = Path.Combine(installation.RootPath, "RainWorld_Data",
-                "StreamingAssets", "soundeffects", "sounds.txt");
-            IDictionary<string, RainWorldSoundDefinition> catalog =
-                RainWorldSoundCatalog.Load(path);
-            RainWorldSoundDefinition roll = catalog["Slugcat_Roll_Init"];
-            True(roll.PlayAll && roll.Clips.Length == 2,
-                "Roll_Init keeps both PLAYALL clips");
-            RainWorldSoundDefinition bomb = catalog["Bomb_Explode"];
-            True(bomb.PlayAll && bomb.Clips.Length == 2,
-                "Bomb_Explode keeps PLAYALL metadata");
-            Near(0.8, bomb.Clips[0].MinimumPitch, 0.000001,
-                "Bomb clip pitch comes from sounds.txt");
-            RainWorldSoundDefinition fire = catalog["Fire_Spear_Explode"];
-            Near(0.8, fire.Clips[0].MinimumVolume, 0.000001,
-                "Fire spear clip volume comes from sounds.txt");
-            Equal(4, catalog["Tube_Worm_Shoot_Tongue"].Clips.Length,
-                "tongue shot retains all original variants");
-            Equal(2, catalog["SM_Spear_Pull"].Clips.Length,
-                "Spearmaster pull retains both variants");
-            True(catalog.ContainsKey("UI_Slugcat_Stunned_Init"),
-                "stun uses the active UI_Slugcat_Stunned_Init SoundID");
-        }
-
-        private static void LocalUnityFsAudioPlayback()
-        {
-            RainWorldInstallation installation = new RainWorldLocator().Locate(null);
-            if (installation == null) return;
-            using (RainWorldAudioEngine audio = new RainWorldAudioEngine(installation))
-            {
-                string resolved;
-                int pcmBytes;
-                string reason;
-                True(audio.TryResolveAndDecodeForDiagnostics("jump2", out resolved,
-                    out pcmBytes, out reason), "jump2 family decode: " + reason);
-                True(resolved.StartsWith("jump2", StringComparison.OrdinalIgnoreCase) &&
-                    !string.Equals(resolved, "jump2", StringComparison.OrdinalIgnoreCase),
-                    "unindexed sounds.txt name resolves to an installed indexed variant");
-                True(pcmBytes > 44, "resolved FSB5 clip exposes PCM16 data");
-
-                IDictionary<string, RainWorldSoundDefinition> catalog =
-                    RainWorldSoundCatalog.Load(Path.Combine(installation.RootPath, "RainWorld_Data",
-                        "StreamingAssets", "soundeffects", "sounds.txt"));
-                List<string> failedEvents = new List<string>();
-                int tick = 1;
-                foreach (string id in catalog.Keys)
-                {
-                    if (id.StartsWith("Slugcat", StringComparison.OrdinalIgnoreCase) ||
-                        id.StartsWith("Spear", StringComparison.OrdinalIgnoreCase) ||
-                        id.StartsWith("SM_", StringComparison.OrdinalIgnoreCase) ||
-                        id.StartsWith("UI_Slugcat", StringComparison.OrdinalIgnoreCase) ||
-                        id.StartsWith("Tube_Worm", StringComparison.OrdinalIgnoreCase) ||
-                        id.StartsWith("Rock_", StringComparison.OrdinalIgnoreCase) ||
-                        id.StartsWith("Fly_", StringComparison.OrdinalIgnoreCase) ||
-                        id.StartsWith("Bomb_", StringComparison.OrdinalIgnoreCase) ||
-                        id.StartsWith("Fire_", StringComparison.OrdinalIgnoreCase))
-                    {
-                        string err = CheckInstalledEvent(audio, id, tick++);
-                        if (err != null) failedEvents.Add(err);
-                    }
-                }
-                if (failedEvents.Count > 0)
-                {
-                    throw new InvalidOperationException("Failed sounds (" + failedEvents.Count + "):\n" +
-                        string.Join("\n", failedEvents.ToArray()));
-                }
-            }
-        }
-
-        private static void DeathSoundsAreSuppressed()
-        {
-            RainWorldInstallation installation = new RainWorldLocator().Locate(null);
-            if (installation == null) return;
-            using (RainWorldAudioEngine audio = new RainWorldAudioEngine(installation))
-            {
-                string[] ids =
-                {
-                    "Slugcat_Terrain_Impact_Death", "UI_Slugcat_Die",
-                    "HUD_Game_Over_Prompt"
-                };
-                for (int i = 0; i < ids.Length; i++)
-                {
-                    audio.Play(new SoundEvent(ids[i], Vec2.Zero, 1.0, 1.0, 0),
-                        Vec2.Zero, i + 1, 100.0);
-                    True(audio.LastEvent == "suppressed death sound: " + ids[i],
-                        ids[i] + " never enters audio playback");
-                }
-            }
-        }
-
-        private static string CheckInstalledEvent(RainWorldAudioEngine audio, string id,
-            long tick)
-        {
-            Stopwatch enqueue = Stopwatch.StartNew();
-            audio.Play(new SoundEvent(id, Vec2.Zero, 0.01, 1.0, 0),
-                Vec2.Zero, tick, 100.0);
-            enqueue.Stop();
-            if (audio.LastEvent.StartsWith("suppressed death sound:",
-                StringComparison.OrdinalIgnoreCase) ||
-                audio.LastEvent.StartsWith("silent sound:",
-                StringComparison.OrdinalIgnoreCase)) return null;
-            Stopwatch deadline = Stopwatch.StartNew();
-            while (deadline.ElapsedMilliseconds < 3000 &&
-                !audio.LastEvent.StartsWith("playback started: " + id,
-                    StringComparison.OrdinalIgnoreCase) &&
-                !audio.LastEvent.StartsWith("playback failed",
-                    StringComparison.OrdinalIgnoreCase) &&
-                !audio.LastEvent.Contains("unavailable"))
-                Thread.Sleep(10);
-            if (!audio.LastEvent.StartsWith("playback started: " + id,
-                StringComparison.OrdinalIgnoreCase))
-                return id + " -> " + audio.LastEvent;
-            return null;
-        }
-
         private static DesktopCollisionWorld CreateAirWorld()
         {
             MonitorInfo monitor = new MonitorInfo("AIR",
@@ -995,13 +770,6 @@ namespace RainWorldDesktopPet.Tests
                 if (world.Surfaces[i].Kind == DesktopSurfaceKind.MonitorFloor)
                     return world.Surfaces[i].Top;
             throw new InvalidOperationException("monitor floor missing");
-        }
-
-        private static bool ContainsSound(SoundEvent[] sounds, string id)
-        {
-            for (int i = 0; i < sounds.Length; i++)
-                if (sounds[i].Id == id) return true;
-            return false;
         }
 
         private static bool HasEffect(Slugcat slugcat, AbilityEffectKind kind)

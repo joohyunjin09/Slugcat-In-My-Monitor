@@ -2,7 +2,6 @@ using System;
 using RainWorldDesktopPet.Core;
 using RainWorldDesktopPet.Desktop;
 using RainWorldDesktopPet.Physics;
-using RainWorldDesktopPet.Audio;
 using System.Collections.Generic;
 
 namespace RainWorldDesktopPet.Creature
@@ -14,13 +13,10 @@ namespace RainWorldDesktopPet.Creature
         private readonly TerrainImpactData lastTerrainImpact = new TerrainImpactData();
         private bool impactStunEpisodeActive;
         private long impactStunDeadlineTick = -1;
-        private readonly List<SoundEvent> soundEvents = new List<SoundEvent>();
         private readonly List<AbilityEffect> effects = new List<AbilityEffect>();
         private readonly List<DesktopSpear> spears = new List<DesktopSpear>();
         private readonly IList<AbilityEffect> effectView;
         private readonly IList<DesktopSpear> spearView;
-        private readonly Dictionary<DesktopSpear, string> spearAirLoops =
-            new Dictionary<DesktopSpear, string>();
         private readonly Random spearImpactRandom = new Random(0x5BEA7);
         private ISlugcatAbilityController abilityController;
 
@@ -238,7 +234,6 @@ namespace RainWorldDesktopPet.Creature
                                 : DesktopPetImpactResult.None);
                         impact.ImpactStunDeadlineTick = impactStunDeadlineTick;
                     }
-                    EmitImpactSound(impact);
                 }
                 Movement.TerrainImpact(impact);
                 abilityController.TerrainImpact(impact);
@@ -450,8 +445,6 @@ namespace RainWorldDesktopPet.Creature
             if (abilityController != null) abilityController.Reset();
             effects.Clear();
             spears.Clear();
-            spearAirLoops.Clear();
-            soundEvents.Clear();
             SelectedSlugcat = profile;
             BodyChunks[0].SetMass(SimulationConstants.MainChunkMass * profile.Movement.BodyWeightFactor);
             BodyChunks[1].SetMass(SimulationConstants.HipsChunkMass * profile.Movement.BodyWeightFactor);
@@ -461,32 +454,15 @@ namespace RainWorldDesktopPet.Creature
         public void EmitSound(string id, Vec2 position, double volume, double pitch,
             int cooldownTicks)
         {
-            soundEvents.Add(new SoundEvent(id, position, volume, pitch, cooldownTicks));
         }
 
         public void StartSoundLoop(string id, string loopKey, Vec2 position,
             double volume, double pitch)
         {
-            soundEvents.Add(SoundEvent.StartLoop(id, loopKey, position, volume, pitch));
         }
 
         public void StopSoundLoop(string id, string loopKey, Vec2 position)
         {
-            soundEvents.Add(SoundEvent.EndLoop(id, loopKey, position));
-        }
-
-        public SoundEvent[] DrainSoundEvents()
-        {
-            SoundEvent[] result = soundEvents.ToArray();
-            soundEvents.Clear();
-            return result;
-        }
-
-        public void DrainSoundEvents(ICollection<SoundEvent> target)
-        {
-            if (target == null) throw new ArgumentNullException("target");
-            for (int i = 0; i < soundEvents.Count; i++) target.Add(soundEvents[i]);
-            soundEvents.Clear();
         }
 
         public void AddEffect(AbilityEffect effect)
@@ -508,13 +484,8 @@ namespace RainWorldDesktopPet.Creature
             }
             for (int i = 0; i < spears.Count; i++)
             {
-                string previousLoop;
-                spearAirLoops.TryGetValue(spears[i], out previousLoop);
                 if (spears[i].Step(world))
                 {
-                    string sound = spears[i].LastImpactSound;
-                    if (!string.IsNullOrEmpty(sound))
-                        EmitSound(sound, spears[i].Chunk.Position, 1.0, 1.0, 0);
                     for (int spark = 0; spark < spears[i].ImpactSparkCount; spark++)
                     {
                         Vec2 angle = RandomUnit(spearImpactRandom);
@@ -526,22 +497,6 @@ namespace RainWorldDesktopPet.Creature
                             spearImpactRandom));
                     }
                 }
-                string currentLoop = spears[i].AirLoopSound;
-                if (!string.Equals(previousLoop, currentLoop,
-                    StringComparison.Ordinal))
-                {
-                    if (!string.IsNullOrEmpty(previousLoop))
-                        soundEvents.Add(SoundEvent.EndLoop(previousLoop,
-                            spears[i].AudioLoopKey, spears[i].Chunk.Position));
-                    if (!string.IsNullOrEmpty(currentLoop))
-                        soundEvents.Add(SoundEvent.StartLoop(currentLoop,
-                            spears[i].AudioLoopKey, spears[i].Chunk.Position,
-                            1.0, 1.0));
-                    if (string.IsNullOrEmpty(currentLoop))
-                        spearAirLoops.Remove(spears[i]);
-                    else
-                        spearAirLoops[spears[i]] = currentLoop;
-                }
             }
         }
 
@@ -551,28 +506,5 @@ namespace RainWorldDesktopPet.Creature
             return new Vec2(Math.Cos(angle), Math.Sin(angle));
         }
 
-        private void EmitImpactSound(TerrainImpactData impact)
-        {
-            string id;
-            double volume;
-            if (impact.ImpactSpeed > 25.0)
-            {
-                id = SelectedSlugcat.Audio.ImpactHard;
-                volume = 1.0;
-            }
-            else if (impact.ImpactSpeed > 12.0)
-            {
-                id = SelectedSlugcat.Audio.ImpactMedium;
-                volume = 0.75;
-            }
-            else
-            {
-                id = SelectedSlugcat.Audio.ImpactLight;
-                volume = 0.45;
-            }
-            int chunkIndex = MathUtil.Clamp(impact.BodyChunkIndex, 0, BodyChunks.Length - 1);
-            EmitSound(id, BodyChunks[chunkIndex].Position, volume,
-                MathUtil.Lerp(0.5, 2.0, MathUtil.InverseLerp(0.0, 60.0, impact.ImpactSpeed)), 3);
-        }
     }
 }

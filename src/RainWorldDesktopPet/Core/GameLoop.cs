@@ -8,7 +8,6 @@ using RainWorldDesktopPet.Desktop;
 using RainWorldDesktopPet.Graphics;
 using RainWorldDesktopPet.Physics;
 using RainWorldDesktopPet.RainWorld;
-using RainWorldDesktopPet.Audio;
 using RainWorldDesktopPet.Workshop;
 
 namespace RainWorldDesktopPet.Core
@@ -40,10 +39,6 @@ namespace RainWorldDesktopPet.Core
         private DmsSkinCatalog dmsSkins;
         private readonly Dictionary<string, string> dmsPartSelections =
             new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        private PushToMeowLibrary pushToMeow;
-        private NaturalMeowController meowController;
-        private readonly WorkshopAssetCache workshopAssetCache = new WorkshopAssetCache();
-        private readonly List<SoundEvent> pendingSounds = new List<SoundEvent>(16);
 
         public GameLoop(IntPtr overlayHandle, RainWorldInstallation installation,
             SlugcatId selectedSlugcat)
@@ -97,8 +92,6 @@ namespace RainWorldDesktopPet.Core
                 AssetStatus += " Selected Slugcat uses procedural fallback for missing " + missing + ".";
             }
             Graphics = new SlugcatGraphics(Slugcat, requested, atlas);
-            Audio = new RainWorldAudioEngine(installation);
-            AssetStatus += " Audio: " + Audio.Status + ".";
             baseAssetStatus = AssetStatus;
             mouse.Sample(SimulationConstants.LogicStepSeconds);
             string fireSmokeStatus;
@@ -122,7 +115,6 @@ namespace RainWorldDesktopPet.Core
         public readonly DesktopPetAI AI;
         public readonly SlugcatGraphics Graphics;
         public readonly SpriteRenderer Renderer;
-        public readonly RainWorldAudioEngine Audio;
         public readonly RainWorldInstallation Installation;
         public string AssetStatus { get; private set; }
         public bool DebugEnabled { get; set; }
@@ -136,11 +128,6 @@ namespace RainWorldDesktopPet.Core
         public SlugcatAppearance Appearance { get { return Slugcat.Appearance; } }
         public SlugcatSkin Skin { get { return Graphics.VisualProfile.Skin; } }
         public int OffscreenRecoveryCount { get; private set; }
-        public bool SoundEnabled
-        {
-            get { return Audio.Enabled; }
-            set { Audio.SetEnabled(value); }
-        }
 
         public bool TryGetAtlasSprite(string name, bool original, out AtlasSprite sprite)
         {
@@ -200,7 +187,6 @@ namespace RainWorldDesktopPet.Core
             return atlas != null && atlas.TryGet(element, out sprite);
         }
         public DmsSkinDefinition ActiveDmsSkin { get { return Renderer.ActiveDmsSkin; } }
-        public bool PushToMeowAvailable { get { return pushToMeow != null && pushToMeow.IsAvailable; } }
 
         public void RecordRenderFrame(double displayRefreshRate)
         {
@@ -215,13 +201,6 @@ namespace RainWorldDesktopPet.Core
 
         public void Advance(IntPtr overlayHandle)
         {
-            Advance(overlayHandle, 3);
-        }
-
-        public void Advance(IntPtr overlayHandle, int maximumSteps)
-        {
-            if (maximumSteps < 1 || maximumSteps > 3)
-                throw new ArgumentOutOfRangeException("maximumSteps");
             double now = clock.Elapsed.TotalSeconds;
             double elapsed = lastTime <= 0.0 ? SimulationConstants.LogicStepSeconds : now - lastTime;
             lastTime = now;
@@ -246,7 +225,7 @@ namespace RainWorldDesktopPet.Core
 
             fixedTimeStep.AddElapsed(elapsed);
             int steps = 0;
-            while (steps < maximumSteps && fixedTimeStep.ConsumeStep())
+            while (steps < 3 && fixedTimeStep.ConsumeStep())
             {
                 if (!Slugcat.State.Conscious || Slugcat.State.Dead ||
                     Slugcat.State.StunCounter > 0)
@@ -263,10 +242,6 @@ namespace RainWorldDesktopPet.Core
                     : AI.Step(Slugcat, World, mouse, mouseAttention);
                 Slugcat.Step(input, World, mouse.Position, mouse.Velocity);
                 RecoverFromDesktopEscape();
-                pendingSounds.Clear();
-                Slugcat.DrainSoundEvents(pendingSounds);
-                for (int soundIndex = 0; soundIndex < pendingSounds.Count; soundIndex++)
-                    Audio.Play(pendingSounds[soundIndex], Slugcat.Center, simulationTick, 500.0);
                 if (!Slugcat.State.Conscious || Slugcat.State.Dead ||
                     Slugcat.State.StunCounter > 0)
                     mouseAttention.Suppress(now, mouse.Position, Graphics.Head.Position);
@@ -276,20 +251,12 @@ namespace RainWorldDesktopPet.Core
                     AI.MouseAttentionActive && Slugcat.State.Conscious &&
                         !Slugcat.State.Dead && Slugcat.State.StunCounter < 1,
                     World);
-                UtilityContext meowContext = AI.LastContext;
-                meowController.Step(now, CurrentSlugcatId(), AI.Behavior,
-                    Slugcat.State.Stillness,
-                    meowContext == null ? double.MaxValue : meowContext.MouseDistance,
-                    mouseAttention.IsActive, Slugcat.IsGrabbed,
-                    Slugcat.State.Conscious && !Slugcat.State.Dead && Slugcat.State.StunCounter < 1);
                 simulationTick++;
                 steps++;
             }
             // MainLoopProcess.RawUpdate zeroes myTimeStacker after the third
             // catch-up Update, preventing a stalled desktop from spiralling.
             if (steps == 3) fixedTimeStep.Reset();
-            else fixedTimeStep.ClampAccumulator(
-                SimulationConstants.LogicStepSeconds * 2.0);
             simulationStepsLastFrame = steps;
         }
 
@@ -304,9 +271,6 @@ namespace RainWorldDesktopPet.Core
         {
             SlugcatPose pose = Graphics.BuildPose(Interpolation, AI.Attention,
                 simulationTick, DebugEnabled);
-            if (DebugEnabled)
-                pose.AudioProfileDebug += " | " + Audio.Status + " | last=" + Audio.LastEvent;
-            meowController.ApplyPose(pose, clock.Elapsed.TotalSeconds);
             pose.LogicTicksPerSecond = SimulationConstants.LogicTicksPerSecond;
             pose.LogicStepSeconds = fixedTimeStep.StepSeconds;
             pose.AccumulatorSeconds = fixedTimeStep.AccumulatorSeconds;
@@ -437,7 +401,6 @@ namespace RainWorldDesktopPet.Core
             // No frame can observe mixed physics/graphics: switch the model,
             // clear incompatible ability state, then rebuild graphics before
             // the next fixed update or render.
-            Audio.StopAllLoops();
             Slugcat.SetSelectedSlugcat(id);
             Graphics.SetGraphicsProfile(next.Graphics, atlas);
         }
@@ -568,14 +531,8 @@ namespace RainWorldDesktopPet.Core
         private void ReloadWorkshopIntegrations(string selectedDmsId)
         {
             Renderer.ClearDmsParts();
-            if (meowController != null) meowController.Dispose();
             if (dmsSkins != null) dmsSkins.Dispose();
             dmsSkins = new DmsSkinCatalog(workshopCatalog, workshopLog);
-            workshopAssetCache.RemoveMissingEntries();
-            pushToMeow = new PushToMeowLibrary(workshopCatalog, workshopLog,
-                Environment.TickCount ^ workshopCatalog.Revision, workshopAssetCache);
-            meowController = new NaturalMeowController(pushToMeow, workshopLog,
-                Environment.TickCount ^ 0x514D454F);
             // Re-resolve each explicit part against the new catalog. Missing,
             // disabled, or now-incomplete sheets become Vanilla; no stale atlas
             // reference survives disposal of the old catalog.
@@ -593,9 +550,8 @@ namespace RainWorldDesktopPet.Core
                 string ignored;
                 SetDmsSkin(selectedDmsId, out ignored);
             }
-            AssetStatus = baseAssetStatus + " Workshop: " + workshopCatalog.Mods.Count + " mods, " +
-                DmsSkins.Count + " DMS sheets, Push To Meow " +
-                (PushToMeowAvailable ? "ready." : "unavailable.");
+            AssetStatus = baseAssetStatus + " Workshop: " + workshopCatalog.Mods.Count +
+                " mods, " + DmsSkins.Count + " DMS sheets.";
         }
 
         private string CurrentSlugcatId()
@@ -607,10 +563,8 @@ namespace RainWorldDesktopPet.Core
         {
             if (disposed) return;
             disposed = true;
-            if (meowController != null) meowController.Dispose();
             if (dmsSkins != null) dmsSkins.Dispose();
             if (workshopCatalog != null) workshopCatalog.Dispose();
-            Audio.Dispose();
             Renderer.Dispose();
         }
     }

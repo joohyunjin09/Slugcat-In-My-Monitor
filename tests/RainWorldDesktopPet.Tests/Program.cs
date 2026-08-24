@@ -14,7 +14,6 @@ using RainWorldDesktopPet.Desktop;
 using RainWorldDesktopPet.Physics;
 using RainWorldDesktopPet.RainWorld;
 using RainWorldDesktopPet.Graphics;
-using RainWorldDesktopPet.Audio;
 using RainWorldDesktopPet.Workshop;
 
 namespace RainWorldDesktopPet.Tests
@@ -44,8 +43,6 @@ namespace RainWorldDesktopPet.Tests
             }
 
             Run("FixedTimeStep uses 40 Hz independently of render rate", FixedStepUsesFortyHertz);
-            Run("Crowded Slugcats share a bounded catch-up budget",
-                CrowdedSlugcatsShareCatchUpBudget);
             Run("Desktop world transform scales original X/Y travel uniformly", DesktopWorldTransformScalesTravelUniformly);
             Run("Original horizontal acceleration and friction match input order", OriginalHorizontalInputParity);
             Run("Crawl reversal uses Player's 0.75 dynamicRunSpeed branch",
@@ -144,8 +141,6 @@ namespace RainWorldDesktopPet.Tests
             Run("PlayerGraphics arm reflection matches y-up signed distance",
                 ArmScaleReflectionMatchesFutileCoordinates);
             Run("Skin face and head families follow PlayerGraphics branches", SkinFaceFamiliesMatchPlayerGraphics);
-            Run("Push To Meow lifts and closes faces while standing and crawling",
-                PushToMeowFaceAnimationUsesOriginalFaceStates);
             Run("Every visual profile remains valid through movement and stun states", AllVisualProfilesRemainStableAcrossStates);
             AbilityParityReplayTests.Register(Run);
 
@@ -258,49 +253,6 @@ namespace RainWorldDesktopPet.Tests
             WorkshopLog log = new WorkshopLog(logPath, false);
             using (WorkshopCatalog workshop = new WorkshopCatalog(installation, log))
             {
-                RainWorldMod pushMod = workshop.FindById("pushtomeow");
-                if (pushMod != null)
-                {
-                    PushToMeowLibrary push = new PushToMeowLibrary(workshop, log, 12345);
-                    True(push.IsAvailable == pushMod.IsActive,
-                        "Push To Meow playback availability must follow its Remix active state");
-                    string[] ids = { "White", "Yellow", "Red", "Gourmand", "Artificer",
-                        "Rivulet", "Spear", "Saint" };
-                    foreach (string id in ids)
-                    {
-                        MeowVoiceSet voice = push.GetVoice(id);
-                        True(voice != null && voice.ShortVariations.Count > 0 &&
-                            voice.LongVariations.Count > 0, id + " must have short and long variations");
-                        True(voice.ShortVariations.All(item => item.DurationSeconds > 0.0) &&
-                            voice.LongVariations.All(item => item.DurationSeconds > 0.0),
-                            id + " WAV durations must be decoded");
-                    }
-                    if (push.IsAvailable)
-                    {
-                        MeowSoundVariation variation = push.Choose("White", true);
-                        True(variation != null, "active Push To Meow has a Survivor clip");
-                        variation.PlaybackVolume = 0.01f;
-                        using (WorkshopAudioPlayer player = new WorkshopAudioPlayer(log))
-                        {
-                            Stopwatch enqueue = Stopwatch.StartNew();
-                            True(player.TryPlay(variation),
-                                "Push To Meow request enters its worker queue");
-                            enqueue.Stop();
-                            True(enqueue.ElapsedMilliseconds < 100,
-                                "Push To Meow file/device I/O stays off the caller thread");
-                            Stopwatch deadline = Stopwatch.StartNew();
-                            while (deadline.ElapsedMilliseconds < 3000 &&
-                                !player.LastEvent.StartsWith("playback started",
-                                    StringComparison.OrdinalIgnoreCase) &&
-                                !player.LastEvent.StartsWith("playback failed",
-                                    StringComparison.OrdinalIgnoreCase))
-                                System.Threading.Thread.Sleep(10);
-                            True(player.LastEvent.StartsWith("playback started",
-                                StringComparison.OrdinalIgnoreCase), player.LastEvent);
-                        }
-                    }
-                }
-
                 if (workshop.FindById("dressmyslugcat") != null)
                 {
                     using (DmsSkinCatalog dms = new DmsSkinCatalog(workshop, log))
@@ -376,14 +328,6 @@ namespace RainWorldDesktopPet.Tests
                         }
                     }
                 }
-
-                List<RainWorldMod> removedPush = workshop.Mods.Where(mod =>
-                    string.Equals(mod.Id, "pushtomeow", StringComparison.OrdinalIgnoreCase)).ToList();
-                foreach (RainWorldMod mod in removedPush) workshop.Mods.Remove(mod);
-                PushToMeowLibrary absentPush = new PushToMeowLibrary(workshop, log, 24680);
-                True(!absentPush.IsInstalled && !absentPush.IsAvailable,
-                    "missing Push To Meow must leave automatic meowing disabled");
-                foreach (RainWorldMod mod in removedPush) workshop.Mods.Add(mod);
 
                 List<RainWorldMod> removedDms = workshop.Mods.Where(mod =>
                     string.Equals(mod.Id, "dressmyslugcat", StringComparison.OrdinalIgnoreCase)).ToList();
@@ -2229,41 +2173,6 @@ namespace RainWorldDesktopPet.Tests
                 "Saint normal face uses the closed-eye FaceB family");
         }
 
-        private static void PushToMeowFaceAnimationUsesOriginalFaceStates()
-        {
-            SlugcatPose pose = new SlugcatPose();
-            pose.SelectedSlugcat = SlugcatId.White;
-            pose.CurrentSkin = SlugcatSkin.Default;
-            pose.Conscious = true;
-            pose.Animation = AnimationIndex.None;
-            pose.BodyMode = BodyModeIndex.Stand;
-            pose.Chest = new Vec2(100.0, 130.0);
-            pose.Hips = new Vec2(100.0, 150.0);
-            pose.Head = new Vec2(100.0, 100.0);
-            pose.Facing = 1;
-
-            OriginalFaceState standingNormal = SpriteRenderer.ResolveOriginalFaceState(pose);
-            pose.LookDirection = Vec2.Up;
-            pose.Blink = true;
-            OriginalFaceState standingMeow = SpriteRenderer.ResolveOriginalFaceState(pose);
-            True(standingMeow.FaceElement.StartsWith("FaceB", StringComparison.Ordinal),
-                "standing meow should select the closed-eye FaceB sprite");
-            Near(standingNormal.FacePosition.Y - 3.0, standingMeow.FacePosition.Y,
-                0.0001, "standing meow should raise the face by the original look offset");
-
-            pose.BodyMode = BodyModeIndex.Crawl;
-            pose.LookDirection = Vec2.Zero;
-            pose.Blink = false;
-            OriginalFaceState crawlNormal = SpriteRenderer.ResolveOriginalFaceState(pose);
-            pose.LookDirection = Vec2.Up;
-            pose.Blink = true;
-            OriginalFaceState crawlMeow = SpriteRenderer.ResolveOriginalFaceState(pose);
-            True(crawlNormal.FaceElement == "FaceA4", "normal crawl face sprite");
-            True(crawlMeow.FaceElement == "FaceB4", "crawl meow closed-eye face sprite");
-            Near(crawlNormal.FacePosition.Y - 3.0, crawlMeow.FacePosition.Y,
-                0.0001, "crawl meow should preserve the original upward face offset");
-        }
-
         private static void AllVisualProfilesRemainStableAcrossStates()
         {
             for (int profileIndex = 0; profileIndex < SlugcatVisualProfiles.All.Count; profileIndex++)
@@ -2441,40 +2350,6 @@ namespace RainWorldDesktopPet.Tests
             };
             IList<CompositionBatch> separated = planner.Plan(distant, 128);
             Equal(2, separated.Count, "distant surface batch count");
-        }
-
-        private static void CrowdedSlugcatsShareCatchUpBudget()
-        {
-            SimulationStepBudget budget = new SimulationStepBudget();
-            int[] limits = new int[8];
-
-            budget.Assign(1, limits);
-            Equal(3, limits[0], "single Slugcat keeps the original catch-up limit");
-
-            bool[] receivedCatchUp = new bool[6];
-            for (int frame = 0; frame < 6; frame++)
-            {
-                budget.Assign(6, limits);
-                int total = 0;
-                for (int i = 0; i < 6; i++)
-                {
-                    True(limits[i] >= 1 && limits[i] <= 2,
-                        "crowded per-Slugcat limit");
-                    total += limits[i];
-                    if (limits[i] > 1) receivedCatchUp[i] = true;
-                }
-                Equal(10, total, "crowded total catch-up budget");
-            }
-            for (int i = 0; i < receivedCatchUp.Length; i++)
-                True(receivedCatchUp[i], "rotating catch-up slot " + i);
-
-            FixedTimeStep fixedStep = new FixedTimeStep(
-                SimulationConstants.LogicStepSeconds);
-            fixedStep.AddElapsed(1.0);
-            fixedStep.ClampAccumulator(SimulationConstants.LogicStepSeconds * 2.0);
-            Near(SimulationConstants.LogicStepSeconds * 2.0,
-                fixedStep.AccumulatorSeconds, 0.0000001,
-                "bounded retained backlog");
         }
 
         private static void CompositionSurfacesOnlyGrow()
@@ -3022,16 +2897,6 @@ namespace RainWorldDesktopPet.Tests
                 "original lethal result becomes maximum impact stun");
             True(high.LastTerrainImpact.DesktopResult == DesktopPetImpactResult.MaximumStun,
                 "desktop impact result is MaximumStun");
-            SoundEvent[] highSounds = high.DrainSoundEvents();
-            bool emittedHardImpact = false;
-            for (int index = 0; index < highSounds.Length; index++)
-            {
-                emittedHardImpact |= highSounds[index].Id == "Slugcat_Terrain_Impact_Hard";
-                True(highSounds[index].Id != "UI_Slugcat_Stunned_Init",
-                    "lethal-speed safety impact does not queue the death-like stun-init audio");
-            }
-            True(emittedHardImpact,
-                "lethal-speed safety impact retains the normal hard collision audio");
         }
 
         private static void TerrainFirstContactUsesDirection()

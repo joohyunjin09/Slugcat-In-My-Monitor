@@ -481,13 +481,10 @@ namespace RainWorldDesktopPet.Graphics
                     slugcat.SelectedSlugcat.Movement.PoleClimbSpeedFactor,
                     slugcat.SelectedSlugcat.Movement.CorridorClimbSpeedFactor);
                 pose.AbilityDebug = slugcat.AbilityController.DebugState;
-                pose.AudioProfileDebug = slugcat.SelectedSlugcat.Audio.Jump + ", " +
-                    slugcat.SelectedSlugcat.Audio.FootstepA;
             }
             else
             {
-                pose.MovementProfileDebug = pose.AbilityDebug = pose.AudioProfileDebug =
-                    string.Empty;
+                pose.MovementProfileDebug = pose.AbilityDebug = string.Empty;
             }
             for (int i = 0; i < 2; i++)
             {

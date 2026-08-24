@@ -15,7 +15,6 @@ namespace RainWorldDesktopPet.UI
         private readonly ComboBox characterSelector;
         private readonly CheckBox debugCheck;
         private readonly CheckBox pauseCheck;
-        private readonly CheckBox soundCheck;
         private readonly Button retryButton;
         private readonly Label statusLabel;
         private bool updating;
@@ -138,15 +137,8 @@ namespace RainWorldDesktopPet.UI
             {
                 if (!updating) app.SettingsPaused = pauseCheck.Checked;
             };
-            soundCheck = new CheckBox { Text = "Sound", AutoSize = true,
-                Margin = new Padding(3, 9, 18, 3) };
-            soundCheck.CheckedChanged += delegate
-            {
-                if (!updating) app.SettingsSoundEnabled = soundCheck.Checked;
-            };
             retryButton = ActionButton("Retry Rendering", delegate { app.SettingsRetryRendering(); RefreshFromApp(); });
             behaviorLayout.Controls.Add(debugCheck);
-            behaviorLayout.Controls.Add(soundCheck);
             behaviorLayout.Controls.Add(pauseCheck);
             behaviorLayout.Controls.Add(retryButton);
             behaviorGroup.Controls.Add(behaviorLayout);
@@ -197,7 +189,6 @@ namespace RainWorldDesktopPet.UI
                 removeButton.Enabled = app.SettingsCanRemoveSlugcat;
                 retryButton.Enabled = app.SettingsCanRetryRendering;
                 debugCheck.Checked = app.SettingsDebugEnabled;
-                soundCheck.Checked = app.SettingsSoundEnabled;
                 pauseCheck.Checked = app.SettingsPaused;
 
                 for (int i = 0; i < characterSelector.Items.Count; i++)

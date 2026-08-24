@@ -32,7 +32,6 @@ namespace RainWorldDesktopPet.UI
         private readonly ToolStripMenuItem debugItem;
         private readonly ToolStripMenuItem retryRenderItem;
         private readonly ToolStripMenuItem pauseItem;
-        private readonly ToolStripMenuItem soundItem;
         private readonly ToolStripMenuItem activeSlugcatsMenu;
         private readonly ToolStripMenuItem spawnItem;
         private readonly ToolStripMenuItem removeItem;
@@ -43,16 +42,12 @@ namespace RainWorldDesktopPet.UI
             new List<Rectangle>(MaximumSlugcats);
         private readonly CompositionBatchPlanner compositionBatchPlanner =
             new CompositionBatchPlanner();
-        private readonly SimulationStepBudget simulationStepBudget =
-            new SimulationStepBudget();
-        private readonly int[] simulationStepLimits = new int[MaximumSlugcats];
         private readonly Dictionary<string, double> displayRefreshRates =
             new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
         private readonly DesktopCollisionWorld collisionWorld =
             new DesktopCollisionWorld(new WindowEnumerator());
         private readonly Stopwatch surfaceRefreshClock = Stopwatch.StartNew();
         private DirectCompositionHost compositionHost;
-        private readonly AppSettings appSettings;
         private readonly string startDmsSkinId;
         private GameLoop gameLoop;
         private GameLoop grabbedGameLoop;
@@ -78,7 +73,6 @@ namespace RainWorldDesktopPet.UI
             this.installation = installation;
             this.startSlugcat = startSlugcat;
             this.startDmsSkinId = startDmsSkinId;
-            appSettings = AppSettings.Load();
             FormBorderStyle = FormBorderStyle.None;
             ShowInTaskbar = false;
             TopMost = true;
@@ -116,20 +110,6 @@ namespace RainWorldDesktopPet.UI
                     gameLoops[i].Paused = pauseItem.Checked;
                 RefreshSettingsWindow();
             };
-            soundItem = new ToolStripMenuItem("Sound (ON)");
-            soundItem.CheckOnClick = true;
-            soundItem.Checked = appSettings.SoundEnabled;
-            soundItem.Text = soundItem.Checked ? "Sound (ON)" : "Sound (OFF)";
-            soundItem.CheckedChanged += delegate
-            {
-                appSettings.SoundEnabled = soundItem.Checked;
-                soundItem.Text = soundItem.Checked ? "Sound (ON)" : "Sound (OFF)";
-                for (int i = 0; i < gameLoops.Count; i++)
-                    gameLoops[i].SoundEnabled = soundItem.Checked;
-                try { appSettings.Save(); }
-                catch (Exception exception) { Program.LogException(exception); }
-                RefreshSettingsWindow();
-            };
             retryRenderItem = new ToolStripMenuItem("Retry Rendering");
             retryRenderItem.Enabled = false;
             retryRenderItem.Click += RetryRendering;
@@ -163,7 +143,6 @@ namespace RainWorldDesktopPet.UI
             menu.Items.Add(slugcatMenu);
             menu.Items.Add(skinEditorItem);
             menu.Items.Add(debugItem);
-            menu.Items.Add(soundItem);
             menu.Items.Add(pauseItem);
             menu.Items.Add(refreshWorkshopItem);
             menu.Items.Add(retryRenderItem);
@@ -253,10 +232,9 @@ namespace RainWorldDesktopPet.UI
             {
                 PollDragInput();
                 RefreshCollisionWorld();
-                simulationStepBudget.Assign(gameLoops.Count, simulationStepLimits);
                 for (int i = 0; i < gameLoops.Count; i++)
                 {
-                    gameLoops[i].Advance(Handle, simulationStepLimits[i]);
+                    gameLoops[i].Advance(Handle);
                     poseBuffer[i] = gameLoops[i].BuildPose();
                 }
                 UpdateRenderCadence(poseBuffer, gameLoops.Count);
@@ -484,7 +462,6 @@ namespace RainWorldDesktopPet.UI
                 gameLoops.Count, collisionWorld);
             added.DebugEnabled = debugItem.Checked;
             added.Paused = pauseItem.Checked;
-            added.SoundEnabled = soundItem.Checked;
             gameLoops.Add(added);
             SelectSlugcat(added);
         }
@@ -688,11 +665,6 @@ namespace RainWorldDesktopPet.UI
             get { return pauseItem.Checked; }
             set { pauseItem.Checked = value; }
         }
-        internal bool SettingsSoundEnabled
-        {
-            get { return soundItem.Checked; }
-            set { soundItem.Checked = value; }
-        }
         internal SlugcatId SettingsSlugcatId
         { get { return gameLoop == null ? startSlugcat : gameLoop.SelectedSlugcat.Id; } }
         internal void SettingsSelectSlugcat(int index)
@@ -717,8 +689,7 @@ namespace RainWorldDesktopPet.UI
             RefreshAllWorkshopIntegrations();
             return gameLoop == null
                 ? "No Slugcat is selected."
-                : gameLoop.DmsSkins.Count + " Dress My Slugcat spritesheets found; Push To Meow " +
-                  (gameLoop.PushToMeowAvailable ? "ready." : "unavailable.");
+                : gameLoop.DmsSkins.Count + " Dress My Slugcat spritesheets found.";
         }
 
         internal void SettingsOpenAppearanceEditor()

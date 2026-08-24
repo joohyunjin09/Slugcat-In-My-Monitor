@@ -330,12 +330,9 @@ namespace RainWorldDesktopPet.Graphics
                 builder.AppendFormat("slugcat {0} originalID={1} profile={2} sprites base={3} extra={4}\n",
                     pose.SelectedSlugcat, pose.OriginalSlugcatId, pose.VisualProfileName,
                     pose.BaseSpriteCount, pose.ExtraSpriteCount);
-                builder.AppendFormat("movement {0}\nability {1}\naudio {2}\n",
-                    pose.MovementProfileDebug, pose.AbilityDebug, pose.AudioProfileDebug);
-                builder.AppendFormat("DMS parts {0} | meow={1} {2} {3:0.000}/{4:0.000}s\n",
-                    dmsParts.Count, pose.IsMeowing,
-                    pose.MeowAsset ?? "-", pose.MeowProgress * pose.MeowDurationSeconds,
-                    pose.MeowDurationSeconds);
+                builder.AppendFormat("movement {0}\nability {1}\n",
+                    pose.MovementProfileDebug, pose.AbilityDebug);
+                builder.AppendFormat("DMS parts {0}\n", dmsParts.Count);
                 builder.AppendFormat("face {0} tail={1} extensions={2}\n",
                     pose.SelectedFaceElement, pose.TailProfileName, pose.GraphicsExtensions);
                 for (int i = 0; i < pose.ExtraParts.Length; i++)
