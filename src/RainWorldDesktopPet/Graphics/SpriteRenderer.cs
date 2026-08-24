@@ -5,6 +5,7 @@ using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Threading.Tasks;
 using RainWorldDesktopPet.AI;
 using RainWorldDesktopPet.Core;
 using RainWorldDesktopPet.Creature;
@@ -58,6 +59,8 @@ namespace RainWorldDesktopPet.Graphics
         private readonly FireSmokeShaderAssets fireSmokeAssets;
         private readonly Bitmap fireSmokeShaderRaster;
         private readonly byte[] fireSmokePixels;
+        private readonly double[] fireSmokeDist;
+        private readonly double[] fireSmokeUvNoise;
         private readonly Bitmap flatLightShaderMask;
         private readonly Bitmap lightSourceShaderMask;
         private readonly Bitmap shockWaveShaderMask;
@@ -114,6 +117,11 @@ namespace RainWorldDesktopPet.Graphics
                     FireSmokeShaderRasterSize, PixelFormat.Format32bppPArgb);
                 fireSmokePixels = new byte[FireSmokeShaderRasterSize *
                     FireSmokeShaderRasterSize * 4];
+                fireSmokeDist = new double[FireSmokeShaderRasterSize *
+                    FireSmokeShaderRasterSize];
+                fireSmokeUvNoise = new double[FireSmokeShaderRasterSize *
+                    FireSmokeShaderRasterSize];
+                InitializeFireSmokeStaticInputs();
             }
             flatLightShaderMask = CreateEffectShaderMask(EffectShaderMask.FlatLight);
             lightSourceShaderMask = CreateEffectShaderMask(EffectShaderMask.LightSource);
@@ -1612,11 +1620,12 @@ namespace RainWorldDesktopPet.Graphics
             // desktop runtime has no RainCycle/room weather writer, so keep
             // that original default instead of inventing a time animation.
             const double rain = 0.5;
-            int index = 0;
-            for (int y = 0; y < FireSmokeShaderRasterSize; y++)
+            Array.Clear(fireSmokePixels, 0, fireSmokePixels.Length);
+            Parallel.For(0, FireSmokeShaderRasterSize, delegate(int y)
             {
                 double v = (y + 0.5) / FireSmokeShaderRasterSize;
                 double localY = (v - 0.5) * size;
+                int index = y * FireSmokeShaderRasterSize * 4;
                 for (int x = 0; x < FireSmokeShaderRasterSize; x++)
                 {
                     double u = (x + 0.5) / FireSmokeShaderRasterSize;
@@ -1628,17 +1637,15 @@ namespace RainWorldDesktopPet.Graphics
                     double textX = Math.Floor(screenX) / effectScreenWidth;
                     double textY = Math.Floor(screenY - rain * 153.2) /
                         effectScreenHeight + 0.04;
-                    double dx = u - 0.5;
-                    double dy = v - 0.5;
-                    double dist = MathUtil.Clamp01(1.0 - Math.Sqrt(dx * dx + dy * dy) * 2.0);
+                    int sampleIndex = y * FireSmokeShaderRasterSize + x;
+                    double dist = fireSmokeDist[sampleIndex];
                     double h = (Math.Sin((1.77 * rain + fireSmokeAssets.SampleNoise(
                         textX * 5.2, rain * 0.1 + textY * 2.6) * 3.0) *
                         Math.PI * 2.0) * 0.5) + 0.5;
                     h *= (Math.Sin((3.5 * rain + fireSmokeAssets.SampleNoise(
                         textX * 12.2, rain * 0.25 + textY * 6.6) * 3.0) *
                         Math.PI * 2.0) * 0.5) + 0.5;
-                    h *= 0.5 + 0.5 * Math.Sin((fireSmokeAssets.SampleNoise(u, v) +
-                        rain) * Math.PI * 6.0);
+                    h *= fireSmokeUvNoise[sampleIndex];
                     double inside = 0.3 + 0.5 * vertexAlpha;
                     h = h * dist + ((h + (1.0 - h) * inside) - h * dist) * dist;
                     h -= fireSmokeAssets.SampleNoise2(textX * 15.2,
@@ -1650,22 +1657,39 @@ namespace RainWorldDesktopPet.Graphics
                         fireSmokePixels[index + 2] = color.R;
                         fireSmokePixels[index + 3] = 255;
                     }
-                    else
-                    {
-                        fireSmokePixels[index] = 0;
-                        fireSmokePixels[index + 1] = 0;
-                        fireSmokePixels[index + 2] = 0;
-                        fireSmokePixels[index + 3] = 0;
-                    }
                     index += 4;
                 }
-            }
+            });
             BitmapData data = fireSmokeShaderRaster.LockBits(new Rectangle(0, 0,
                 fireSmokeShaderRaster.Width, fireSmokeShaderRaster.Height),
                 ImageLockMode.WriteOnly, PixelFormat.Format32bppPArgb);
             try { Marshal.Copy(fireSmokePixels, 0, data.Scan0, fireSmokePixels.Length); }
             finally { fireSmokeShaderRaster.UnlockBits(data); }
             DrawEffectSprite(graphics, fireSmokeShaderRaster, center, rotation, size, null);
+        }
+
+        private void InitializeFireSmokeStaticInputs()
+        {
+            // These two expressions depend only on the sprite UVs and the
+            // original RoomCamera default (_RAIN = .5). Cache them once; the
+            // remaining two NoiseTex samples still run for every screen-space
+            // fragment exactly as the original shader does.
+            const double rain = 0.5;
+            for (int y = 0; y < FireSmokeShaderRasterSize; y++)
+            {
+                double v = (y + 0.5) / FireSmokeShaderRasterSize;
+                for (int x = 0; x < FireSmokeShaderRasterSize; x++)
+                {
+                    double u = (x + 0.5) / FireSmokeShaderRasterSize;
+                    int index = y * FireSmokeShaderRasterSize + x;
+                    double dx = u - 0.5;
+                    double dy = v - 0.5;
+                    fireSmokeDist[index] = MathUtil.Clamp01(1.0 -
+                        Math.Sqrt(dx * dx + dy * dy) * 2.0);
+                    fireSmokeUvNoise[index] = 0.5 + 0.5 * Math.Sin(
+                        (fireSmokeAssets.SampleNoise(u, v) + rain) * Math.PI * 6.0);
+                }
+            }
         }
 
         private void DrawEffectShaderSprite(System.Drawing.Graphics graphics,
