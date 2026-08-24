@@ -903,10 +903,6 @@ namespace RainWorldDesktopPet.Tests
                     True(audio.LastEvent == "suppressed death sound: " + ids[i],
                         ids[i] + " never enters audio playback");
                 }
-                audio.Play(new SoundEvent("Slugcat_Terrain_Impact_Hard", Vec2.Zero,
-                    1.0, 1.0, 0), Vec2.Zero, 10, 100.0);
-                True(audio.LastEvent == "suppressed high-impact sound: Slugcat_Terrain_Impact_Hard",
-                    "desktop high-speed impact cannot bypass the bassOnly safety gate");
             }
         }
 
@@ -918,8 +914,6 @@ namespace RainWorldDesktopPet.Tests
                 Vec2.Zero, tick, 100.0);
             enqueue.Stop();
             if (audio.LastEvent.StartsWith("suppressed death sound:",
-                StringComparison.OrdinalIgnoreCase) ||
-                audio.LastEvent.StartsWith("suppressed high-impact sound:",
                 StringComparison.OrdinalIgnoreCase) ||
                 audio.LastEvent.StartsWith("silent sound:",
                 StringComparison.OrdinalIgnoreCase)) return null;

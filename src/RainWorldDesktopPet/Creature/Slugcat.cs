@@ -227,7 +227,7 @@ namespace RainWorldDesktopPet.Creature
                         impact.CalculatedStun = originalCalculatedStun;
                         impact.WasOriginallyLethal = originallyLethal;
                         impact.AppliedStun = ApplyNonLethalTerrainImpactStun(
-                            originalCalculatedStun);
+                            originalCalculatedStun, originallyLethal);
                         impact.SafetyOverrideApplied = originallyLethal ||
                             impact.AppliedStun < originalCalculatedStun;
                         impact.DesktopResult = impact.AppliedStun >=
@@ -249,7 +249,8 @@ namespace RainWorldDesktopPet.Creature
             }
         }
 
-        private int ApplyNonLethalTerrainImpactStun(int originalCalculatedStun)
+        private int ApplyNonLethalTerrainImpactStun(int originalCalculatedStun,
+            bool suppressLethalImpactStunSound)
         {
             if (!impactStunEpisodeActive)
             {
@@ -264,11 +265,16 @@ namespace RainWorldDesktopPet.Creature
                 : (int)remainingLong;
             int applied = Math.Min(originalCalculatedStun,
                 Math.Min(SimulationConstants.MaxImpactStunTicks, remaining));
-            if (applied > 0) Stun(applied);
+            if (applied > 0) Stun(applied, suppressLethalImpactStunSound);
             return applied;
         }
 
         public void Stun(int ticks)
+        {
+            Stun(ticks, false);
+        }
+
+        private void Stun(int ticks, bool suppressInitialSound)
         {
             bool beginsStun = ticks > 10 && State.StunCounter <= 10;
             if (ticks > State.StunCounter)
@@ -285,7 +291,10 @@ namespace RainWorldDesktopPet.Creature
                 State.Standing = false;
             }
             State.Conscious = !State.Dead && State.StunCounter < 10;
-            if (beginsStun) EmitSound("UI_Slugcat_Stunned_Init", Center, 1.0, 1.0, 10);
+            if (beginsStun && !suppressInitialSound)
+            {
+                EmitSound("UI_Slugcat_Stunned_Init", Center, 1.0, 1.0, 10);
+            }
         }
 
         public void Die()
@@ -544,15 +553,14 @@ namespace RainWorldDesktopPet.Creature
 
         private void EmitImpactSound(TerrainImpactData impact)
         {
-            // Desktop-pet impacts are intentionally non-lethal. The original
-            // hard-impact event maps to bassOnly (the low "dung" cue that is
-            // easily mistaken for the game-over/death sound), so never emit it
-            // for the high-speed collision path. Medium and light contacts
-            // retain their normal feedback.
-            if (impact.ImpactSpeed > 25.0) return;
             string id;
             double volume;
-            if (impact.ImpactSpeed > 12.0)
+            if (impact.ImpactSpeed > 25.0)
+            {
+                id = SelectedSlugcat.Audio.ImpactHard;
+                volume = 1.0;
+            }
+            else if (impact.ImpactSpeed > 12.0)
             {
                 id = SelectedSlugcat.Audio.ImpactMedium;
                 volume = 0.75;
