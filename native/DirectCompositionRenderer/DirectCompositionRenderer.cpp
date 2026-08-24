@@ -55,6 +55,10 @@ float Noise(float2 value) { float2 cell=floor(value),f=frac(value);
     float c=Hash(cell+float2(0,1)),d=Hash(cell+1);
     return lerp(lerp(a,b,f.x),lerp(c,d,f.x),f.y); }
 float4 PSMain(PixelInput input) : SV_TARGET { float2 p=input.uv*2-1;
+    if (input.seed<0) { float radial=saturate(1-length(p));
+        float shape=input.seed<-1.5 ? radial*radial : pow(radial,.65);
+        float alpha=shape*input.color.a;
+        return float4(input.color.rgb*alpha,alpha); }
     float dist=saturate(1-length(p)); float2 stableUv=input.uv;
     float h=Noise(stableUv*3.35+input.seed*float2(7,13));
     h*=Noise(stableUv*7.5+input.seed*float2(19,3));
@@ -227,10 +231,11 @@ float4 PSMain(PixelInput input) : SV_TARGET { float2 p=input.uv*2-1;
             std::vector<EffectVertex> vertices;
             if (SUCCEEDED(draw)) { vertices.reserve(count*12);
                 for (UINT i=0;i<count;++i) { const auto& e=effects[i];
+                    bool light=e.Seed<0;
                     AddQuad(vertices,e.CenterX,e.CenterY,e.BackSize,e.Rotation,e.BackRed,
-                        e.BackGreen,e.BackBlue,e.BackAlpha,e.Seed,width,height);
+                        e.BackGreen,e.BackBlue,e.BackAlpha,light?-1:e.Seed,width,height);
                     AddQuad(vertices,e.CenterX,e.CenterY,e.FrontSize,e.Rotation,e.FrontRed,
-                        e.FrontGreen,e.FrontBlue,e.FrontAlpha,e.Seed+.37f,width,height); }
+                        e.FrontGreen,e.FrontBlue,e.FrontAlpha,light?-2:e.Seed+.37f,width,height); }
                 D3D11_MAPPED_SUBRESOURCE mapped={};
                 draw=Context->Map(EffectVertexBuffer.Get(),0,D3D11_MAP_WRITE_DISCARD,0,&mapped);
                 if (SUCCEEDED(draw)) { std::memcpy(mapped.pData,vertices.data(),

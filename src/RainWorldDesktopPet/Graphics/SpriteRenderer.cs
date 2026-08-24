@@ -1409,18 +1409,9 @@ namespace RainWorldDesktopPet.Graphics
                 }
                 else if (effect.Kind == AbilityEffectKind.ExplosionLight)
                 {
-                    double rootLife = Math.Sqrt(Math.Max(0.0, life));
-                    double shaderScale = rootLife * effect.Radius / 8.0;
-                    double size = shaderScale * 16.0;
-                    DrawEffectShaderSprite(graphics, flatLightShaderMask, position,
-                        0.0, size, Color.FromArgb(MathUtil.Clamp((int)Math.Round(
-                            255.0 * life * effect.Intensity * 0.5), 0, 255), 0, 0, 0));
-                    int lightAlpha = MathUtil.Clamp((int)Math.Round(255.0 *
-                        rootLife * effect.Intensity), 0, 255);
-                    DrawEffectShaderSprite(graphics, lightSourceShaderMask, position,
-                        0.0, size, Color.FromArgb(lightAlpha, 255, 255, 255));
-                    DrawEffectShaderSprite(graphics, lightSourceShaderMask, position,
-                        0.0, size, Color.FromArgb(lightAlpha, 255, 255, 255));
+                    // The 160-unit flash is wider than the character surface.
+                    // Submit it with smoke to the independently-sized GPU layer.
+                    continue;
                 }
                 else if (effect.Kind == AbilityEffectKind.ExplosionSpikes)
                 {
@@ -1493,10 +1484,31 @@ namespace RainWorldDesktopPet.Graphics
             for (int i = 0; i < slugcat.AbilityEffects.Count && count < target.Length; i++)
             {
                 AbilityEffect effect = slugcat.AbilityEffects[i];
+                double life = MathUtil.Lerp(effect.LastLife, effect.Life, interpolation);
+                Vec2 position = Vec2.Lerp(effect.LastPosition, effect.Position,
+                    interpolation);
+                Vec2 center = position * renderScale - renderSpace.WorldOrigin;
+                if (effect.Kind == AbilityEffectKind.ExplosionLight)
+                {
+                    double rootLife = Math.Sqrt(Math.Max(0.0, life));
+                    float size = (float)(rootLife * effect.Radius * 2.0 * renderScale);
+                    float lightAlpha = (float)MathUtil.Clamp01(rootLife * effect.Intensity);
+                    DirectCompositionHost.GpuSmokeEffect light =
+                        new DirectCompositionHost.GpuSmokeEffect();
+                    light.CenterX = (float)center.X;
+                    light.CenterY = (float)center.Y;
+                    light.BackSize = size;
+                    light.FrontSize = size;
+                    light.BackAlpha = (float)MathUtil.Clamp01(life * effect.Intensity * 0.5);
+                    light.FrontRed = light.FrontGreen = light.FrontBlue = 1.0f;
+                    light.FrontAlpha = 1.0f - (1.0f - lightAlpha) * (1.0f - lightAlpha);
+                    light.Seed = -1.0f;
+                    target[count++] = light;
+                    continue;
+                }
                 if (effect.Kind != AbilityEffectKind.Smoke &&
                     effect.Kind != AbilityEffectKind.FlashingSmoke) continue;
 
-                double life = MathUtil.Lerp(effect.LastLife, effect.Life, interpolation);
                 double scale = life > 0.5
                     ? MathUtil.Lerp(1.0, 0.5, MathUtil.InverseLerp(0.5, 1.0, life))
                     : Math.Sin(Math.Max(0.0, life) * Math.PI);
@@ -1513,10 +1525,6 @@ namespace RainWorldDesktopPet.Graphics
                         0.2 + 0.8 * Math.Sqrt(Math.Max(0.0, life)));
                 Color front = effect.Kind == AbilityEffectKind.FlashingSmoke
                     ? Color.White : LerpColor(colorB, colorA, life);
-                Vec2 position = Vec2.Lerp(effect.LastPosition, effect.Position,
-                    interpolation);
-                Vec2 center = position * renderScale - renderSpace.WorldOrigin;
-
                 DirectCompositionHost.GpuSmokeEffect command =
                     new DirectCompositionHost.GpuSmokeEffect();
                 command.CenterX = (float)center.X;
@@ -1537,6 +1545,55 @@ namespace RainWorldDesktopPet.Graphics
                     (effect.Lifetime % 97) * 0.113);
                 target[count++] = command;
             }
+        }
+
+        public RectangleF CalculateGpuEffectBounds(Slugcat slugcat, SlugcatPose pose)
+        {
+            double interpolation = pose.TimeStacker;
+            double renderScale = pose.CharacterRenderScale;
+            bool hasBounds = false;
+            double left = 0.0, top = 0.0, right = 0.0, bottom = 0.0;
+            for (int i = 0; i < slugcat.AbilityEffects.Count; i++)
+            {
+                AbilityEffect effect = slugcat.AbilityEffects[i];
+                double life = MathUtil.Lerp(effect.LastLife, effect.Life, interpolation);
+                double size;
+                if (effect.Kind == AbilityEffectKind.ExplosionLight)
+                {
+                    size = Math.Sqrt(Math.Max(0.0, life)) * effect.Radius *
+                        2.0 * renderScale;
+                }
+                else if (effect.Kind == AbilityEffectKind.Smoke ||
+                    effect.Kind == AbilityEffectKind.FlashingSmoke)
+                {
+                    double scale = life > 0.5
+                        ? MathUtil.Lerp(1.0, 0.5,
+                            MathUtil.InverseLerp(0.5, 1.0, life))
+                        : Math.Sin(Math.Max(0.0, life) * Math.PI);
+                    double baseScale = 11.0 * effect.Radius * Math.Max(0.0, scale);
+                    size = baseScale * 1.1 * 16.0 * renderScale;
+                }
+                else continue;
+                if (size <= 0.0001) continue;
+                Vec2 position = Vec2.Lerp(effect.LastPosition, effect.Position,
+                    interpolation) * renderScale;
+                double half = size * 0.5 + 2.0;
+                if (!hasBounds)
+                {
+                    left = position.X - half; top = position.Y - half;
+                    right = position.X + half; bottom = position.Y + half;
+                    hasBounds = true;
+                }
+                else
+                {
+                    left = Math.Min(left, position.X - half);
+                    top = Math.Min(top, position.Y - half);
+                    right = Math.Max(right, position.X + half);
+                    bottom = Math.Max(bottom, position.Y + half);
+                }
+            }
+            return hasBounds ? RectangleF.FromLTRB((float)left, (float)top,
+                (float)right, (float)bottom) : RectangleF.Empty;
         }
 
         private void DrawSpears(System.Drawing.Graphics graphics, Slugcat slugcat,

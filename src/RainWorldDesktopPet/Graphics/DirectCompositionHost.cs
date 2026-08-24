@@ -8,7 +8,9 @@ namespace RainWorldDesktopPet.Graphics
     public sealed class DirectCompositionHost : IDisposable
     {
         private const int MaximumSurfaces = 8;
+        private const int EffectSurfaceQuantum = 128;
         private readonly CompositionSurface[] surfaces = new CompositionSurface[MaximumSurfaces];
+        private readonly Size[] effectSurfaceSizes = new Size[MaximumSurfaces];
         private IntPtr nativeRenderer;
         private Rectangle desktopBounds;
         private uint activeEffectMask;
@@ -83,6 +85,28 @@ namespace RainWorldDesktopPet.Graphics
             activeEffectMask = 0;
         }
 
+        public Rectangle PrepareEffectBounds(int slot, RectangleF requiredBounds)
+        {
+            if (slot < 0 || slot >= MaximumSurfaces)
+                throw new ArgumentOutOfRangeException("slot");
+            int requiredWidth = RoundEffectSize((int)Math.Ceiling(requiredBounds.Width) + 8);
+            int requiredHeight = RoundEffectSize((int)Math.Ceiling(requiredBounds.Height) + 8);
+            Size current = effectSurfaceSizes[slot];
+            Size reusable = SelectReusableSurfaceSize(current,
+                new Size(requiredWidth, requiredHeight));
+            effectSurfaceSizes[slot] = reusable;
+            int centerX = (int)Math.Round(requiredBounds.Left + requiredBounds.Width * 0.5f);
+            int centerY = (int)Math.Round(requiredBounds.Top + requiredBounds.Height * 0.5f);
+            return new Rectangle(centerX - reusable.Width / 2,
+                centerY - reusable.Height / 2, reusable.Width, reusable.Height);
+        }
+
+        private static int RoundEffectSize(int value)
+        {
+            return ((Math.Max(1, value) + EffectSurfaceQuantum - 1) /
+                EffectSurfaceQuantum) * EffectSurfaceQuantum;
+        }
+
         public void PresentEffects(int slot, GpuSmokeEffect[] effects, int count,
             Rectangle bounds)
         {
@@ -140,6 +164,7 @@ namespace RainWorldDesktopPet.Graphics
             {
                 if (surfaces[i] != null) surfaces[i].Dispose();
                 surfaces[i] = null;
+                effectSurfaceSizes[i] = Size.Empty;
             }
         }
 

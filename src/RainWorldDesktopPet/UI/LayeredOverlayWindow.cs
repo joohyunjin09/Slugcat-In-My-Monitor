@@ -260,7 +260,6 @@ namespace RainWorldDesktopPet.UI
                     graphics.Clear(Color.Transparent);
                     graphics.CompositingMode = System.Drawing.Drawing2D.CompositingMode.SourceOver;
                     RenderSpace renderSpace = new RenderSpace(surface.Bounds);
-                    int smokeEffectCount = 0;
                     for (int member = 0; member < batch.SurfaceIndices.Count; member++)
                     {
                         int loopIndex = batch.SurfaceIndices[member];
@@ -269,13 +268,37 @@ namespace RainWorldDesktopPet.UI
                         loop.Renderer.Render(graphics, poseBuffer[loopIndex], renderSpace, debug,
                             loop.World, loop.Slugcat, loop.AI, loop.AssetStatus,
                             loop.SelectedSlugcat);
-                        loop.Renderer.CollectGpuSmokeEffects(loop.Slugcat,
-                            poseBuffer[loopIndex], renderSpace, smokeEffectBuffer,
-                            ref smokeEffectCount);
                     }
                     compositionHost.Present(batchIndex);
-                    compositionHost.PresentEffects(batchIndex, smokeEffectBuffer,
-                        smokeEffectCount, surface.Bounds);
+
+                    RectangleF effectContentBounds = RectangleF.Empty;
+                    for (int member = 0; member < batch.SurfaceIndices.Count; member++)
+                    {
+                        int loopIndex = batch.SurfaceIndices[member];
+                        GameLoop loop = gameLoops[loopIndex];
+                        RectangleF memberBounds = loop.Renderer.CalculateGpuEffectBounds(
+                            loop.Slugcat, poseBuffer[loopIndex]);
+                        if (memberBounds.IsEmpty) continue;
+                        effectContentBounds = effectContentBounds.IsEmpty ? memberBounds :
+                            RectangleF.Union(effectContentBounds, memberBounds);
+                    }
+                    if (!effectContentBounds.IsEmpty)
+                    {
+                        Rectangle effectBounds = compositionHost.PrepareEffectBounds(
+                            batchIndex, effectContentBounds);
+                        RenderSpace effectRenderSpace = new RenderSpace(effectBounds);
+                        int smokeEffectCount = 0;
+                        for (int member = 0; member < batch.SurfaceIndices.Count; member++)
+                        {
+                            int loopIndex = batch.SurfaceIndices[member];
+                            GameLoop loop = gameLoops[loopIndex];
+                            loop.Renderer.CollectGpuSmokeEffects(loop.Slugcat,
+                                poseBuffer[loopIndex], effectRenderSpace,
+                                smokeEffectBuffer, ref smokeEffectCount);
+                        }
+                        compositionHost.PresentEffects(batchIndex, smokeEffectBuffer,
+                            smokeEffectCount, effectBounds);
+                    }
                 }
                 compositionHost.Commit(batches.Count);
                 for (int i = 0; i < gameLoops.Count; i++)

@@ -131,6 +131,8 @@ namespace RainWorldDesktopPet.Tests
                 GpuSmokeCommandAbiMatchesNativeRenderer);
             Run("Artificer smoke emits direct GPU effect commands",
                 ArtificerSmokeEmitsGpuEffectCommands);
+            Run("Artificer flash expands the independent GPU effect bounds",
+                ArtificerFlashExpandsGpuEffectBounds);
             Run("Unused Stand and Walk hands retract like SlugcatHand", UnusedHandsRetract);
             Run("Crawl hands use original velocity-relative targets", CrawlHandsUseOriginalTargets);
             Run("SlugcatHand connection constraint prevents arm separation", ArmConstraintPreventsSeparation);
@@ -2342,6 +2344,30 @@ namespace RainWorldDesktopPet.Tests
                 "back smoke quad should be larger than front smoke quad");
             True(commands[0].BackAlpha > commands[0].FrontAlpha,
                 "back smoke layer should retain the original stronger alpha");
+        }
+
+        private static void ArtificerFlashExpandsGpuEffectBounds()
+        {
+            Slugcat slugcat = new Slugcat(new Vec2(100.0, 80.0));
+            slugcat.AddEffect(AbilityEffect.CreateExplosionLight(
+                new Vec2(100.0, 80.0), 160.0, 1.0, 3));
+            SlugcatPose pose = new SlugcatPose();
+            pose.CharacterRenderScale = 2.2;
+            pose.TimeStacker = 1.0;
+            using (SpriteRenderer renderer = new SpriteRenderer(null))
+            {
+                RectangleF bounds = renderer.CalculateGpuEffectBounds(slugcat, pose);
+                True(bounds.Width > 700.0f && bounds.Height > 700.0f,
+                    "flash bounds should exceed the 384px character surface");
+                DirectCompositionHost.GpuSmokeEffect[] commands =
+                    new DirectCompositionHost.GpuSmokeEffect[2];
+                int count = 0;
+                renderer.CollectGpuSmokeEffects(slugcat, pose,
+                    new RenderSpace(Rectangle.Ceiling(bounds)), commands, ref count);
+                Equal(1, count, "flash GPU command count");
+                True(commands[0].Seed < 0.0f,
+                    "negative command seed selects the radial-light shader");
+            }
         }
 
         private static void TwoFortyHertzRenderCadence()
