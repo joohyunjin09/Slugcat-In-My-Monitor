@@ -8,6 +8,7 @@ using RainWorldDesktopPet.Desktop;
 using RainWorldDesktopPet.Graphics;
 using RainWorldDesktopPet.Physics;
 using RainWorldDesktopPet.RainWorld;
+using RainWorldDesktopPet.Workshop;
 
 namespace RainWorldDesktopPet.Core
 {
@@ -17,6 +18,7 @@ namespace RainWorldDesktopPet.Core
         private readonly FixedTimeStep fixedTimeStep = new FixedTimeStep(SimulationConstants.LogicStepSeconds);
         private readonly MouseTracker mouse = new MouseTracker();
         private readonly MouseAttentionState mouseAttention = new MouseAttentionState();
+        private readonly bool managesWorldRefresh;
         private double lastTime;
         private double surfaceRefreshAccumulator;
         private long simulationTick;
@@ -31,24 +33,32 @@ namespace RainWorldDesktopPet.Core
         private int offscreenTicks;
         private Vec2 lastVisibleCenter;
         private bool hasVisibleCenter;
+        private readonly string baseAssetStatus;
+        private readonly WorkshopLog workshopLog;
+        private WorkshopCatalog workshopCatalog;
+        private DmsSkinCatalog dmsSkins;
+        private readonly Dictionary<string, string> dmsPartSelections =
+            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
-        public GameLoop(IntPtr overlayHandle, RainWorldInstallation installation, SlugcatVariant variant)
-            : this(overlayHandle, installation, variant, SlugcatSkin.Default)
+        public GameLoop(IntPtr overlayHandle, RainWorldInstallation installation,
+            SlugcatId selectedSlugcat)
+            : this(overlayHandle, installation, selectedSlugcat, 0)
         {
         }
 
         public GameLoop(IntPtr overlayHandle, RainWorldInstallation installation,
-            SlugcatVariant variant, SlugcatSkin skin)
-            : this(overlayHandle, installation, variant, skin, 0)
+            SlugcatId selectedSlugcat, int spawnIndex)
+            : this(overlayHandle, installation, selectedSlugcat, spawnIndex, null)
         {
         }
 
-        public GameLoop(IntPtr overlayHandle, RainWorldInstallation installation,
-            SlugcatVariant variant, SlugcatSkin skin, int spawnIndex)
+        internal GameLoop(IntPtr overlayHandle, RainWorldInstallation installation,
+            SlugcatId selectedSlugcat, int spawnIndex, DesktopCollisionWorld sharedWorld)
         {
             Installation = installation;
-            World = new DesktopCollisionWorld(new WindowEnumerator());
-            World.Refresh(overlayHandle);
+            managesWorldRefresh = sharedWorld == null;
+            World = sharedWorld ?? new DesktopCollisionWorld(new WindowEnumerator());
+            if (managesWorldRefresh) World.Refresh(overlayHandle);
             Point cursor = System.Windows.Forms.Cursor.Position;
             MonitorInfo monitor = MonitorManager.FindNearest(cursor);
             double spawnMargin = DesktopWorldTransform.ToDesktopLength(70.0);
@@ -66,25 +76,34 @@ namespace RainWorldDesktopPet.Core
             Vec2 spawn = DesktopWorldTransform.ToSimulation(new Vec2(spawnX,
                 monitor.WorkArea.Bottom - DesktopWorldTransform.ToDesktopLength(
                     SimulationConstants.HipsChunkRadius + 2.0)));
-            Slugcat = new Slugcat(spawn, variant);
+            Slugcat = new Slugcat(spawn, selectedSlugcat);
             lastVisibleCenter = Slugcat.Center;
             hasVisibleCenter = true;
-            AI = new DesktopPetAI(Environment.TickCount);
+            AI = new DesktopPetAI(Environment.TickCount, spawnIndex);
             AI.Attention.SetTarget(AttentionKind.RandomPoint,
                 spawn + new Vec2(Slugcat.State.Facing * 60.0, -20.0));
             RainWorldAssetLoader assetLoader = new RainWorldAssetLoader(installation);
             atlas = assetLoader.TryLoadPlayerAtlas();
             AssetStatus = assetLoader.Status;
-            SlugcatVisualProfile requested = SlugcatVisualProfiles.Get(skin);
+            SlugcatGraphicsProfile requested = Slugcat.SelectedSlugcat.Graphics;
             string missing;
             if (!requested.IsAvailable(atlas, out missing))
             {
-                requested = SlugcatVisualProfiles.Default;
-                AssetStatus += " Requested skin is unavailable (missing " + missing + "); Default is active.";
+                AssetStatus += UiLocalization.Text(
+                    " 선택한 슬러그캣의 일부 자산이 없어 절차형 외형을 사용합니다: " + missing + ".",
+                    " Selected Slugcat uses procedural fallback for missing " + missing + ".");
             }
             Graphics = new SlugcatGraphics(Slugcat, requested, atlas);
+            baseAssetStatus = AssetStatus;
             mouse.Sample(SimulationConstants.LogicStepSeconds);
             Renderer = new SpriteRenderer(atlas);
+#if DEBUG
+            workshopLog = new WorkshopLog(true);
+#else
+            workshopLog = new WorkshopLog(false);
+#endif
+            workshopCatalog = new WorkshopCatalog(installation, workshopLog);
+            ReloadWorkshopIntegrations(null);
         }
 
         public readonly DesktopCollisionWorld World;
@@ -96,13 +115,14 @@ namespace RainWorldDesktopPet.Core
         public string AssetStatus { get; private set; }
         public bool DebugEnabled { get; set; }
         public bool Paused { get; set; }
-        public SlugcatAppearance Appearance { get { return Slugcat.Appearance; } }
-        public SlugcatSkin Skin { get { return Graphics.VisualProfile.Skin; } }
+        public SlugcatProfile SelectedSlugcat { get { return Slugcat.SelectedSlugcat; } }
         public double Interpolation { get { return fixedTimeStep.Alpha; } }
         public long SimulationTick { get { return simulationTick; } }
         public double RenderFramesPerSecond { get { return renderFramesPerSecond; } }
         public double MonitorRefreshRate { get { return monitorRefreshRate; } }
         public MouseAttentionState MouseAttention { get { return mouseAttention; } }
+        public SlugcatAppearance Appearance { get { return Slugcat.Appearance; } }
+        public SlugcatSkin Skin { get { return Graphics.VisualProfile.Skin; } }
         public int OffscreenRecoveryCount { get; private set; }
 
         public bool TryGetAtlasSprite(string name, bool original, out AtlasSprite sprite)
@@ -117,13 +137,15 @@ namespace RainWorldDesktopPet.Core
             reason = null;
             if (atlas == null)
             {
-                reason = "The original Rain World atlas is unavailable.";
+                reason = UiLocalization.Text("Rain World 원본 atlas를 사용할 수 없습니다.",
+                    "The original Rain World atlas is unavailable.");
                 return false;
             }
             try
             {
                 RainWorldAtlas replacement = RainWorldAtlasLoader.Load(imagePath, metadataPath);
                 atlas.SetPartOverride(part, replacement);
+                Renderer.InvalidateAtlasAvailability();
                 return true;
             }
             catch (Exception exception)
@@ -135,19 +157,33 @@ namespace RainWorldDesktopPet.Core
 
         public void ClearPartAtlas(string part)
         {
-            if (atlas != null) atlas.ClearPartOverride(part);
+            if (atlas != null)
+            {
+                atlas.ClearPartOverride(part);
+                Renderer.InvalidateAtlasAvailability();
+            }
         }
 
         public Color GetPartColor(string part) { return Graphics.GetPartColor(part); }
         public void SetPartColor(string part, Color color) { Graphics.SetPartColor(part, color); }
         public void ClearPartColors() { Graphics.ClearPartColors(); }
-
-        public void Dispose()
+        public WorkshopCatalog WorkshopCatalog { get { return workshopCatalog; } }
+        public IList<DmsSkinDefinition> DmsSkins
         {
-            if (disposed) return;
-            disposed = true;
-            Renderer.Dispose();
+            get { return dmsSkins == null ? new DmsSkinDefinition[0] : dmsSkins.Skins; }
         }
+
+        public bool TryGetDmsPartPreview(string part, out AtlasSprite sprite)
+        {
+            sprite = null;
+            string element = DmsSpriteGroups.PreviewElement(part);
+            if (string.IsNullOrEmpty(element)) return false;
+            DmsSkinDefinition skin = Renderer.GetDmsPart(part);
+            if (skin != null && skin.TryGetSprite(element, CurrentSlugcatId(),
+                DmsSpriteSide.None, out sprite)) return true;
+            return atlas != null && atlas.TryGet(element, out sprite);
+        }
+        public DmsSkinDefinition ActiveDmsSkin { get { return Renderer.ActiveDmsSkin; } }
 
         public void RecordRenderFrame(double displayRefreshRate)
         {
@@ -173,13 +209,15 @@ namespace RainWorldDesktopPet.Core
                 return;
             }
 
-            surfaceRefreshAccumulator += elapsed;
-            if (surfaceRefreshAccumulator >= SimulationConstants.WindowRefreshSeconds)
+            if (managesWorldRefresh)
             {
-                surfaceRefreshAccumulator %= SimulationConstants.WindowRefreshSeconds;
-                World.Refresh(overlayHandle);
-                Vec2 surfaceDelta = Slugcat.ApplyMovingSurfaceDelta(World);
-                Graphics.ApplyMovingSurfaceDelta(surfaceDelta);
+                if (World.TryApplyPendingRefresh()) ApplyMovingSurfaceDelta();
+                surfaceRefreshAccumulator += elapsed;
+                if (surfaceRefreshAccumulator >= SimulationConstants.WindowRefreshSeconds)
+                {
+                    surfaceRefreshAccumulator %= SimulationConstants.WindowRefreshSeconds;
+                    World.RequestRefresh(overlayHandle);
+                }
             }
 
             fixedTimeStep.AddElapsed(elapsed);
@@ -204,7 +242,8 @@ namespace RainWorldDesktopPet.Core
                 if (!Slugcat.State.Conscious || Slugcat.State.Dead ||
                     Slugcat.State.StunCounter > 0)
                     mouseAttention.Suppress(now, mouse.Position, Graphics.Head.Position);
-                parityDiagnostics.ObserveSurfaceState(Slugcat, World, input, simulationTick);
+                if (DebugEnabled)
+                    parityDiagnostics.ObserveSurfaceState(Slugcat, World, input, simulationTick);
                 Graphics.Step(AI.Attention, AI.OriginalAttentionTarget,
                     AI.MouseAttentionActive && Slugcat.State.Conscious &&
                         !Slugcat.State.Dead && Slugcat.State.StunCounter < 1,
@@ -218,9 +257,17 @@ namespace RainWorldDesktopPet.Core
             simulationStepsLastFrame = steps;
         }
 
+        public void ApplyMovingSurfaceDelta()
+        {
+            if (Paused) return;
+            Vec2 surfaceDelta = Slugcat.ApplyMovingSurfaceDelta(World);
+            Graphics.ApplyMovingSurfaceDelta(surfaceDelta);
+        }
+
         public SlugcatPose BuildPose()
         {
-            SlugcatPose pose = Graphics.BuildPose(Interpolation, AI.Attention, simulationTick);
+            SlugcatPose pose = Graphics.BuildPose(Interpolation, AI.Attention,
+                simulationTick, DebugEnabled);
             pose.LogicTicksPerSecond = SimulationConstants.LogicTicksPerSecond;
             pose.LogicStepSeconds = fixedTimeStep.StepSeconds;
             pose.AccumulatorSeconds = fixedTimeStep.AccumulatorSeconds;
@@ -277,7 +324,7 @@ namespace RainWorldDesktopPet.Core
                 pose.CurrentSurfaceRight = 0.0;
                 pose.CurrentSurfaceTop = 0.0;
             }
-            parityDiagnostics.Observe(pose);
+            if (DebugEnabled) parityDiagnostics.Observe(pose);
             return pose;
         }
 
@@ -320,12 +367,6 @@ namespace RainWorldDesktopPet.Core
                 offscreenTicks = 0;
                 return;
             }
-
-            // A throw through the top of a monitor is a temporary ceiling
-            // excursion, not a lost pet. Keep simulating the original upward
-            // momentum and gravity so the Slugcat naturally falls back into
-            // the same monitor. Horizontal and lower-screen escapes still use
-            // the normal timed/hard recovery below.
             if (DesktopRecovery.IsAboveMonitorCeiling(Slugcat.Center, monitors))
             {
                 offscreenTicks = 0;
@@ -351,16 +392,27 @@ namespace RainWorldDesktopPet.Core
             OffscreenRecoveryCount++;
         }
 
+        public void SetSelectedSlugcat(SlugcatId id)
+        {
+            SlugcatProfile next = SlugcatProfiles.Get(id);
+            // No frame can observe mixed physics/graphics: switch the model,
+            // clear incompatible ability state, then rebuild graphics before
+            // the next fixed update or render.
+            Slugcat.SetSelectedSlugcat(id);
+            Graphics.SetGraphicsProfile(next.Graphics, atlas);
+        }
+
         public void SetVariant(SlugcatVariant variant)
         {
-            Slugcat.SetVariant(variant);
+            SetSelectedSlugcat(SlugcatProfiles.Get(variant).Id);
         }
 
         public bool CanUseSkin(SlugcatSkin skin, out string reason)
         {
             string missing;
             bool available = SlugcatVisualProfiles.Get(skin).IsAvailable(atlas, out missing);
-            reason = available ? null : "Missing local Downpour asset: " + missing;
+            reason = available ? null : UiLocalization.Text(
+                "로컬 Downpour 자산이 없습니다: ", "Missing local Downpour asset: ") + missing;
             return available;
         }
 
@@ -368,8 +420,161 @@ namespace RainWorldDesktopPet.Core
         {
             string reason;
             if (!CanUseSkin(skin, out reason)) return false;
-            Graphics.SetVisualProfile(SlugcatVisualProfiles.Get(skin), atlas);
+            switch (skin)
+            {
+                case SlugcatSkin.Artificer: SetSelectedSlugcat(SlugcatId.Artificer); break;
+                case SlugcatSkin.Spearmaster: SetSelectedSlugcat(SlugcatId.SpearMaster); break;
+                case SlugcatSkin.Rivulet: SetSelectedSlugcat(SlugcatId.Rivulet); break;
+                case SlugcatSkin.Saint: SetSelectedSlugcat(SlugcatId.Saint); break;
+                default:
+                    switch (Slugcat.Appearance.Variant)
+                    {
+                        case SlugcatVariant.Monk: SetSelectedSlugcat(SlugcatId.Yellow); break;
+                        case SlugcatVariant.Hunter: SetSelectedSlugcat(SlugcatId.Red); break;
+                        case SlugcatVariant.Gourmand: SetSelectedSlugcat(SlugcatId.Gourmand); break;
+                        default: SetSelectedSlugcat(SlugcatId.White); break;
+                    }
+                    break;
+            }
             return true;
+        }
+
+        public string GetDmsPartSelection(string part)
+        {
+            string id;
+            return !string.IsNullOrWhiteSpace(part) &&
+                dmsPartSelections.TryGetValue(part, out id) ? id : null;
+        }
+
+        public bool SetDmsPart(string part, string id, out string reason)
+        {
+            if (string.IsNullOrWhiteSpace(part) ||
+                !DmsSpriteGroups.Required.ContainsKey(part))
+            {
+                reason = UiLocalization.Text("알 수 없는 DMS 파츠: ", "Unknown DMS part: ") +
+                    (part ?? "<null>");
+                return false;
+            }
+            if (string.IsNullOrWhiteSpace(id))
+            {
+                dmsPartSelections.Remove(part);
+                Renderer.SetDmsPart(part, null);
+                reason = null;
+                return true;
+            }
+            DmsSkinDefinition skin = dmsSkins == null ? null : dmsSkins.Find(id);
+            if (skin == null)
+            {
+                reason = UiLocalization.Text("DMS 스프라이트 시트가 더 이상 설치되어 있지 않습니다: ",
+                    "DMS spritesheet is no longer installed: ") + id;
+                return false;
+            }
+            if (!skin.IsModActive)
+            {
+                reason = UiLocalization.Text(
+                    "원본 모드가 설치되어 있지만 Rain World Remix에서 비활성화되어 있습니다: ",
+                    "The source mod is installed but disabled in Rain World Remix: ") + skin.ModName;
+                return false;
+            }
+            if (!skin.HasPart(part))
+            {
+                reason = UiLocalization.Text(skin.Name + "에 완전한 " + part + " 스프라이트 그룹이 없습니다.",
+                    skin.Name + " does not provide a complete " + part + " sprite group.");
+                return false;
+            }
+            dmsPartSelections[part] = skin.Id;
+            Renderer.SetDmsPart(part, skin);
+            reason = null;
+            return true;
+        }
+
+        public void ClearDmsParts()
+        {
+            dmsPartSelections.Clear();
+            Renderer.ClearDmsParts();
+        }
+
+        // Command-line compatibility: it atomically replaces every selection,
+        // rather than layering a whole skin over retained editor overrides.
+        public bool SetDmsSkin(string id, out string reason)
+        {
+            if (string.IsNullOrWhiteSpace(id))
+            {
+                ClearDmsParts();
+                reason = null;
+                return true;
+            }
+            DmsSkinDefinition skin = dmsSkins == null ? null : dmsSkins.Find(id);
+            if (skin == null)
+            {
+                reason = UiLocalization.Text("DMS 스프라이트 시트가 더 이상 설치되어 있지 않습니다: ",
+                    "DMS spritesheet is no longer installed: ") + id;
+                return false;
+            }
+            if (!skin.IsModActive)
+            {
+                reason = UiLocalization.Text(
+                    "원본 모드가 설치되어 있지만 Rain World Remix에서 비활성화되어 있습니다: ",
+                    "The source mod is installed but disabled in Rain World Remix: ") + skin.ModName;
+                return false;
+            }
+            ClearDmsParts();
+            foreach (string part in skin.AvailableParts)
+            {
+                dmsPartSelections[part] = skin.Id;
+                Renderer.SetDmsPart(part, skin);
+            }
+            reason = null;
+            return true;
+        }
+
+        public void RefreshWorkshopIntegration()
+        {
+            workshopCatalog.Refresh();
+            ReloadWorkshopIntegrations(null);
+        }
+
+        private void ReloadWorkshopIntegrations(string selectedDmsId)
+        {
+            Renderer.ClearDmsParts();
+            if (dmsSkins != null) dmsSkins.Dispose();
+            dmsSkins = new DmsSkinCatalog(workshopCatalog, workshopLog);
+            // Re-resolve each explicit part against the new catalog. Missing,
+            // disabled, or now-incomplete sheets become Vanilla; no stale atlas
+            // reference survives disposal of the old catalog.
+            string[] selectedParts = new string[dmsPartSelections.Count];
+            dmsPartSelections.Keys.CopyTo(selectedParts, 0);
+            for (int i = 0; i < selectedParts.Length; i++)
+            {
+                string selectedId = dmsPartSelections[selectedParts[i]];
+                string ignored;
+                if (!SetDmsPart(selectedParts[i], selectedId, out ignored))
+                    dmsPartSelections.Remove(selectedParts[i]);
+            }
+            if (!string.IsNullOrWhiteSpace(selectedDmsId))
+            {
+                string ignored;
+                SetDmsSkin(selectedDmsId, out ignored);
+            }
+            AssetStatus = baseAssetStatus + UiLocalization.Text(
+                " Workshop: 모드 " + workshopCatalog.Mods.Count + "개, DMS 시트 " +
+                    DmsSkins.Count + "개.",
+                " Workshop: " + workshopCatalog.Mods.Count + " mods, " +
+                    DmsSkins.Count + " DMS sheets.");
+        }
+
+        private string CurrentSlugcatId()
+        {
+            return Graphics.VisualProfile.ResolveOriginalSlugcatId(Slugcat.Appearance);
+        }
+
+        public void Dispose()
+        {
+            if (disposed) return;
+            disposed = true;
+            if (dmsSkins != null) dmsSkins.Dispose();
+            if (workshopCatalog != null) workshopCatalog.Dispose();
+            Renderer.Dispose();
         }
     }
 }

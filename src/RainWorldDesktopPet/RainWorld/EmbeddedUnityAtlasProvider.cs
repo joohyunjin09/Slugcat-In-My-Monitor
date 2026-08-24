@@ -1,6 +1,7 @@
 using System;
 using System.Drawing;
 using System.IO;
+using RainWorldDesktopPet.Core;
 
 namespace RainWorldDesktopPet.RainWorld
 {
@@ -20,7 +21,8 @@ namespace RainWorldDesktopPet.RainWorld
         public EmbeddedUnityAtlasProvider(RainWorldInstallation installation)
         {
             this.installation = installation;
-            Status = "Embedded Rain World atlas has not been inspected.";
+            Status = UiLocalization.Text("내장 Rain World atlas를 아직 확인하지 않았습니다.",
+                "Embedded Rain World atlas has not been inspected.");
         }
 
         public string Status { get; private set; }
@@ -33,16 +35,20 @@ namespace RainWorldDesktopPet.RainWorld
             }
             catch (Exception exception)
             {
-                Status = "Could not load embedded Rain World player atlas: " + exception.Message;
+                Status = UiLocalization.Text("내장 Rain World 플레이어 atlas를 불러오지 못했습니다: ",
+                    "Could not load embedded Rain World player atlas: ") + exception.Message;
                 return null;
             }
         }
 
         public RainWorldAtlasSet LoadPlayerAtlases()
         {
-            if (installation == null) throw new InvalidOperationException("Rain World installation is unavailable.");
+            if (installation == null) throw new InvalidOperationException(UiLocalization.Text(
+                "Rain World 설치본을 사용할 수 없습니다.", "Rain World installation is unavailable."));
             if (!File.Exists(installation.ResourcesAssetsPath))
-                throw new FileNotFoundException("Rain World resources.assets was not found.", installation.ResourcesAssetsPath);
+                throw new FileNotFoundException(UiLocalization.Text(
+                    "Rain World resources.assets를 찾지 못했습니다.",
+                    "Rain World resources.assets was not found."), installation.ResourcesAssetsPath);
 
             RainWorldAtlasSet set = new RainWorldAtlasSet();
             try
@@ -69,7 +75,9 @@ namespace RainWorldDesktopPet.RainWorld
                         }
                         else if (hasMscMetadata != hasMscTexture)
                         {
-                            mscWarning = "rainworldmsc has only one of its TextAsset/Texture2D objects.";
+                            mscWarning = UiLocalization.Text(
+                                "rainworldmsc의 TextAsset/Texture2D 중 하나만 존재합니다.",
+                                "rainworldmsc has only one of its TextAsset/Texture2D objects.");
                         }
                     }
                     catch (Exception exception)
@@ -79,10 +87,15 @@ namespace RainWorldDesktopPet.RainWorld
                         mscWarning = exception.Message;
                     }
 
-                    Status = "Loaded original embedded rainWorld atlas from " + installation.ResourcesAssetsPath +
-                        " (Unity " + reader.UnityVersion + ", base " + baseAtlas.Image.Width + "x" +
-                        baseAtlas.Image.Height + (mscLoaded ? ", MSC included" : ", MSC unavailable") + ").";
-                    if (!string.IsNullOrEmpty(mscWarning)) Status += " MSC warning: " + mscWarning;
+                    Status = UiLocalization.Text("원본 rainWorld atlas를 불러왔습니다: ",
+                            "Loaded original embedded rainWorld atlas from ") +
+                        installation.ResourcesAssetsPath + " (Unity " + reader.UnityVersion +
+                        UiLocalization.Text(", 기본 ", ", base ") + baseAtlas.Image.Width + "x" +
+                        baseAtlas.Image.Height + (mscLoaded
+                            ? UiLocalization.Text(", MSC 포함", ", MSC included")
+                            : UiLocalization.Text(", MSC 없음", ", MSC unavailable")) + ").";
+                    if (!string.IsNullOrEmpty(mscWarning))
+                        Status += UiLocalization.Text(" MSC 경고: ", " MSC warning: ") + mscWarning;
                     return set;
                 }
             }

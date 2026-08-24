@@ -88,6 +88,37 @@ namespace RainWorldDesktopPet.RainWorld
         internal readonly byte[] InlineData;
     }
 
+    public sealed class UnityAudioClipInfo
+    {
+        internal UnityAudioClipInfo(UnitySerializedObjectInfo serializedObject,
+            string name, int channels, int frequency, int bitsPerSample,
+            float lengthSeconds, string resourceSource, ulong resourceOffset,
+            ulong resourceSize, int compressionFormat)
+        {
+            SerializedObject = serializedObject;
+            Name = name;
+            Channels = channels;
+            Frequency = frequency;
+            BitsPerSample = bitsPerSample;
+            LengthSeconds = lengthSeconds;
+            ResourceSource = resourceSource;
+            ResourceOffset = resourceOffset;
+            ResourceSize = resourceSize;
+            CompressionFormat = compressionFormat;
+        }
+
+        public readonly UnitySerializedObjectInfo SerializedObject;
+        public readonly string Name;
+        public readonly int Channels;
+        public readonly int Frequency;
+        public readonly int BitsPerSample;
+        public readonly float LengthSeconds;
+        public readonly string ResourceSource;
+        public readonly ulong ResourceOffset;
+        public readonly ulong ResourceSize;
+        public readonly int CompressionFormat;
+    }
+
     /// <summary>
     /// Minimal reader for the Unity 2020 SerializedFile format used by Rain World.
     /// It deliberately reads only the object table, TextAsset and Texture2D. It does
@@ -97,13 +128,15 @@ namespace RainWorldDesktopPet.RainWorld
     {
         public const int Texture2DClassId = 28;
         public const int TextAssetClassId = 49;
+        public const int AudioClipClassId = 83;
 
         private const int SupportedSerializedVersion = 22;
         private const int MaximumCollectionCount = 10000000;
         private const int MaximumStringBytes = 16 * 1024 * 1024;
 
         private readonly string filePath;
-        private readonly FileStream stream;
+        private readonly Stream stream;
+        private readonly bool ownsStream;
         private readonly UnityEndianReader reader;
         private readonly object sync = new object();
         private readonly List<UnitySerializedObjectInfo> objects = new List<UnitySerializedObjectInfo>();
@@ -115,6 +148,25 @@ namespace RainWorldDesktopPet.RainWorld
             this.filePath = Path.GetFullPath(filePath);
             stream = new FileStream(this.filePath, FileMode.Open, FileAccess.Read,
                 FileShare.ReadWrite | FileShare.Delete, 64 * 1024, FileOptions.RandomAccess);
+            ownsStream = true;
+            reader = new UnityEndianReader(stream, false);
+            try
+            {
+                ReadMetadata();
+            }
+            catch
+            {
+                stream.Dispose();
+                throw;
+            }
+        }
+
+        public UnitySerializedFileReader(byte[] data, string displayName)
+        {
+            if (data == null) throw new ArgumentNullException("data");
+            filePath = displayName ?? "<memory>";
+            stream = new MemoryStream(data, false);
+            ownsStream = true;
             reader = new UnityEndianReader(stream, false);
             try
             {
@@ -189,6 +241,19 @@ namespace RainWorldDesktopPet.RainWorld
             return texture;
         }
 
+        public IList<UnityAudioClipInfo> ReadAudioClips()
+        {
+            lock (sync)
+            {
+                ThrowIfDisposed();
+                List<UnityAudioClipInfo> result = new List<UnityAudioClipInfo>();
+                for (int i = 0; i < objects.Count; i++)
+                    if (objects[i].ClassId == AudioClipClassId)
+                        result.Add(ReadAudioClip(objects[i]));
+                return result;
+            }
+        }
+
         public byte[] ReadTextureData(UnityTexture2DInfo texture)
         {
             if (texture == null) throw new ArgumentNullException("texture");
@@ -222,7 +287,7 @@ namespace RainWorldDesktopPet.RainWorld
         {
             if (disposed) return;
             disposed = true;
-            stream.Dispose();
+            if (ownsStream) stream.Dispose();
         }
 
         private void ReadMetadata()
@@ -262,10 +327,6 @@ namespace RainWorldDesktopPet.RainWorld
             UnityVersion = reader.ReadNullTerminatedUtf8(MaximumStringBytes);
             reader.ReadInt32(); // BuildTarget
             bool typeTreeEnabled = reader.ReadByte() != 0;
-            if (typeTreeEnabled)
-            {
-                throw new NotSupportedException("Type-tree-enabled Unity assets are not supported by the minimal Rain World reader.");
-            }
 
             int typeCount = ReadCollectionCount("serialized type", MaximumCollectionCount);
             List<int> classIds = new List<int>(typeCount);
@@ -276,6 +337,17 @@ namespace RainWorldDesktopPet.RainWorld
                 reader.ReadInt16(); // script type index
                 if (classId == 114) reader.ReadBytes(16); // MonoBehaviour script ID
                 reader.ReadBytes(16); // old type hash
+                if (typeTreeEnabled)
+                {
+                    int nodeCount = ReadCollectionCount("type tree node", MaximumCollectionCount);
+                    int stringBufferSize = ReadCollectionCount("type tree string byte", MaximumStringBytes);
+                    // SerializedFile v22 uses the 32-byte blob node layout:
+                    // hBBIIiiiQ, followed by its local string buffer.
+                    reader.ReadBytes(checked(nodeCount * 32));
+                    reader.ReadBytes(stringBufferSize);
+                    int dependencyCount = ReadCollectionCount("type dependency", MaximumCollectionCount);
+                    reader.ReadBytes(checked(dependencyCount * 4));
+                }
                 classIds.Add(classId);
             }
 
@@ -368,6 +440,34 @@ namespace RainWorldDesktopPet.RainWorld
             return new UnityTexture2DInfo(item, name, width, height, completeImageSize,
                 textureFormat, mipCount, filterMode, wrapU, wrapV, wrapW, inlineData,
                 streamOffset, streamSize, streamPath);
+        }
+
+        private UnityAudioClipInfo ReadAudioClip(UnitySerializedObjectInfo item)
+        {
+            reader.Position = item.ByteOffset;
+            long end = ObjectEnd(item);
+            string name = reader.ReadAlignedUtf8String(end, MaximumStringBytes);
+            reader.ReadInt32(); // m_LoadType
+            int channels = reader.ReadInt32();
+            int frequency = reader.ReadInt32();
+            int bitsPerSample = reader.ReadInt32();
+            float lengthSeconds = reader.ReadSingle();
+            reader.ReadByte(); // m_IsTrackerFormat
+            reader.Align(4);
+            reader.ReadInt32(); // m_SubsoundIndex
+            reader.ReadByte(); // m_PreloadAudioData
+            reader.ReadByte(); // m_LoadInBackground
+            reader.ReadByte(); // m_Legacy3D
+            reader.ReadByte(); // m_Ambisonic
+            string source = reader.ReadAlignedUtf8String(end, MaximumStringBytes);
+            ulong offset = reader.ReadUInt64();
+            ulong size = reader.ReadUInt64();
+            int compressionFormat = reader.ReadInt32();
+            if (channels <= 0 || channels > 8 || frequency <= 0 ||
+                bitsPerSample <= 0 || bitsPerSample > 32 || reader.Position > end)
+                throw new InvalidDataException("AudioClip has invalid fields: " + name);
+            return new UnityAudioClipInfo(item, name, channels, frequency,
+                bitsPerSample, lengthSeconds, source, offset, size, compressionFormat);
         }
 
         private string ResolveExternalResourcePath(string relativePath)

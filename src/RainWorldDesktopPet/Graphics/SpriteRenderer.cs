@@ -10,6 +10,7 @@ using RainWorldDesktopPet.Creature;
 using RainWorldDesktopPet.Desktop;
 using RainWorldDesktopPet.Physics;
 using RainWorldDesktopPet.RainWorld;
+using RainWorldDesktopPet.Workshop;
 
 namespace RainWorldDesktopPet.Graphics
 {
@@ -33,14 +34,27 @@ namespace RainWorldDesktopPet.Graphics
         private readonly RainWorldAtlasSet atlas;
         private readonly Font debugFont = new Font("Consolas", 9.0f, FontStyle.Regular, GraphicsUnit.Point);
         private readonly Dictionary<int, ImageAttributes> tintAttributes = new Dictionary<int, ImageAttributes>();
+        private readonly Dictionary<int, ImageAttributes> effectTintAttributes =
+            new Dictionary<int, ImageAttributes>();
         private readonly Dictionary<int, SolidBrush> bodyBrushes = new Dictionary<int, SolidBrush>();
+        private readonly Dictionary<SlugcatId, bool> profileAtlasAvailability =
+            new Dictionary<SlugcatId, bool>();
         private readonly PointF[] destinationPoints = new PointF[3];
+        private readonly PointF[] effectDestinationPoints = new PointF[3];
         private readonly Vec2[] tailMeshVertices = new Vec2[15];
         private readonly PointF[] tailMeshPoints = new PointF[15];
         private readonly PointF[] tailTrianglePoints = new PointF[3];
         private readonly PointF[] tailRasterDestinationPoints = new PointF[3];
+        private readonly PointF[] tailTextureCoordinates = new PointF[15];
+        private readonly PointF[] tailTextureSourceTriangle = new PointF[3];
+        private readonly PointF[] tailTextureDestinationTriangle = new PointF[3];
+        private readonly PointF[] abilityQuad = new PointF[4];
+        private readonly PointF[] abilityTriangle = new PointF[3];
         private readonly Bitmap tailRaster;
         private readonly System.Drawing.Graphics tailRasterGraphics;
+        private readonly Bitmap flatLightShaderMask;
+        private readonly Bitmap lightSourceShaderMask;
+        private readonly Bitmap shockWaveShaderMask;
         private const int TailRasterSize = 128;
         public const int OriginalTailMeshVertexCount = 15;
         public const int OriginalTailMeshTriangleCount = 13;
@@ -61,6 +75,8 @@ namespace RainWorldDesktopPet.Graphics
         };
         private SlugcatPose activePose;
         private RenderSpace activeRenderSpace;
+        private readonly Dictionary<string, DmsSkinDefinition> dmsParts =
+            new Dictionary<string, DmsSkinDefinition>(StringComparer.OrdinalIgnoreCase);
 
         public SpriteRenderer(RainWorldAtlasSet atlas)
         {
@@ -72,9 +88,75 @@ namespace RainWorldDesktopPet.Graphics
             tailRasterGraphics.PixelOffsetMode = PixelOffsetMode.Half;
             tailRasterGraphics.CompositingMode = CompositingMode.SourceCopy;
             tailRasterGraphics.CompositingQuality = CompositingQuality.HighSpeed;
+            flatLightShaderMask = CreateEffectShaderMask(EffectShaderMask.FlatLight);
+            lightSourceShaderMask = CreateEffectShaderMask(EffectShaderMask.LightSource);
+            shockWaveShaderMask = CreateEffectShaderMask(EffectShaderMask.ShockWave);
         }
 
         public bool UsesLocalAtlas { get { return atlas != null; } }
+        public DmsSkinDefinition ActiveDmsSkin
+        {
+            get
+            {
+                foreach (DmsSkinDefinition skin in dmsParts.Values) return skin;
+                return null;
+            }
+        }
+
+        public DmsSkinDefinition GetDmsPart(string part)
+        {
+            DmsSkinDefinition skin;
+            return !string.IsNullOrWhiteSpace(part) && dmsParts.TryGetValue(part, out skin)
+                ? skin : null;
+        }
+
+        public void SetDmsPart(string part, DmsSkinDefinition skin)
+        {
+            if (string.IsNullOrWhiteSpace(part)) return;
+            if (skin == null) dmsParts.Remove(part);
+            else dmsParts[part] = skin;
+        }
+
+        public void ClearDmsParts()
+        {
+            dmsParts.Clear();
+        }
+
+        public void InvalidateAtlasAvailability()
+        {
+            profileAtlasAvailability.Clear();
+        }
+
+        // Kept for the command-line preview utility. Runtime UI uses only
+        // explicit per-part selections through SetDmsPart.
+        public void SetDmsSkin(DmsSkinDefinition skin)
+        {
+            dmsParts.Clear();
+            if (skin == null) return;
+            for (int i = 0; i < DmsSpriteGroups.SelectableParts.Length; i++)
+            {
+                string part = DmsSpriteGroups.SelectableParts[i];
+                if (skin.HasPart(part)) dmsParts[part] = skin;
+            }
+        }
+
+        public void Render(System.Drawing.Graphics graphics, SlugcatPose pose,
+            Vec2 windowOrigin, bool debug, DesktopCollisionWorld world,
+            Slugcat slugcat, DesktopPetAI ai, string assetStatus,
+            SlugcatAppearance appearance)
+        {
+            Render(graphics, pose, windowOrigin, debug, world, slugcat, ai,
+                assetStatus, slugcat.SelectedSlugcat);
+        }
+
+        public void Render(System.Drawing.Graphics graphics, SlugcatPose pose,
+            RenderSpace renderSpace, bool debug, DesktopCollisionWorld world,
+            Slugcat slugcat, DesktopPetAI ai, string assetStatus,
+            SlugcatAppearance appearance)
+        {
+            Render(graphics, pose, renderSpace, debug, world, slugcat, ai,
+                assetStatus, slugcat.SelectedSlugcat);
+        }
 
         public void Render(
             System.Drawing.Graphics graphics,
@@ -85,10 +167,10 @@ namespace RainWorldDesktopPet.Graphics
             Slugcat slugcat,
             DesktopPetAI ai,
             string assetStatus,
-            SlugcatAppearance appearance)
+            SlugcatProfile selectedSlugcat)
         {
             Render(graphics, pose, new RenderSpace(new Rectangle((int)windowOrigin.X,
-                (int)windowOrigin.Y, 1, 1)), debug, world, slugcat, ai, assetStatus, appearance);
+                (int)windowOrigin.Y, 1, 1)), debug, world, slugcat, ai, assetStatus, selectedSlugcat);
         }
 
         public void Render(
@@ -100,7 +182,7 @@ namespace RainWorldDesktopPet.Graphics
             Slugcat slugcat,
             DesktopPetAI ai,
             string assetStatus,
-            SlugcatAppearance appearance)
+            SlugcatProfile selectedSlugcat)
         {
             graphics.SmoothingMode = SmoothingMode.AntiAlias;
             graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
@@ -108,30 +190,46 @@ namespace RainWorldDesktopPet.Graphics
             pose.SpritePlacements.Clear();
             pose.OverlayBounds = renderSpace.VirtualDesktopBounds;
             activePose = pose;
-            activeRenderSpace = renderSpace;
+            // SpritePlacement is debug-overlay metadata. Building one heap
+            // object per atlas sprite at compositor FPS was the renderer's
+            // largest steady allocation source.
+            activeRenderSpace = debug ? renderSpace : null;
             GraphicsState state = graphics.Save();
             try
             {
                 double scale = pose.CharacterRenderScale;
-                graphics.Transform = new Matrix((float)scale, 0.0f, 0.0f, (float)scale,
-                    (float)-renderSpace.WorldOrigin.X,
-                    (float)-renderSpace.WorldOrigin.Y);
-
-                if (atlas != null)
+                using (Matrix transform = new Matrix((float)scale, 0.0f, 0.0f,
+                    (float)scale, (float)-renderSpace.WorldOrigin.X,
+                    (float)-renderSpace.WorldOrigin.Y))
                 {
-                    // Keep the procedural tail and legs behind the torso for
-                    // the desktop view. Broad custom parts otherwise appear
-                    // to pass across the front of the Slugcat.
+                    graphics.Transform = transform;
+                }
+
+                bool profileAtlasAvailable = IsProfileAtlasAvailable(pose.SelectedSlugcat);
+                DrawSpears(graphics, slugcat, pose, pose.TimeStacker, false);
+                if (profileAtlasAvailable)
+                {
+                    // Dress My Slugcat reorders PlayerGraphics' Futile nodes
+                    // after AddToContainer: tail(2) behind legs(4) behind
+                    // hips(1), then one arm behind the body and the other
+                    // behind the head according to flipDirection.  Applying
+                    // an individual DMS part must preserve that exact order.
+                    if (pose.Facing >= 0) DrawAtlasArm(graphics, pose, 1, pose.VisualArmColor); // 6
+                    else DrawAtlasArm(graphics, pose, 0, pose.VisualArmColor); // 5
+                    DrawAtlasBody(graphics, pose); // 0
                     DrawTail(graphics, pose, pose.VisualTailColor); // 2
                     DrawAtlasLegs(graphics, pose); // 4
-                    DrawAtlasTorso(graphics, pose); // 0 Body, 1 Hips
+                    DrawAtlasHips(graphics, pose); // 1
+                    // Spearmaster's TailSpeckles are inserted at original
+                    // sprite index 3, before the front arm and head.
                     DrawExtraGraphics(graphics, pose, ExtraGraphicsLayer.AfterTailBeforeHead);
+                    if (pose.Facing >= 0) DrawAtlasArm(graphics, pose, 0, pose.VisualArmColor); // 5
+                    else DrawAtlasArm(graphics, pose, 1, pose.VisualArmColor); // 6
                     DrawAtlasHeadPart(graphics, pose, pose.VisualHeadColor, false); // 3
-                    DrawAtlasArm(graphics, pose, 0, pose.VisualArmColor); // 5
-                    DrawAtlasArm(graphics, pose, 1, pose.VisualArmColor); // 6
                     DrawExtraGraphics(graphics, pose, ExtraGraphicsLayer.BehindFace);
-                    DrawAtlasHeadPart(graphics, pose, pose.VisualHeadColor, true); // 9
+                    // The DMS hook moves Rivulet's gills directly behind FaceA.
                     DrawExtraGraphics(graphics, pose, ExtraGraphicsLayer.InFront);
+                    DrawAtlasHeadPart(graphics, pose, pose.VisualHeadColor, true); // 9
                 }
                 else
                 {
@@ -141,11 +239,16 @@ namespace RainWorldDesktopPet.Graphics
                     DrawLimbs(graphics, pose, 1, pose.VisualArmColor);
                     DrawHead(graphics, pose, false, pose.VisualHeadColor);
                 }
+                DrawAbilityObjects(graphics, slugcat, pose, pose.TimeStacker);
 
                 if (debug)
                 {
-                    graphics.Transform = new Matrix(1.0f, 0.0f, 0.0f, 1.0f,
-                        (float)-renderSpace.WorldOrigin.X, (float)-renderSpace.WorldOrigin.Y);
+                    using (Matrix transform = new Matrix(1.0f, 0.0f, 0.0f, 1.0f,
+                        (float)-renderSpace.WorldOrigin.X,
+                        (float)-renderSpace.WorldOrigin.Y))
+                    {
+                        graphics.Transform = transform;
+                    }
                     DrawDebugWorld(graphics, pose, world, slugcat, ai);
                 }
             }
@@ -167,9 +270,17 @@ namespace RainWorldDesktopPet.Graphics
                 builder.AppendFormat("AI {0} input {1} | body {2} animation {3} frame {4} facing/flip {5}\n",
                     ai.Behavior, slugcat.LastInput, pose.BodyMode, pose.Animation,
                     pose.AnimationFrame, pose.Facing);
-                builder.AppendFormat("skin {0} originalID={1} profile={2} sprites base={3} extra={4}\n",
-                    pose.CurrentSkin, pose.OriginalSlugcatId, pose.VisualProfileName,
+                PlatformTransitionPlan transition = ai.TransitionPlan;
+                builder.AppendFormat("transition {0} valid={1} surface {2}->{3} target={4} dx/dy={5:0.0}/{6:0.0}\n",
+                    transition.Mode, transition.IsValid, transition.SourceSurfaceId,
+                    transition.TargetSurfaceId, transition.TargetPoint,
+                    transition.HorizontalDistance, transition.VerticalDistance);
+                builder.AppendFormat("slugcat {0} originalID={1} profile={2} sprites base={3} extra={4}\n",
+                    pose.SelectedSlugcat, pose.OriginalSlugcatId, pose.VisualProfileName,
                     pose.BaseSpriteCount, pose.ExtraSpriteCount);
+                builder.AppendFormat("movement {0}\nability {1}\n",
+                    pose.MovementProfileDebug, pose.AbilityDebug);
+                builder.AppendFormat("DMS parts {0}\n", dmsParts.Count);
                 builder.AppendFormat("face {0} tail={1} extensions={2}\n",
                     pose.SelectedFaceElement, pose.TailProfileName, pose.GraphicsExtensions);
                 for (int i = 0; i < pose.ExtraParts.Length; i++)
@@ -180,7 +291,7 @@ namespace RainWorldDesktopPet.Graphics
                         extra.LastPosition, extra.CurrentPosition, extra.RenderPosition,
                         extra.Rotation, extra.Layer, extra.Visible);
                 }
-                VirtualInput[] inputHistory = slugcat.Movement.InputHistory;
+                VirtualInput[] inputHistory = slugcat.Movement.InputHistoryForRead;
                 builder.AppendFormat("input history now/1/2/3: {0} | {1} | {2} | {3}\n",
                     inputHistory[0], inputHistory[1], inputHistory[2], inputHistory[3]);
                 builder.AppendFormat("physics gravity {0:0.###}/tick air {1:0.###} maxFall none connection {2:0.###} world x{3:0.00} snapshot {4}\n",
@@ -283,6 +394,17 @@ namespace RainWorldDesktopPet.Graphics
             }
         }
 
+        private bool IsProfileAtlasAvailable(SlugcatId id)
+        {
+            bool available;
+            if (profileAtlasAvailability.TryGetValue(id, out available)) return available;
+            string missing;
+            available = atlas != null && SlugcatGraphicsProfiles.Get(id).IsAvailable(
+                atlas, out missing);
+            profileAtlasAvailability[id] = available;
+            return available;
+        }
+
         private static void AppendSurfaceDebug(StringBuilder builder, DesktopCollisionWorld world, BodyChunk chunk)
         {
             long id = chunk.SupportingSurfaceId != 0 ? chunk.SupportingSurfaceId : chunk.WallSurfaceId;
@@ -314,6 +436,7 @@ namespace RainWorldDesktopPet.Graphics
 
         private void DrawOriginalTailMesh(System.Drawing.Graphics graphics, SlugcatPose pose, Color bodyColor)
         {
+            pose.TailRenderMode = null;
             PopulateOriginalTailMeshVertices(pose, tailMeshVertices);
             for (int i = 0; i < tailMeshVertices.Length; i++)
                 tailMeshPoints[i] = tailMeshVertices[i].ToPointF();
@@ -341,16 +464,31 @@ namespace RainWorldDesktopPet.Graphics
             if (rasterWidth <= TailRasterSize && rasterHeight <= TailRasterSize)
             {
                 tailRasterGraphics.Clear(Color.Transparent);
-                for (int i = 0; i < TailTriangles.GetLength(0); i++)
+                AtlasSprite dmsTail = null;
+                DmsSkinDefinition dmsTailSkin = GetDmsPart("TAIL");
+                bool textured = dmsTailSkin != null && dmsTailSkin.TryGetSprite("TailTexture",
+                    pose.OriginalSlugcatId, DmsSpriteSide.None, out dmsTail);
+                Color tailColor = dmsTailSkin != null && dmsTailSkin.DefaultTail.Color.A > 0
+                    ? dmsTailSkin.DefaultTail.Color
+                    : bodyColor;
+                if (textured)
                 {
-                    for (int j = 0; j < 3; j++)
+                    RasterizeDmsTail(dmsTail, tailColor, rasterLeft, rasterTop);
+                    pose.TailRenderMode = "DMS-UV-TriangleMesh";
+                }
+                else
+                {
+                    for (int i = 0; i < TailTriangles.GetLength(0); i++)
                     {
-                        PointF point = tailMeshPoints[TailTriangles[i, j]];
-                        tailTrianglePoints[j] = new PointF(
-                            point.X - rasterLeft, point.Y - rasterTop);
+                        for (int j = 0; j < 3; j++)
+                        {
+                            PointF point = tailMeshPoints[TailTriangles[i, j]];
+                            tailTrianglePoints[j] = new PointF(
+                                point.X - rasterLeft, point.Y - rasterTop);
+                        }
+                        tailRasterGraphics.FillPolygon(GetBodyBrush(tailColor),
+                            tailTrianglePoints, FillMode.Winding);
                     }
-                    tailRasterGraphics.FillPolygon(GetBodyBrush(bodyColor),
-                        tailTrianglePoints, FillMode.Winding);
                 }
 
                 tailRasterDestinationPoints[0] = new PointF(rasterLeft, rasterTop);
@@ -384,8 +522,107 @@ namespace RainWorldDesktopPet.Graphics
             }
             Array.Copy(tailMeshVertices, pose.TailMeshVertices,
                 OriginalTailMeshVertexCount);
-            pose.TailRenderMode = "OriginalTriangleMesh";
+            if (string.IsNullOrEmpty(pose.TailRenderMode)) pose.TailRenderMode = "OriginalTriangleMesh";
             pose.TailMeshVertexCount = tailMeshVertices.Length;
+        }
+
+        private void RasterizeDmsTail(AtlasSprite sprite, Color tint, int rasterLeft, int rasterTop)
+        {
+            PopulateTailTextureCoordinates(sprite.Element, tailTextureCoordinates);
+            GraphicsState baseState = tailRasterGraphics.Save();
+            try
+            {
+                tailRasterGraphics.CompositingMode = CompositingMode.SourceOver;
+                for (int triangle = 0; triangle < TailTriangles.GetLength(0); triangle++)
+                {
+                    for (int point = 0; point < 3; point++)
+                    {
+                        int vertex = TailTriangles[triangle, point];
+                        tailTextureSourceTriangle[point] = tailTextureCoordinates[vertex];
+                        tailTextureDestinationTriangle[point] = new PointF(
+                            tailMeshPoints[vertex].X - rasterLeft,
+                            tailMeshPoints[vertex].Y - rasterTop);
+                    }
+                    using (Matrix transform = CreateTriangleTransform(
+                        tailTextureSourceTriangle, tailTextureDestinationTriangle))
+                    {
+                        if (transform == null) continue;
+                        GraphicsState state = tailRasterGraphics.Save();
+                        try
+                        {
+                            using (GraphicsPath clip = new GraphicsPath())
+                            {
+                                clip.AddPolygon(tailTextureDestinationTriangle);
+                                tailRasterGraphics.SetClip(clip, CombineMode.Replace);
+                            }
+                            tailRasterGraphics.Transform = transform;
+                            tailRasterGraphics.DrawImage(sprite.Atlas.Image,
+                                new Rectangle(0, 0, sprite.Atlas.Image.Width, sprite.Atlas.Image.Height),
+                                0, 0, sprite.Atlas.Image.Width, sprite.Atlas.Image.Height,
+                                GraphicsUnit.Pixel, GetTintAttributes(tint));
+                        }
+                        finally
+                        {
+                            tailRasterGraphics.Restore(state);
+                        }
+                    }
+                }
+            }
+            finally
+            {
+                tailRasterGraphics.Restore(baseState);
+            }
+        }
+
+        private static void PopulateTailTextureCoordinates(AtlasElement element,
+            PointF[] result)
+        {
+            for (int index = 0; index < result.Length; index++)
+            {
+                double u;
+                double v;
+                if (index == result.Length - 1)
+                {
+                    u = 1.0;
+                    v = 0.5;
+                }
+                else
+                {
+                    u = (index / 2) / 7.0;
+                    v = index % 2 == 0 ? 0.0 : 1.0;
+                }
+                result[index] = new PointF(
+                    element.Frame.Left + (float)(u * element.Frame.Width),
+                    element.Frame.Top + (float)(v * element.Frame.Height));
+            }
+        }
+
+        private static Matrix CreateTriangleTransform(PointF[] source, PointF[] destination)
+        {
+            double denominator = source[0].X * (source[1].Y - source[2].Y) +
+                source[1].X * (source[2].Y - source[0].Y) +
+                source[2].X * (source[0].Y - source[1].Y);
+            if (Math.Abs(denominator) < 0.000001) return null;
+            double m11 = (destination[0].X * (source[1].Y - source[2].Y) +
+                destination[1].X * (source[2].Y - source[0].Y) +
+                destination[2].X * (source[0].Y - source[1].Y)) / denominator;
+            double m21 = (destination[0].X * (source[2].X - source[1].X) +
+                destination[1].X * (source[0].X - source[2].X) +
+                destination[2].X * (source[1].X - source[0].X)) / denominator;
+            double dx = (destination[0].X * (source[1].X * source[2].Y - source[2].X * source[1].Y) +
+                destination[1].X * (source[2].X * source[0].Y - source[0].X * source[2].Y) +
+                destination[2].X * (source[0].X * source[1].Y - source[1].X * source[0].Y)) / denominator;
+            double m12 = (destination[0].Y * (source[1].Y - source[2].Y) +
+                destination[1].Y * (source[2].Y - source[0].Y) +
+                destination[2].Y * (source[0].Y - source[1].Y)) / denominator;
+            double m22 = (destination[0].Y * (source[2].X - source[1].X) +
+                destination[1].Y * (source[0].X - source[2].X) +
+                destination[2].Y * (source[1].X - source[0].X)) / denominator;
+            double dy = (destination[0].Y * (source[1].X * source[2].Y - source[2].X * source[1].Y) +
+                destination[1].Y * (source[2].X * source[0].Y - source[0].X * source[2].Y) +
+                destination[2].Y * (source[0].X * source[1].Y - source[1].X * source[0].Y)) / denominator;
+            return new Matrix((float)m11, (float)m12, (float)m21, (float)m22,
+                (float)dx, (float)dy);
         }
 
         public static Vec2[] BuildOriginalTailMeshVertices(SlugcatPose pose)
@@ -478,21 +715,25 @@ namespace RainWorldDesktopPet.Graphics
             FillCircle(graphics, pose.Hips, 7.1 * pose.VisualHipsScale, Shade(pose.VisualHipsColor));
         }
 
-        private void DrawAtlasTorso(System.Drawing.Graphics graphics, SlugcatPose pose)
+        private void DrawAtlasBody(System.Drawing.Graphics graphics, SlugcatPose pose)
         {
             double bodyAngle = AimScreen(pose.Hips, pose.Chest);
             double verticality = MathUtil.InverseLerp(0.3, 0.5, Math.Abs(pose.BodyUp.Y));
             double bodyWidth = pose.VisualBodyScale + MathUtil.Lerp(-0.05, 0.05, pose.Breath) * verticality;
-            double hipsWidth = pose.VisualHipsScale + 0.05 * pose.Breath;
 
             Vec2 bodyPosition = pose.Chest + new Vec2(0.0, -0.5 * pose.Breath * (1.0 - verticality));
             DrawElement(graphics, pose.BodyElement, bodyPosition, bodyAngle, bodyWidth, 1.0,
-                0.5, 0.7894737, pose.VisualBodyColor);
+                0.5, 0.7894737, pose.VisualBodyColor, SelectTorsoSide(pose));
+        }
+
+        private void DrawAtlasHips(System.Drawing.Graphics graphics, SlugcatPose pose)
+        {
+            double hipsWidth = pose.VisualHipsScale + 0.05 * pose.Breath;
             Vec2 hipsPosition = (pose.Hips * 2.0 + pose.Chest) / 3.0;
             Vec2 tailTarget = pose.Tail.Length > 0 ? pose.Tail[0] : pose.Hips + (pose.Hips - pose.Chest);
             double hipsAngle = AimScreen(pose.Chest, tailTarget);
             DrawElement(graphics, pose.HipsElement, hipsPosition, hipsAngle, hipsWidth, 1.0,
-                0.5, 0.5, pose.VisualHipsColor);
+                0.5, 0.5, pose.VisualHipsColor, SelectTorsoSide(pose));
         }
 
         private void DrawAtlasLegs(System.Drawing.Graphics graphics, SlugcatPose pose)
@@ -511,7 +752,8 @@ namespace RainWorldDesktopPet.Graphics
                 ? pose.Facing
                 : 1.0;
             DrawElement(graphics, legsName, pose.Legs, legsAngle, legsScaleX, 1.0,
-                0.5, 0.25, pose.VisualLegsColor);
+                0.5, 0.25, pose.VisualLegsColor,
+                legsScaleX < 0.0 ? DmsSpriteSide.Left : DmsSpriteSide.Right);
         }
 
         private void DrawAtlasArm(System.Drawing.Graphics graphics, SlugcatPose pose, int index, Color bodyColor)
@@ -524,7 +766,7 @@ namespace RainWorldDesktopPet.Graphics
             double angle = ComputeArmRotation(pose, index);
             double scaleY = ComputeArmScaleY(pose, index);
             DrawElement(graphics, "PlayerArm" + frame, hand, angle, 1.0, scaleY,
-                0.9, 0.5, bodyColor);
+                0.9, 0.5, bodyColor, index == 0 ? DmsSpriteSide.Left : DmsSpriteSide.Right);
         }
 
         private void DrawExtraGraphics(System.Drawing.Graphics graphics, SlugcatPose pose,
@@ -536,7 +778,8 @@ namespace RainWorldDesktopPet.Graphics
                 ExtraGraphicsPartPose part = pose.ExtraParts[i];
                 if (part == null || !part.Visible || part.Layer != layer) continue;
                 DrawElement(graphics, part.Element, part.SpritePosition, part.Rotation,
-                    part.ScaleX, part.ScaleY, part.AnchorX, part.AnchorY, part.Tint);
+                    part.ScaleX, part.ScaleY, part.AnchorX, part.AnchorY, part.Tint,
+                    part.ScaleX < 0.0 ? DmsSpriteSide.Left : DmsSpriteSide.Right);
             }
         }
 
@@ -548,7 +791,8 @@ namespace RainWorldDesktopPet.Graphics
             {
                 DrawElement(graphics, state.HeadElement, state.HeadPosition,
                     state.HeadRotation, state.HeadScaleX,
-                    1.0, 0.5, 0.5, bodyColor);
+                    1.0, 0.5, 0.5, bodyColor,
+                    state.HeadScaleX < 0.0 ? DmsSpriteSide.Left : DmsSpriteSide.Right);
                 return;
             }
 
@@ -562,7 +806,8 @@ namespace RainWorldDesktopPet.Graphics
             pose.FaceScaleX = state.FaceScaleX;
             pose.FaceSelectionReason = state.Reason;
                 DrawElement(graphics, state.FaceElement, state.FacePosition,
-                    state.FaceRotation, state.FaceScaleX, 1.0, 0.5, 0.5, pose.VisualEyeColor);
+                    state.FaceRotation, state.FaceScaleX, 1.0, 0.5, 0.5, pose.VisualEyeColor,
+                    state.FaceScaleX < 0.0 ? DmsSpriteSide.Left : DmsSpriteSide.Right);
         }
 
         private void DrawHead(System.Drawing.Graphics graphics, SlugcatPose pose, bool useAtlas, Color bodyColor)
@@ -725,7 +970,7 @@ namespace RainWorldDesktopPet.Graphics
             }
 
             if (pose.MouseAttentionActive) reason += "+MouseAttention";
-            SlugcatVisualProfile profile = SlugcatVisualProfiles.Get(pose.CurrentSkin);
+            SlugcatGraphicsProfile profile = ResolvePoseProfile(pose);
             result.HeadElement = profile.HeadFamily + headFrame;
             result.HeadPosition = headPosition;
             result.HeadRotation = rawHeadAngle;
@@ -747,8 +992,15 @@ namespace RainWorldDesktopPet.Graphics
 
         private static string FaceFamily(SlugcatPose pose)
         {
-            return SlugcatVisualProfiles.Get(pose.CurrentSkin).ResolveFaceFamily(
+            return ResolvePoseProfile(pose).ResolveFaceFamily(
                 pose.Blink, SelectFaceScaleX(pose));
+        }
+
+        private static SlugcatGraphicsProfile ResolvePoseProfile(SlugcatPose pose)
+        {
+            if (pose.CurrentSkin != SlugcatSkin.Default)
+                return SlugcatVisualProfiles.Get(pose.CurrentSkin);
+            return SlugcatGraphicsProfiles.Get(pose.SelectedSlugcat);
         }
 
         private static double BodyAxisSign(SlugcatPose pose)
@@ -783,18 +1035,41 @@ namespace RainWorldDesktopPet.Graphics
                 return pose.Chest.X < pose.Hips.X ? -1.0 : 1.0;
             if (pose.BodyMode == BodyModeIndex.WallClimb)
                 return pose.Facing == -1 ? -1.0 : 1.0;
+            // Custom.DistanceToLine is evaluated in Futile's y-up space.
+            // Reflecting it into this renderer's y-down space reverses the
+            // signed distance. The arm, hand target and spear keep one shared
+            // coordinate conversion instead of independently flipping sprites.
             return SignedDistanceToLine(pose.Hands[index], pose.Chest, pose.Hips) < 0.0
-                ? -1.0
-                : 1.0;
+                ? 1.0
+                : -1.0;
         }
 
         private void DrawElement(System.Drawing.Graphics graphics, string name, Vec2 position, double angle, double scaleX, double scaleY, double anchorX, double anchorY, Color tint)
         {
+            DrawElement(graphics, name, position, angle, scaleX, scaleY, anchorX,
+                anchorY, tint, DmsSpriteSide.None);
+        }
+
+        private void DrawElement(System.Drawing.Graphics graphics, string name, Vec2 position,
+            double angle, double scaleX, double scaleY, double anchorX, double anchorY,
+            Color tint, DmsSpriteSide side)
+        {
             // Futile accepts zero-scale sprites (for example the outside row of
             // Spearmaster's tinyStar speckles); GDI+ rejects a singular matrix.
             if (Math.Abs(scaleX) < 0.000001 || Math.Abs(scaleY) < 0.000001) return;
-            AtlasSprite sprite;
-            if (!atlas.TryGet(name, out sprite)) return;
+            AtlasSprite sprite = null;
+            DmsSkinDefinition selectedPartSkin = null;
+            if (activePose != null)
+            {
+                string generic = DmsSpriteGroups.ToGenericElement(name,
+                    activePose.OriginalSlugcatId);
+                selectedPartSkin = GetDmsPart(DmsSpriteGroups.PartForElement(generic));
+            }
+            bool dmsApplied = selectedPartSkin != null &&
+                selectedPartSkin.TryGetSprite(name, activePose.OriginalSlugcatId, side, out sprite);
+            if (!dmsApplied && !atlas.TryGet(name, out sprite)) return;
+            if (dmsApplied) tint = selectedPartSkin.ResolveTint(name,
+                activePose.OriginalSlugcatId, tint);
             AtlasElement element = sprite.Element;
             GraphicsState state = graphics.Save();
             try
@@ -830,11 +1105,27 @@ namespace RainWorldDesktopPet.Graphics
             }
         }
 
+        private static DmsSpriteSide SelectTorsoSide(SlugcatPose pose)
+        {
+            if (pose.BodyMode == BodyModeIndex.Stand && pose.InputX != 0)
+                return pose.InputX < 0 ? DmsSpriteSide.Left : DmsSpriteSide.Right;
+            double axis = pose.Chest.X - pose.Hips.X;
+            if (Math.Abs(axis) > 0.5) return axis < 0.0 ? DmsSpriteSide.Left : DmsSpriteSide.Right;
+            return pose.Facing < 0.0 ? DmsSpriteSide.Left : DmsSpriteSide.Right;
+        }
+
         private ImageAttributes GetTintAttributes(Color tint)
         {
             ImageAttributes attributes;
             if (tintAttributes.TryGetValue(tint.ToArgb(), out attributes)) return attributes;
 
+            attributes = CreateTintAttributes(tint);
+            tintAttributes[tint.ToArgb()] = attributes;
+            return attributes;
+        }
+
+        private static ImageAttributes CreateTintAttributes(Color tint)
+        {
             float red = tint.R / 255.0f;
             float green = tint.G / 255.0f;
             float blue = tint.B / 255.0f;
@@ -846,9 +1137,8 @@ namespace RainWorldDesktopPet.Graphics
                 new float[] { 0, 0, 0, tint.A / 255.0f, 0 },
                 new float[] { 0, 0, 0, 0, 1 }
             });
-            attributes = new ImageAttributes();
+            ImageAttributes attributes = new ImageAttributes();
             attributes.SetColorMatrix(matrix, ColorMatrixFlag.Default, ColorAdjustType.Bitmap);
-            tintAttributes[tint.ToArgb()] = attributes;
             return attributes;
         }
 
@@ -1049,12 +1339,492 @@ namespace RainWorldDesktopPet.Graphics
             return pen;
         }
 
+        private void DrawAbilityObjects(System.Drawing.Graphics graphics,
+            Slugcat slugcat, SlugcatPose pose, double interpolation)
+        {
+            SaintAbilityController saint = slugcat.AbilityController as SaintAbilityController;
+            bool drawsTongue = saint != null && saint.Mode != SaintTongueMode.Retracted;
+            if (!drawsTongue && slugcat.Spears.Count == 0 &&
+                slugcat.AbilityEffects.Count == 0)
+            {
+                return;
+            }
+            if (drawsTongue)
+            {
+                Vec2[] currentRope = saint.RopeForRender;
+                Vec2[] previousRope = saint.LastRopeForRender;
+                Vec2 previous = Vec2.Lerp(previousRope[0], currentRope[0], interpolation);
+                if (currentRope.Length > 1)
+                    previous += (previous - Vec2.Lerp(previousRope[1],
+                        currentRope[1], interpolation)).Normalized;
+                double stretch = saint.RopeStretchFactor;
+                for (int segment = 1; segment < currentRope.Length; segment++)
+                {
+                    double fraction = segment / (double)(currentRope.Length - 1);
+                    Vec2 next = segment < currentRope.Length - 2
+                        ? Vec2.Lerp(previousRope[segment], currentRope[segment], interpolation)
+                        : pose.FacePosition;
+                    Vec2 perpendicular = (previous - next).Normalized.Perpendicular;
+                    double width = 0.2 + 1.6 * MathUtil.Lerp(1.0, stretch,
+                        Math.Pow(Math.Sin(fraction * Math.PI), 0.7));
+                    Vec2 a = previous - perpendicular * width;
+                    Vec2 b = previous + perpendicular * width;
+                    Vec2 c = next - perpendicular * width;
+                    Vec2 d = next + perpendicular * width;
+                    double paletteFraction = Math.Max(0.0,
+                        Math.Sin(fraction * Math.PI));
+                    Color originalTongue = HslToRgb(
+                        MathUtil.Lerp(0.95, 1.0, paletteFraction), 1.0,
+                        MathUtil.Lerp(0.75, 0.9, Math.Pow(paletteFraction, 0.15)));
+                    Color tongueColor = LerpColor(Color.FromArgb(45, 45, 50),
+                        originalTongue, 0.7);
+                    abilityQuad[0] = a.ToPointF();
+                    abilityQuad[1] = b.ToPointF();
+                    abilityQuad[2] = d.ToPointF();
+                    abilityQuad[3] = c.ToPointF();
+                    graphics.FillPolygon(GetBodyBrush(tongueColor), abilityQuad);
+                    previous = next;
+                }
+            }
+
+            DrawSpears(graphics, slugcat, pose, interpolation, true);
+
+            for (int i = 0; i < slugcat.AbilityEffects.Count; i++)
+            {
+                AbilityEffect effect = slugcat.AbilityEffects[i];
+                Vec2 position = Vec2.Lerp(effect.LastPosition, effect.Position, interpolation);
+                double life = MathUtil.Lerp(effect.LastLife, effect.Life, interpolation);
+                if (effect.Kind == AbilityEffectKind.ShockWave)
+                {
+                    continue;
+                }
+                else if (effect.Kind == AbilityEffectKind.ExplosionLight)
+                {
+                    // The 160-unit flash is wider than the character surface.
+                    // Submit it with smoke to the independently-sized GPU layer.
+                    continue;
+                }
+                else if (effect.Kind == AbilityEffectKind.ExplosionSpikes)
+                {
+                    continue;
+                }
+                else if (effect.Kind == AbilityEffectKind.SootMark)
+                {
+                    FillCircle(graphics, position, effect.Radius,
+                        Color.FromArgb(MathUtil.Clamp((int)(105 * life), 0, 105), 18, 18, 18));
+                }
+                else if (effect.Kind == AbilityEffectKind.Spark ||
+                    effect.Kind == AbilityEffectKind.WaterDrip)
+                {
+                    Color trailColor = effect.Kind == AbilityEffectKind.Spark
+                        // Spark.DrawSprites leaves the FSprite alpha at its
+                        // default one. Its tail shortens only in the final
+                        // tenth of life; it does not fade every frame.
+                        ? Color.White
+                        : Color.FromArgb(MathUtil.Clamp((int)(210 * life), 0, 255), 220, 225, 235);
+                    Vec2 trail = Vec2.Lerp(effect.PreviousPreviousPosition,
+                        effect.PreviousPreviousPreviousPosition, interpolation);
+                    if (Vec2.Distance(position, trail) < 9.0)
+                        trail = position - effect.Velocity.Normalized * 9.0;
+                    trail = Vec2.Lerp(position, trail,
+                        MathUtil.InverseLerp(0.0, 0.1, life));
+                    Vec2 axis = position - trail;
+                    if (axis.LengthSquared < 0.000001) axis = Vec2.Down;
+                    Vec2 perpendicular = axis.Normalized.Perpendicular * effect.Radius;
+                    abilityTriangle[0] = (position + perpendicular).ToPointF();
+                    abilityTriangle[1] = (position - perpendicular).ToPointF();
+                    abilityTriangle[2] = trail.ToPointF();
+                    graphics.FillPolygon(GetBodyBrush(trailColor), abilityTriangle);
+                }
+                else if (effect.Kind == AbilityEffectKind.Smoke ||
+                    effect.Kind == AbilityEffectKind.FlashingSmoke)
+                {
+                    // Submitted after the CPU sprite surface through the
+                    // Direct3D effect path. Do not draw a GDI fallback here;
+                    // that would restore the expensive GPU/CPU round trip.
+                    continue;
+                }
+                else if (effect.Kind == AbilityEffectKind.Explosion)
+                {
+                    continue;
+                }
+                else
+                {
+                    double progress = MathUtil.Clamp01(1.0 - life);
+                    FillCircle(graphics, position, Math.Max(0.5, effect.Radius * progress),
+                        Color.FromArgb(MathUtil.Clamp((int)(160 * life), 0, 255), 255, 255, 255));
+                }
+            }
+        }
+
+        public void CollectGpuSmokeEffects(Slugcat slugcat, SlugcatPose pose,
+            RenderSpace renderSpace, DirectCompositionHost.GpuSmokeEffect[] target,
+            ref int count)
+        {
+            if (target == null) throw new ArgumentNullException("target");
+            double interpolation = pose.TimeStacker;
+            double renderScale = pose.CharacterRenderScale;
+            for (int i = 0; i < slugcat.AbilityEffects.Count && count < target.Length; i++)
+            {
+                AbilityEffect effect = slugcat.AbilityEffects[i];
+                double life = MathUtil.Lerp(effect.LastLife, effect.Life, interpolation);
+                Vec2 position = Vec2.Lerp(effect.LastPosition, effect.Position,
+                    interpolation);
+                Vec2 center = position * renderScale - renderSpace.WorldOrigin;
+                if (effect.Kind == AbilityEffectKind.ExplosionLight)
+                {
+                    double rootLife = Math.Sqrt(Math.Max(0.0, life));
+                    float size = (float)(rootLife * effect.Radius * 2.0 * renderScale);
+                    float lightAlpha = (float)MathUtil.Clamp01(rootLife * effect.Intensity);
+                    DirectCompositionHost.GpuSmokeEffect light =
+                        new DirectCompositionHost.GpuSmokeEffect();
+                    light.CenterX = (float)center.X;
+                    light.CenterY = (float)center.Y;
+                    light.BackSize = size;
+                    light.FrontSize = size;
+                    light.BackAlpha = (float)MathUtil.Clamp01(life * effect.Intensity * 0.5);
+                    light.FrontRed = light.FrontGreen = light.FrontBlue = 1.0f;
+                    light.FrontAlpha = 1.0f - (1.0f - lightAlpha) * (1.0f - lightAlpha);
+                    light.Seed = -1.0f;
+                    target[count++] = light;
+                    continue;
+                }
+                if (effect.Kind == AbilityEffectKind.ShockWave)
+                {
+                    double progress = MathUtil.Clamp01(life);
+                    DirectCompositionHost.GpuSmokeEffect wave =
+                        new DirectCompositionHost.GpuSmokeEffect();
+                    wave.CenterX = (float)center.X;
+                    wave.CenterY = (float)center.Y;
+                    wave.BackSize = (float)(Math.Sqrt(progress) * effect.Radius *
+                        2.0 * renderScale);
+                    wave.BackRed = (float)Math.Pow(progress, 0.1);
+                    wave.BackGreen = (float)MathUtil.Clamp01(effect.Intensity);
+                    wave.BackBlue = (float)progress;
+                    wave.BackAlpha = 1.0f;
+                    wave.Seed = -3.0f;
+                    target[count++] = wave;
+                    continue;
+                }
+                if (effect.Kind == AbilityEffectKind.Explosion)
+                {
+                    double progress = MathUtil.Clamp01(1.0 - life);
+                    DirectCompositionHost.GpuSmokeEffect explosion =
+                        new DirectCompositionHost.GpuSmokeEffect();
+                    explosion.CenterX = (float)center.X;
+                    explosion.CenterY = (float)center.Y;
+                    explosion.BackSize = (float)(effect.Radius * progress *
+                        2.0 * renderScale);
+                    explosion.BackRed = explosion.BackGreen = explosion.BackBlue = 1.0f;
+                    explosion.BackAlpha = (float)MathUtil.Clamp01(160.0 / 255.0 * life);
+                    explosion.Seed = -4.0f;
+                    target[count++] = explosion;
+                    continue;
+                }
+                if (effect.Kind == AbilityEffectKind.ExplosionSpikes)
+                {
+                    double progress = MathUtil.Clamp01(1.0 - life);
+                    double radius = effect.Radius * Math.Sin(progress * Math.PI * 0.5);
+                    DirectCompositionHost.GpuSmokeEffect spikes =
+                        new DirectCompositionHost.GpuSmokeEffect();
+                    spikes.CenterX = (float)center.X;
+                    spikes.CenterY = (float)center.Y;
+                    spikes.BackSize = (float)(Math.Max(30.0, radius) *
+                        2.0 * renderScale);
+                    spikes.BackRed = spikes.BackGreen = spikes.BackBlue = 1.0f;
+                    spikes.BackAlpha = (float)MathUtil.Clamp01(190.0 / 255.0 * life);
+                    spikes.Seed = -5.0f;
+                    target[count++] = spikes;
+                    continue;
+                }
+                if (effect.Kind != AbilityEffectKind.Smoke &&
+                    effect.Kind != AbilityEffectKind.FlashingSmoke) continue;
+
+                double scale = life > 0.5
+                    ? MathUtil.Lerp(1.0, 0.5, MathUtil.InverseLerp(0.5, 1.0, life))
+                    : Math.Sin(Math.Max(0.0, life) * Math.PI);
+                double alpha = Math.Pow(Math.Max(0.0, life), 1.8);
+                double baseScale = 11.0 * effect.Radius * Math.Max(0.0, scale);
+                if (baseScale <= 0.0001 || alpha <= 0.0001) continue;
+
+                Color paletteBlack = Color.FromArgb(28, 31, 34);
+                Color paletteFog = Color.FromArgb(92, 98, 105);
+                Color colorA = LerpColor(paletteBlack, paletteFog, 0.1);
+                Color colorB = LerpColor(paletteBlack, paletteFog, 0.4);
+                Color back = effect.Kind == AbilityEffectKind.FlashingSmoke
+                    ? Color.White : LerpColor(colorB, colorA,
+                        0.2 + 0.8 * Math.Sqrt(Math.Max(0.0, life)));
+                Color front = effect.Kind == AbilityEffectKind.FlashingSmoke
+                    ? Color.White : LerpColor(colorB, colorA, life);
+                DirectCompositionHost.GpuSmokeEffect command =
+                    new DirectCompositionHost.GpuSmokeEffect();
+                command.CenterX = (float)center.X;
+                command.CenterY = (float)center.Y;
+                command.Rotation = (float)MathUtil.Lerp(effect.LastRotation,
+                    effect.Rotation, interpolation);
+                command.BackSize = (float)(baseScale * 1.1 * 16.0 * renderScale);
+                command.FrontSize = (float)(baseScale * 0.9 * 16.0 * renderScale);
+                command.BackRed = back.R / 255.0f;
+                command.BackGreen = back.G / 255.0f;
+                command.BackBlue = back.B / 255.0f;
+                command.BackAlpha = (float)(alpha * 0.8);
+                command.FrontRed = front.R / 255.0f;
+                command.FrontGreen = front.G / 255.0f;
+                command.FrontBlue = front.B / 255.0f;
+                command.FrontAlpha = (float)(alpha * 0.6);
+                command.Seed = (float)(effect.Radius * 0.173 +
+                    (effect.Lifetime % 97) * 0.113);
+                target[count++] = command;
+            }
+        }
+
+        public RectangleF CalculateGpuEffectBounds(Slugcat slugcat, SlugcatPose pose)
+        {
+            double interpolation = pose.TimeStacker;
+            double renderScale = pose.CharacterRenderScale;
+            bool hasBounds = false;
+            double left = 0.0, top = 0.0, right = 0.0, bottom = 0.0;
+            for (int i = 0; i < slugcat.AbilityEffects.Count; i++)
+            {
+                AbilityEffect effect = slugcat.AbilityEffects[i];
+                double life = MathUtil.Lerp(effect.LastLife, effect.Life, interpolation);
+                double size;
+                if (effect.Kind == AbilityEffectKind.ExplosionLight)
+                {
+                    size = Math.Sqrt(Math.Max(0.0, life)) * effect.Radius *
+                        2.0 * renderScale;
+                }
+                else if (effect.Kind == AbilityEffectKind.ShockWave)
+                {
+                    size = Math.Sqrt(MathUtil.Clamp01(life)) * effect.Radius *
+                        2.0 * renderScale;
+                }
+                else if (effect.Kind == AbilityEffectKind.Explosion)
+                {
+                    size = effect.Radius * MathUtil.Clamp01(1.0 - life) *
+                        2.0 * renderScale;
+                }
+                else if (effect.Kind == AbilityEffectKind.ExplosionSpikes)
+                {
+                    double progress = MathUtil.Clamp01(1.0 - life);
+                    double radius = effect.Radius * Math.Sin(progress * Math.PI * 0.5);
+                    size = Math.Max(30.0, radius) * 2.0 * renderScale;
+                }
+                else if (effect.Kind == AbilityEffectKind.Smoke ||
+                    effect.Kind == AbilityEffectKind.FlashingSmoke)
+                {
+                    double scale = life > 0.5
+                        ? MathUtil.Lerp(1.0, 0.5,
+                            MathUtil.InverseLerp(0.5, 1.0, life))
+                        : Math.Sin(Math.Max(0.0, life) * Math.PI);
+                    double baseScale = 11.0 * effect.Radius * Math.Max(0.0, scale);
+                    size = baseScale * 1.1 * 16.0 * renderScale;
+                }
+                else continue;
+                if (size <= 0.0001) continue;
+                Vec2 position = Vec2.Lerp(effect.LastPosition, effect.Position,
+                    interpolation) * renderScale;
+                double half = size * 0.5 + 2.0;
+                if (!hasBounds)
+                {
+                    left = position.X - half; top = position.Y - half;
+                    right = position.X + half; bottom = position.Y + half;
+                    hasBounds = true;
+                }
+                else
+                {
+                    left = Math.Min(left, position.X - half);
+                    top = Math.Min(top, position.Y - half);
+                    right = Math.Max(right, position.X + half);
+                    bottom = Math.Max(bottom, position.Y + half);
+                }
+            }
+            return hasBounds ? RectangleF.FromLTRB((float)left, (float)top,
+                (float)right, (float)bottom) : RectangleF.Empty;
+        }
+
+        private void DrawSpears(System.Drawing.Graphics graphics, Slugcat slugcat,
+            SlugcatPose pose, double interpolation, bool inFront)
+        {
+            for (int i = 0; i < slugcat.Spears.Count; i++)
+            {
+                DesktopSpear spear = slugcat.Spears[i];
+                if (spear.InFrontOfPlayer != inFront) continue;
+                Vec2 center = spear.Chunk.RenderPosition(interpolation);
+                Vec2 direction = MathUtil.SlerpDirection(
+                    spear.LastRotation, spear.Rotation, interpolation);
+                if (spear.HasUmbilical)
+                {
+                    Vec2[] current = spear.Umbilical;
+                    Vec2[] previousFrame = spear.LastUmbilical;
+                    Vec2 previous = Vec2.Lerp(previousFrame[0], current[0], interpolation);
+                    using (Pen umbilical = CreateRoundPen(
+                        LerpColor(pose.VisualBodyColor, Color.White, 0.35), 0.65f))
+                    {
+                        for (int segment = 1; segment < current.Length; segment++)
+                        {
+                            Vec2 next = Vec2.Lerp(previousFrame[segment],
+                                current[segment], interpolation);
+                            graphics.DrawLine(umbilical, previous.ToPointF(), next.ToPointF());
+                            previous = next;
+                        }
+                    }
+                }
+
+                Color needleColor = spear.NeedleHasConnection
+                    ? Color.White
+                    : LerpColor(OutlineColor, Color.White, spear.NeedleFadeFraction);
+                string element = "BioSpear" + (spear.NeedleType + 1);
+                AtlasSprite atlasSpear;
+                if (atlas != null && atlas.TryGet(element, out atlasSpear))
+                {
+                    double anchorY = spear.Mode == DesktopSpearMode.Thrown ||
+                        spear.Mode == DesktopSpearMode.StuckInCreature ? 0.85 : 0.5;
+                    DrawElement(graphics, element, center,
+                        AimScreen(Vec2.Zero, direction), 1.0, 1.0, 0.5,
+                        anchorY, needleColor);
+                }
+                else
+                {
+                    using (Pen fallback = CreateRoundPen(needleColor, 2.0f))
+                        graphics.DrawLine(fallback,
+                            (center - direction * 13.0).ToPointF(),
+                            (center + direction * 13.0).ToPointF());
+                }
+            }
+        }
+
         private static void FillCircle(System.Drawing.Graphics graphics, Vec2 center, double radius, Color color)
         {
             using (Brush brush = new SolidBrush(color))
             {
                 graphics.FillEllipse(brush, (float)(center.X - radius), (float)(center.Y - radius), (float)(radius * 2.0), (float)(radius * 2.0));
             }
+        }
+
+        private enum EffectShaderMask
+        {
+            FlatLight,
+            LightSource,
+            ShockWave
+        }
+
+        private static Bitmap CreateEffectShaderMask(EffectShaderMask kind)
+        {
+            const int size = 64;
+            Bitmap mask = new Bitmap(size, size, PixelFormat.Format32bppPArgb);
+            for (int y = 0; y < size; y++)
+            {
+                for (int x = 0; x < size; x++)
+                {
+                    double nx = (x + 0.5 - size * 0.5) / (size * 0.5);
+                    double ny = (y + 0.5 - size * 0.5) / (size * 0.5);
+                    double radius = Math.Sqrt(nx * nx + ny * ny);
+                    double alpha;
+                    if (kind == EffectShaderMask.LightSource)
+                        alpha = Math.Pow(Math.Max(0.0, 1.0 - radius), 2.0);
+                    else if (kind == EffectShaderMask.FlatLight)
+                        alpha = Math.Pow(Math.Max(0.0, 1.0 - radius), 0.65);
+                    else if (kind == EffectShaderMask.ShockWave)
+                        alpha = Math.Exp(-Math.Pow((radius - 0.76) / 0.055, 2.0));
+                    else alpha = 0.0;
+                    int a = MathUtil.Clamp((int)Math.Round(alpha * 255.0), 0, 255);
+                    mask.SetPixel(x, y, Color.FromArgb(a, 255, 255, 255));
+                }
+            }
+            return mask;
+        }
+
+        private void DrawEffectShaderSprite(System.Drawing.Graphics graphics,
+            Bitmap mask, Vec2 center, double rotation, double size, Color tint)
+        {
+            if (mask == null || size <= 0.0001 || tint.A <= 0) return;
+            DrawEffectSprite(graphics, mask, center, rotation, size,
+                GetEffectTintAttributes(tint));
+        }
+
+        private void DrawEffectSprite(System.Drawing.Graphics graphics, Bitmap bitmap,
+            Vec2 center, double rotation, double size, ImageAttributes attributes)
+        {
+            // DrawImage accepts a parallelogram. Supplying the already-rotated
+            // world-space points avoids Save/Translate/Rotate/Restore for each
+            // smoke mask and light sprite, which was the hot path during rapid
+            // Artificer jumps without changing its three original sprites.
+            double radians = rotation * Math.PI / 180.0;
+            double cosine = Math.Cos(radians);
+            double sine = Math.Sin(radians);
+            double half = size * 0.5;
+            Vec2 topLeft = center + new Vec2(-half * cosine + half * sine,
+                -half * sine - half * cosine);
+            effectDestinationPoints[0] = topLeft.ToPointF();
+            effectDestinationPoints[1] = (topLeft + new Vec2(size * cosine,
+                size * sine)).ToPointF();
+            effectDestinationPoints[2] = (topLeft + new Vec2(-size * sine,
+                size * cosine)).ToPointF();
+            graphics.DrawImage(bitmap, effectDestinationPoints,
+                new RectangleF(0, 0, bitmap.Width, bitmap.Height), GraphicsUnit.Pixel,
+                attributes, null, 0);
+        }
+
+        private ImageAttributes GetEffectTintAttributes(Color tint)
+        {
+            // The original shader receives continuous values. GDI+ needs a
+            // native ImageAttributes object per colour matrix, so retain a
+            // visually finer 5-bit approximation while bounding the cache.
+            Color quantized = Color.FromArgb(QuantizeEffectChannel(tint.A),
+                QuantizeEffectChannel(tint.R), QuantizeEffectChannel(tint.G),
+                QuantizeEffectChannel(tint.B));
+            int key = quantized.ToArgb();
+            ImageAttributes attributes;
+            if (effectTintAttributes.TryGetValue(key, out attributes)) return attributes;
+            if (effectTintAttributes.Count >= 512)
+            {
+                foreach (KeyValuePair<int, ImageAttributes> item in effectTintAttributes)
+                    item.Value.Dispose();
+                effectTintAttributes.Clear();
+            }
+            attributes = CreateTintAttributes(quantized);
+            effectTintAttributes[key] = attributes;
+            return attributes;
+        }
+
+        private static int QuantizeEffectChannel(int value)
+        {
+            return MathUtil.Clamp((int)Math.Round(value / 8.0) * 8, 0, 255);
+        }
+
+        private static Color LerpColor(Color from, Color to, double amount)
+        {
+            amount = MathUtil.Clamp01(amount);
+            return Color.FromArgb(
+                MathUtil.Clamp((int)Math.Round(MathUtil.Lerp(from.A, to.A, amount)), 0, 255),
+                MathUtil.Clamp((int)Math.Round(MathUtil.Lerp(from.R, to.R, amount)), 0, 255),
+                MathUtil.Clamp((int)Math.Round(MathUtil.Lerp(from.G, to.G, amount)), 0, 255),
+                MathUtil.Clamp((int)Math.Round(MathUtil.Lerp(from.B, to.B, amount)), 0, 255));
+        }
+
+        private static Color HslToRgb(double hue, double saturation, double lightness)
+        {
+            hue -= Math.Floor(hue);
+            saturation = MathUtil.Clamp01(saturation);
+            lightness = MathUtil.Clamp01(lightness);
+            double chroma = (1.0 - Math.Abs(2.0 * lightness - 1.0)) * saturation;
+            double sector = hue * 6.0;
+            double secondary = chroma * (1.0 - Math.Abs(sector % 2.0 - 1.0));
+            double red = 0.0;
+            double green = 0.0;
+            double blue = 0.0;
+            if (sector < 1.0) { red = chroma; green = secondary; }
+            else if (sector < 2.0) { red = secondary; green = chroma; }
+            else if (sector < 3.0) { green = chroma; blue = secondary; }
+            else if (sector < 4.0) { green = secondary; blue = chroma; }
+            else if (sector < 5.0) { red = secondary; blue = chroma; }
+            else { red = chroma; blue = secondary; }
+            double match = lightness - chroma * 0.5;
+            return Color.FromArgb(255,
+                MathUtil.Clamp((int)Math.Round((red + match) * 255.0), 0, 255),
+                MathUtil.Clamp((int)Math.Round((green + match) * 255.0), 0, 255),
+                MathUtil.Clamp((int)Math.Round((blue + match) * 255.0), 0, 255));
         }
 
         private static void DrawCross(System.Drawing.Graphics graphics, Pen pen, Vec2 point, double radius)
@@ -1067,12 +1837,20 @@ namespace RainWorldDesktopPet.Graphics
         {
             tailRasterGraphics.Dispose();
             tailRaster.Dispose();
+            flatLightShaderMask.Dispose();
+            lightSourceShaderMask.Dispose();
+            shockWaveShaderMask.Dispose();
             debugFont.Dispose();
             foreach (KeyValuePair<int, ImageAttributes> item in tintAttributes)
             {
                 item.Value.Dispose();
             }
             tintAttributes.Clear();
+            foreach (KeyValuePair<int, ImageAttributes> item in effectTintAttributes)
+            {
+                item.Value.Dispose();
+            }
+            effectTintAttributes.Clear();
             foreach (KeyValuePair<int, SolidBrush> item in bodyBrushes)
             {
                 item.Value.Dispose();

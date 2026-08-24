@@ -2,6 +2,8 @@ using System;
 using System.Drawing;
 using System.IO;
 using System.Text;
+using System.Collections.Generic;
+using System.Threading;
 using RainWorldDesktopPet.Core;
 using RainWorldDesktopPet.Creature;
 using RainWorldDesktopPet.Desktop;
@@ -13,6 +15,24 @@ namespace RainWorldDesktopPet.Graphics
     // anomalous tick deltas are only recorded for comparison with the DLL.
     public sealed class ParityDiagnostics
     {
+        private sealed class PendingLog
+        {
+            public string Path;
+            public string Text;
+        }
+
+        private static readonly object logSync = new object();
+        private static readonly Queue<PendingLog> pendingLogs = new Queue<PendingLog>();
+        private static readonly AutoResetEvent logSignal = new AutoResetEvent(false);
+
+        static ParityDiagnostics()
+        {
+            Thread writer = new Thread(LogWriterMain);
+            writer.IsBackground = true;
+            writer.Name = "Slugcat parity diagnostics";
+            writer.Start();
+        }
+
         private readonly string logPath = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "SlugcatInMyMonitor", "parity.log");
@@ -97,10 +117,7 @@ namespace RainWorldDesktopPet.Graphics
             Rectangle previous = stillExists ? surface.PreviousWindowBounds : Rectangle.Empty;
             Rectangle current = stillExists ? surface.CurrentWindowBounds : Rectangle.Empty;
             Vec2 movement = stillExists ? surface.MovementVelocity : Vec2.Zero;
-            try
-            {
-                Directory.CreateDirectory(Path.GetDirectoryName(surfaceLogPath));
-                File.AppendAllText(surfaceLogPath, string.Format(
+            QueueLog(surfaceLogPath, string.Format(
                     "[UNEXPECTED SURFACE LOSS] {0:u} tick={1} snapshot={20} chunk={2} lost={3}/{4} reason={5}; pos={6} last={7} vel={8}; " +
                     "prevContact F/L/R={9}/{10}/{11} current={12}/{13}/{14}; input={15}; " +
                     "surfaceExists={16} previousRect={17} currentRect={18} surfaceVelocity={19}{21}",
@@ -110,10 +127,6 @@ namespace RainWorldDesktopPet.Graphics
                     chunk.ContactFloor, chunk.ContactLeft, chunk.ContactRight, input,
                     stillExists, previous, current, movement,
                     chunk.CollisionSnapshotVersion, Environment.NewLine));
-            }
-            catch (Exception)
-            {
-            }
         }
 
         public void Observe(SlugcatPose pose)
@@ -163,10 +176,7 @@ namespace RainWorldDesktopPet.Graphics
 
             if (reason == null || pose.SimulationTick - lastLoggedTick < 40) return;
             lastLoggedTick = pose.SimulationTick;
-            try
-            {
-                Directory.CreateDirectory(Path.GetDirectoryName(logPath));
-                File.AppendAllText(logPath, string.Format(
+            QueueLog(logPath, string.Format(
                     "{0:u} tick={1} t={2:0.000} {3}; animation={4} body={5} facing={6} look={7} headDir={8} face={9} scaleX={10:0.###}; " +
                     "chunk0 {11}->{12}->{13}; head {14}->{15}->{16}; tail0 {17}->{18}->{19}; " +
                     "leftArm mode={20} hand={21}->{22} target={23} connection={24}; " +
@@ -181,10 +191,6 @@ namespace RainWorldDesktopPet.Graphics
                     pose.HandTargets[0], pose.ArmConnectionCurrent[0],
                     pose.ArmModes[1], pose.HandLast[1], pose.HandCurrent[1],
                     pose.HandTargets[1], pose.ArmConnectionCurrent[1], Environment.NewLine));
-            }
-            catch (Exception)
-            {
-            }
         }
 
         private void ObserveTerrainEscape(BodyChunk chunk, DesktopCollisionWorld world, long tick)
@@ -212,20 +218,13 @@ namespace RainWorldDesktopPet.Graphics
                     surface.Id, surface.Kind, surface.Label, surface.Left,
                     surface.Top, surface.Right, surface.Bottom);
             }
-            try
-            {
-                Directory.CreateDirectory(Path.GetDirectoryName(terrainEscapeLogPath));
-                File.AppendAllText(terrainEscapeLogPath, string.Format(
+            QueueLog(terrainEscapeLogPath, string.Format(
                     "[DESKTOP TERRAIN ESCAPE] {0:u}\nTick: {1}\nMonitor: {2}/{3}\nMonitor Bounds: {4}\nWorkArea: {5}\nFloorY: {6:0.###}\nChunk: {7}\nChunk Position: {8}\nLast Position: {9}\nVelocity: {10}\nLast Surface: {11}/{12}\nCollision Snapshot: {13}\nAvailable Surfaces:\n{14}\n",
                     DateTime.Now, tick, monitor.Name, monitor.TerrainId, monitor.Bounds,
                     monitor.WorkArea, floor, chunk.Index, chunk.Position,
                     chunk.LastPosition, chunk.Velocity, chunk.PreviousSupportingSurfaceId,
                     chunk.PreviousSupportingSurfaceKind, chunk.CollisionSnapshotVersion,
                     available));
-            }
-            catch (Exception)
-            {
-            }
         }
 
         private void ObserveAirControl(SlugcatPose pose)
@@ -233,19 +232,12 @@ namespace RainWorldDesktopPet.Graphics
             if (!pose.IsAirborne || pose.InputX == pose.PreviousInputX ||
                 pose.SimulationTick == lastAirControlLogTick) return;
             lastAirControlLogTick = pose.SimulationTick;
-            try
-            {
-                Directory.CreateDirectory(Path.GetDirectoryName(airControlLogPath));
-                File.AppendAllText(airControlLogPath, string.Format(
+            QueueLog(airControlLogPath, string.Format(
                     "[AIR CONTROL] {0:u}\nTick: {1}\nInput X: {2}\nPrevious Input X: {3}\nVelocity Before: {4:0.###}, {5:0.###}\nVelocity After: {6:0.###}, {7:0.###}\nAnimation: {8}\nBodyMode: {9}\nOriginal-equivalent branch: {10}\n\n",
                     DateTime.Now, pose.SimulationTick, pose.InputX, pose.PreviousInputX,
                     pose.AirHorizontalVelocityBefore[0], pose.AirHorizontalVelocityBefore[1],
                     pose.AirHorizontalVelocityAfter[0], pose.AirHorizontalVelocityAfter[1],
                     pose.Animation, pose.BodyMode, pose.AirControlBranch));
-            }
-            catch (Exception)
-            {
-            }
         }
 
         private void ObserveTerrainImpact(SlugcatPose pose)
@@ -253,10 +245,7 @@ namespace RainWorldDesktopPet.Graphics
             if (pose.TerrainImpactSequence == 0 ||
                 pose.TerrainImpactSequence == lastImpactSequence) return;
             lastImpactSequence = pose.TerrainImpactSequence;
-            try
-            {
-                Directory.CreateDirectory(Path.GetDirectoryName(impactLogPath));
-                File.AppendAllText(impactLogPath, string.Format(
+            QueueLog(impactLogPath, string.Format(
                     "[TERRAIN IMPACT] {0:u}\nTick: {1}\nChunk: {2}\nSurface: {3}/{4}\nPreImpact Velocity: {5}\nPostImpact Velocity: {6}\nCollision Normal: {7}\nImpact Direction: {8}\nImpact Speed: {9:0.###}\nFirst Contact: {10}\nOriginal Calculated Stun: {11}\nApplied Impact Stun: {12}\nDesktop Result: {13}\nOriginally Lethal: {14}\nSafety Override: {15}\nImpact Stun Deadline Tick: {16}\nFinal Stun Counter: {17}\nDead: {18}\nFace Element: {19}\n\n",
                     DateTime.Now, pose.SimulationTick, pose.ImpactBodyChunk,
                     pose.ImpactSurfaceId, pose.ImpactSurfaceKind, pose.PreImpactVelocity,
@@ -267,10 +256,6 @@ namespace RainWorldDesktopPet.Graphics
                     pose.ImpactSafetyOverrideApplied, pose.ImpactStunDeadlineTick,
                     pose.StunCounter, pose.ImpactCausedDeath || pose.Dead,
                     pose.SelectedFaceElement));
-            }
-            catch (Exception)
-            {
-            }
         }
 
         private void ObserveArmRotations(SlugcatPose pose)
@@ -285,10 +270,7 @@ namespace RainWorldDesktopPet.Graphics
                     double delta = ShortestAngleDelta(lastArmRotation[i], rotation);
                     if (Math.Abs(delta) > 120.0)
                     {
-                        try
-                        {
-                            Directory.CreateDirectory(Path.GetDirectoryName(logPath));
-                            File.AppendAllText(logPath, string.Format(
+                        QueueLog(logPath, string.Format(
                                 "[ARM ROTATION SPIKE] {0:u} tick={1} arm={2} previous={3:0.###} current={4:0.###} shortestDelta={5:0.###}; " +
                                 "hand={6} shoulder={7} direction={8} distance={9:0.###} target={10} connection={11} mode={12} retract={13} body={14} animation={15} scaleY={16:0.###}{17}",
                                 DateTime.Now, pose.SimulationTick, i, lastArmRotation[i], rotation, delta,
@@ -296,10 +278,6 @@ namespace RainWorldDesktopPet.Graphics
                                 Vec2.Distance(pose.Hands[i], pose.ArmShoulders[i]), pose.HandTargets[i],
                                 pose.ArmConnections[i], pose.ArmModes[i], pose.ArmRetractCounters[i],
                                 pose.BodyMode, pose.Animation, pose.ArmScaleY[i], Environment.NewLine));
-                        }
-                        catch (Exception)
-                        {
-                        }
                     }
                 }
                 lastArmRotation[i] = rotation;
@@ -321,6 +299,39 @@ namespace RainWorldDesktopPet.Graphics
         {
             return !double.IsNaN(value.X) && !double.IsNaN(value.Y) &&
                    !double.IsInfinity(value.X) && !double.IsInfinity(value.Y);
+        }
+
+        private static void QueueLog(string path, string value)
+        {
+            lock (logSync)
+            {
+                while (pendingLogs.Count >= 128) pendingLogs.Dequeue();
+                pendingLogs.Enqueue(new PendingLog { Path = path, Text = value });
+            }
+            logSignal.Set();
+        }
+
+        private static void LogWriterMain()
+        {
+            while (true)
+            {
+                PendingLog entry = null;
+                lock (logSync)
+                    if (pendingLogs.Count > 0) entry = pendingLogs.Dequeue();
+                if (entry == null)
+                {
+                    logSignal.WaitOne(1000);
+                    continue;
+                }
+                try
+                {
+                    Directory.CreateDirectory(Path.GetDirectoryName(entry.Path));
+                    File.AppendAllText(entry.Path, entry.Text);
+                }
+                catch (Exception)
+                {
+                }
+            }
         }
     }
 }
