@@ -34,6 +34,12 @@ namespace RainWorldDesktopPet.Graphics
         private readonly RainWorldAtlasSet atlas;
         private readonly Font debugFont = new Font("Consolas", 9.0f, FontStyle.Regular, GraphicsUnit.Point);
         private readonly Dictionary<int, ImageAttributes> tintAttributes = new Dictionary<int, ImageAttributes>();
+        // Smoke changes colour continuously for up to 400 original ticks.
+        // Keep its shader-adapter tints separate from sprite tints and bound
+        // their native GDI handles so repeated Artificer jumps cannot grow an
+        // unbounded ImageAttributes cache.
+        private readonly Dictionary<int, ImageAttributes> effectTintAttributes =
+            new Dictionary<int, ImageAttributes>();
         private readonly Dictionary<int, SolidBrush> bodyBrushes = new Dictionary<int, SolidBrush>();
         private readonly PointF[] destinationPoints = new PointF[3];
         private readonly PointF[] effectDestinationPoints = new PointF[3];
@@ -1105,6 +1111,13 @@ namespace RainWorldDesktopPet.Graphics
             ImageAttributes attributes;
             if (tintAttributes.TryGetValue(tint.ToArgb(), out attributes)) return attributes;
 
+            attributes = CreateTintAttributes(tint);
+            tintAttributes[tint.ToArgb()] = attributes;
+            return attributes;
+        }
+
+        private static ImageAttributes CreateTintAttributes(Color tint)
+        {
             float red = tint.R / 255.0f;
             float green = tint.G / 255.0f;
             float blue = tint.B / 255.0f;
@@ -1116,9 +1129,8 @@ namespace RainWorldDesktopPet.Graphics
                 new float[] { 0, 0, 0, tint.A / 255.0f, 0 },
                 new float[] { 0, 0, 0, 0, 1 }
             });
-            attributes = new ImageAttributes();
+            ImageAttributes attributes = new ImageAttributes();
             attributes.SetColorMatrix(matrix, ColorMatrixFlag.Default, ColorAdjustType.Bitmap);
-            tintAttributes[tint.ToArgb()] = attributes;
             return attributes;
         }
 
@@ -1421,7 +1433,10 @@ namespace RainWorldDesktopPet.Graphics
                     effect.Kind == AbilityEffectKind.WaterDrip)
                 {
                     Color trailColor = effect.Kind == AbilityEffectKind.Spark
-                        ? Color.FromArgb(MathUtil.Clamp((int)(255 * life), 0, 255), 255, 255, 255)
+                        // Spark.DrawSprites leaves the FSprite alpha at its
+                        // default one. Its tail shortens only in the final
+                        // tenth of life; it does not fade every frame.
+                        ? Color.White
                         : Color.FromArgb(MathUtil.Clamp((int)(210 * life), 0, 255), 220, 225, 235);
                     Vec2 trail = Vec2.Lerp(effect.PreviousPreviousPosition,
                         effect.PreviousPreviousPreviousPosition, interpolation);
@@ -1597,12 +1612,36 @@ namespace RainWorldDesktopPet.Graphics
                 size * sine)).ToPointF();
             effectDestinationPoints[2] = (topLeft + new Vec2(-size * sine,
                 size * cosine)).ToPointF();
-            int quantizedAlpha = MathUtil.Clamp((int)Math.Round(tint.A / 8.0) * 8,
-                0, 255);
-            Color quantized = Color.FromArgb(quantizedAlpha, tint.R, tint.G, tint.B);
             graphics.DrawImage(mask, effectDestinationPoints,
                 new RectangleF(0, 0, mask.Width, mask.Height), GraphicsUnit.Pixel,
-                GetTintAttributes(quantized), null, 0);
+                GetEffectTintAttributes(tint), null, 0);
+        }
+
+        private ImageAttributes GetEffectTintAttributes(Color tint)
+        {
+            // The original shader receives continuous values. GDI+ needs a
+            // native ImageAttributes object per colour matrix, so retain a
+            // visually finer 5-bit approximation while bounding the cache.
+            Color quantized = Color.FromArgb(QuantizeEffectChannel(tint.A),
+                QuantizeEffectChannel(tint.R), QuantizeEffectChannel(tint.G),
+                QuantizeEffectChannel(tint.B));
+            int key = quantized.ToArgb();
+            ImageAttributes attributes;
+            if (effectTintAttributes.TryGetValue(key, out attributes)) return attributes;
+            if (effectTintAttributes.Count >= 512)
+            {
+                foreach (KeyValuePair<int, ImageAttributes> item in effectTintAttributes)
+                    item.Value.Dispose();
+                effectTintAttributes.Clear();
+            }
+            attributes = CreateTintAttributes(quantized);
+            effectTintAttributes[key] = attributes;
+            return attributes;
+        }
+
+        private static int QuantizeEffectChannel(int value)
+        {
+            return MathUtil.Clamp((int)Math.Round(value / 8.0) * 8, 0, 255);
         }
 
         private static Color LerpColor(Color from, Color to, double amount)
@@ -1659,6 +1698,11 @@ namespace RainWorldDesktopPet.Graphics
                 item.Value.Dispose();
             }
             tintAttributes.Clear();
+            foreach (KeyValuePair<int, ImageAttributes> item in effectTintAttributes)
+            {
+                item.Value.Dispose();
+            }
+            effectTintAttributes.Clear();
             foreach (KeyValuePair<int, SolidBrush> item in bodyBrushes)
             {
                 item.Value.Dispose();

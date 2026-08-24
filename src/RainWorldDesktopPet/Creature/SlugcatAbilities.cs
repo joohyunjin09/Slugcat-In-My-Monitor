@@ -130,7 +130,10 @@ namespace RainWorldDesktopPet.Creature
             if (source.NextDouble() < 0.1)
                 lifeTime = source.Next(standardLifeTime,
                     Math.Max(standardLifeTime + 1, exceptionalLifeTime));
-            lifeTime = Math.Max(1, lifeTime);
+            // Spark uses Random.Range(0, standardLifeTime) in the original.
+            // A zero result is a valid one-frame cosmetic: it is drawn after
+            // Room.AddObject, then destroyed by its first Update. Do not turn
+            // that quarter of a 4-tick burst into extra visible trails.
             AbilityEffect effect = new AbilityEffect(AbilityEffectKind.Spark,
                 initialPosition, velocity, lifeTime, 1.0);
             // Spark stores lastPos before offsetting pos along velocity. Its

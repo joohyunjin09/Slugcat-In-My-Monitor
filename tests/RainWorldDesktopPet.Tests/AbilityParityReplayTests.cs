@@ -303,6 +303,22 @@ namespace RainWorldDesktopPet.Tests
                 True(slugcat.AbilityEffects[i].Kind == AbilityEffectKind.Spark,
                     "Spark creation order " + i);
 
+            bool foundZeroLifetimeSpark = false;
+            Random sparkRandom = new Random(923);
+            for (int i = 0; i < 64; i++)
+            {
+                AbilityEffect spark = AbilityEffect.CreateSpark(Vec2.Zero, Vec2.Right,
+                    4, 18, sparkRandom);
+                if (spark.InitialLifetime != 0) continue;
+                foundZeroLifetimeSpark = true;
+                spark.Step();
+                True(!spark.IsAlive,
+                    "zero-lifetime original Spark expires on its first update");
+                break;
+            }
+            True(foundZeroLifetimeSpark,
+                "original Random.Range(0, 4) branch produces a zero-lifetime Spark");
+
             AbilityEffect light = AbilityEffect.CreateExplosionLight(Vec2.Zero,
                 160.0, 1.0, 3);
             for (int tick = 0; tick < 4; tick++) light.Step();
