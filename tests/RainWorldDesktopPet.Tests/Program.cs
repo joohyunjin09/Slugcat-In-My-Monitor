@@ -855,6 +855,10 @@ namespace RainWorldDesktopPet.Tests
                 0);
             True((overlayStyle & NativeMethods.WS_EX_TRANSPARENT) != 0,
                 "the full-desktop overlay must remain click-through to other applications");
+            True((overlayStyle & NativeMethods.WS_EX_TOPMOST) != 0,
+                "the overlay must be created in the topmost window band");
+            True((overlayStyle & NativeMethods.WS_EX_NOACTIVATE) != 0,
+                "restoring topmost state must not require activating the overlay");
             True(LayeredOverlayWindow.ShouldSuppressLeftButton(
                     NativeMethods.WM_LBUTTONDOWN, false, true),
                 "the initial press on a Slugcat must be suppressed");

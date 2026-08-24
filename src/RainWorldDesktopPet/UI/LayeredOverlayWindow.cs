@@ -24,6 +24,7 @@ namespace RainWorldDesktopPet.UI
         private const int MinimumOverlaySize = 384;
         private const int OverlaySizeQuantum = 128;
         private const int OverlayPadding = 24;
+        private const int WmEnsureTopMost = 0x8001;
         private readonly RainWorldInstallation installation;
         private readonly SlugcatId startSlugcat;
         private readonly Timer renderTimer;
@@ -56,7 +57,9 @@ namespace RainWorldDesktopPet.UI
         private GameLoop gameLoop;
         private GameLoop grabbedGameLoop;
         private readonly NativeMethods.LowLevelMouseProc mouseHookCallback;
+        private readonly NativeMethods.WinEventProc foregroundEventCallback;
         private IntPtr mouseHook;
+        private IntPtr foregroundEventHook;
         private SettingsWindow settingsWindow;
         private SkinEditorWindow skinEditor;
         private Rectangle virtualDesktopBounds;
@@ -80,6 +83,7 @@ namespace RainWorldDesktopPet.UI
             this.startSlugcat = startSlugcat;
             this.startDmsSkinId = startDmsSkinId;
             mouseHookCallback = MouseHookCallback;
+            foregroundEventCallback = ForegroundEventCallback;
             FormBorderStyle = FormBorderStyle.None;
             ShowInTaskbar = false;
             TopMost = true;
@@ -208,6 +212,8 @@ namespace RainWorldDesktopPet.UI
             base.OnHandleCreated(e);
             ConfigureVirtualDesktop();
             InstallMouseHook();
+            InstallForegroundEventHook();
+            EnsureOverlayTopMost();
             compositionHost = new DirectCompositionHost(Handle, virtualDesktopBounds);
             collisionWorld.Refresh(Handle);
             surfaceRefreshClock.Restart();
@@ -224,6 +230,7 @@ namespace RainWorldDesktopPet.UI
         {
             renderingEnabled = false;
             renderTimer.Stop();
+            UninstallForegroundEventHook();
             UninstallMouseHook();
             ReleaseGrabInput();
             if (settingsWindow != null && !settingsWindow.IsDisposed) settingsWindow.Close();
@@ -482,6 +489,46 @@ namespace RainWorldDesktopPet.UI
             if (hook != IntPtr.Zero) NativeMethods.UnhookWindowsHookEx(hook);
         }
 
+        private void InstallForegroundEventHook()
+        {
+            if (foregroundEventHook != IntPtr.Zero) return;
+            foregroundEventHook = NativeMethods.SetWinEventHook(
+                NativeMethods.EVENT_SYSTEM_FOREGROUND,
+                NativeMethods.EVENT_SYSTEM_FOREGROUND,
+                IntPtr.Zero, foregroundEventCallback, 0, 0,
+                NativeMethods.WINEVENT_OUTOFCONTEXT |
+                NativeMethods.WINEVENT_SKIPOWNPROCESS);
+            if (foregroundEventHook == IntPtr.Zero)
+                Program.LogException(new Win32Exception(Marshal.GetLastWin32Error(),
+                    "Unable to monitor foreground window changes."));
+        }
+
+        private void UninstallForegroundEventHook()
+        {
+            IntPtr hook = foregroundEventHook;
+            foregroundEventHook = IntPtr.Zero;
+            if (hook != IntPtr.Zero) NativeMethods.UnhookWinEvent(hook);
+        }
+
+        private void ForegroundEventCallback(IntPtr hook, uint eventType, IntPtr handle,
+            int objectId, int childId, uint eventThread, uint eventTime)
+        {
+            if (handle == IntPtr.Zero || !IsHandleCreated || IsDisposed) return;
+            NativeMethods.PostMessage(Handle, WmEnsureTopMost, IntPtr.Zero, IntPtr.Zero);
+        }
+
+        private void EnsureOverlayTopMost()
+        {
+            if (!IsHandleCreated || IsDisposed) return;
+            if (!NativeMethods.SetWindowPos(Handle, NativeMethods.HWND_TOPMOST,
+                0, 0, 0, 0, NativeMethods.SWP_NOMOVE | NativeMethods.SWP_NOSIZE |
+                NativeMethods.SWP_NOACTIVATE | NativeMethods.SWP_NOOWNERZORDER))
+            {
+                Program.LogException(new Win32Exception(Marshal.GetLastWin32Error(),
+                    "Unable to restore the overlay topmost position."));
+            }
+        }
+
         private IntPtr MouseHookCallback(int code, IntPtr message, IntPtr data)
         {
             if (code >= 0)
@@ -527,6 +574,11 @@ namespace RainWorldDesktopPet.UI
 
         protected override void WndProc(ref Message message)
         {
+            if (message.Msg == WmEnsureTopMost)
+            {
+                EnsureOverlayTopMost();
+                return;
+            }
             if (message.Msg == NativeMethods.WM_LBUTTONUP && mouseCaptured)
             {
                 ReleaseGrabInput();

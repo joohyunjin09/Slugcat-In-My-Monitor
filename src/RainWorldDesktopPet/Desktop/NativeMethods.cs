@@ -13,6 +13,13 @@ namespace RainWorldDesktopPet.Desktop
         internal const int WS_EX_NOACTIVATE = 0x08000000;
         internal const int WS_EX_NOREDIRECTIONBITMAP = 0x00200000;
         internal const int WH_MOUSE_LL = 14;
+        internal const uint EVENT_SYSTEM_FOREGROUND = 0x0003;
+        internal const uint WINEVENT_OUTOFCONTEXT = 0x0000;
+        internal const uint WINEVENT_SKIPOWNPROCESS = 0x0002;
+        internal const int SWP_NOSIZE = 0x0001;
+        internal const int SWP_NOMOVE = 0x0002;
+        internal const int SWP_NOACTIVATE = 0x0010;
+        internal const int SWP_NOOWNERZORDER = 0x0200;
         internal const int WM_NCHITTEST = 0x0084;
         internal const int WM_CANCELMODE = 0x001F;
         internal const int WM_LBUTTONDOWN = 0x0201;
@@ -35,6 +42,10 @@ namespace RainWorldDesktopPet.Desktop
 
         internal delegate bool EnumWindowsProc(IntPtr handle, IntPtr parameter);
         internal delegate IntPtr LowLevelMouseProc(int code, IntPtr message, IntPtr data);
+        internal delegate void WinEventProc(IntPtr hook, uint eventType, IntPtr handle,
+            int objectId, int childId, uint eventThread, uint eventTime);
+
+        internal static readonly IntPtr HWND_TOPMOST = new IntPtr(-1);
 
         internal const int WHDR_DONE = 0x00000001;
         internal const int WHDR_PREPARED = 0x00000002;
@@ -158,6 +169,24 @@ namespace RainWorldDesktopPet.Desktop
         [DllImport("user32.dll")]
         internal static extern IntPtr CallNextHookEx(IntPtr hook, int code,
             IntPtr message, IntPtr data);
+
+        [DllImport("user32.dll")]
+        internal static extern IntPtr SetWinEventHook(uint eventMin, uint eventMax,
+            IntPtr module, WinEventProc callback, uint processId, uint threadId, uint flags);
+
+        [DllImport("user32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        internal static extern bool UnhookWinEvent(IntPtr hook);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        internal static extern bool SetWindowPos(IntPtr handle, IntPtr insertAfter,
+            int x, int y, int width, int height, int flags);
+
+        [DllImport("user32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        internal static extern bool PostMessage(IntPtr handle, int message,
+            IntPtr wParam, IntPtr lParam);
 
         [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
         internal static extern IntPtr GetModuleHandle(string moduleName);
