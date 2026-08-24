@@ -18,6 +18,7 @@ namespace RainWorldDesktopPet.Audio
         private double playbackEndTime = double.NegativeInfinity;
         private double animationStartTime = double.NegativeInfinity;
         private double animationEndTime = double.NegativeInfinity;
+        private double blinkEndTime = double.NegativeInfinity;
         private double spearmasterTailSwitchTime = double.NegativeInfinity;
         private double lastMeowEndTime = double.NegativeInfinity;
         private DesktopBehavior previousBehavior;
@@ -113,11 +114,13 @@ namespace RainWorldDesktopPet.Audio
             playbackStartTime = now;
             playbackEndTime = now + Math.Max(0.08,
                 variation.DurationSeconds / Math.Max(0.1f, variation.PlaybackPitch));
-            // Push To Meow's DoMeowAnim uses a 33 ms delayed look/blink, then
-            // releases it 160 ms (short) or 260 ms (long) later. Animation is
-            // intentionally independent from WAV duration.
+            // DoMeowAnim queues LookAtPoint and Blink after 33 ms. LookAtNothing
+            // runs 160/260 ms later, while Player.Blink(9/11) remains active
+            // for its own original 40 Hz tick count.
             animationStartTime = now + 0.033;
             animationEndTime = animationStartTime + (isShort ? 0.160 : 0.260);
+            blinkEndTime = animationStartTime +
+                (isShort ? 9.0 : 11.0) * SimulationConstants.LogicStepSeconds;
             spearmasterTailSwitchTime = now + 0.080 + random.NextDouble() * 0.060;
             nextCandidateTime = playbackEndTime + MinimumCooldownSeconds;
             log.Info("PushToMeow", "Playing " + slugcatId + " " + (isShort ? "short" : "long") +
@@ -155,11 +158,17 @@ namespace RainWorldDesktopPet.Audio
             pose.MeowIsShort = shortMeow;
             pose.MeowAsset = currentVariation.AssetName;
 
-            // DoMeowAnim waits 33 ms before looking up and blinking. It drops
-            // the forced look at 193/293 ms, even if a source WAV is longer.
+            // DoMeowAnim waits 33 ms before LookAtPoint. The face resolver
+            // turns that look vector into the original three-pixel upward
+            // Face sprite offset for both normal and Crawl poses.
             if (now >= animationStartTime && now < animationEndTime)
             {
                 pose.LookDirection = new Vec2(0.0, -1.0);
+            }
+            // Blink(9/11) is intentionally independent of LookAtNothing. It
+            // selects FaceB (closed eyes) for the remaining original ticks.
+            if (now >= animationStartTime && now < blinkEndTime)
+            {
                 pose.Blink = true;
             }
 

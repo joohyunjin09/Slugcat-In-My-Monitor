@@ -136,6 +136,8 @@ namespace RainWorldDesktopPet.Tests
             Run("PlayerGraphics arm reflection matches y-up signed distance",
                 ArmScaleReflectionMatchesFutileCoordinates);
             Run("Skin face and head families follow PlayerGraphics branches", SkinFaceFamiliesMatchPlayerGraphics);
+            Run("Push To Meow lifts and closes faces while standing and crawling",
+                PushToMeowFaceAnimationUsesOriginalFaceStates);
             Run("Every visual profile remains valid through movement and stun states", AllVisualProfilesRemainStableAcrossStates);
             AbilityParityReplayTests.Register(Run);
 
@@ -2191,6 +2193,41 @@ namespace RainWorldDesktopPet.Tests
                 "Saint head uses HeadB in every movement state");
             True(state.FaceElement.StartsWith("FaceB", StringComparison.Ordinal),
                 "Saint normal face uses the closed-eye FaceB family");
+        }
+
+        private static void PushToMeowFaceAnimationUsesOriginalFaceStates()
+        {
+            SlugcatPose pose = new SlugcatPose();
+            pose.SelectedSlugcat = SlugcatId.White;
+            pose.CurrentSkin = SlugcatSkin.Default;
+            pose.Conscious = true;
+            pose.Animation = AnimationIndex.None;
+            pose.BodyMode = BodyModeIndex.Stand;
+            pose.Chest = new Vec2(100.0, 130.0);
+            pose.Hips = new Vec2(100.0, 150.0);
+            pose.Head = new Vec2(100.0, 100.0);
+            pose.Facing = 1;
+
+            OriginalFaceState standingNormal = SpriteRenderer.ResolveOriginalFaceState(pose);
+            pose.LookDirection = Vec2.Up;
+            pose.Blink = true;
+            OriginalFaceState standingMeow = SpriteRenderer.ResolveOriginalFaceState(pose);
+            True(standingMeow.FaceElement.StartsWith("FaceB", StringComparison.Ordinal),
+                "standing meow should select the closed-eye FaceB sprite");
+            Near(standingNormal.FacePosition.Y - 3.0, standingMeow.FacePosition.Y,
+                0.0001, "standing meow should raise the face by the original look offset");
+
+            pose.BodyMode = BodyModeIndex.Crawl;
+            pose.LookDirection = Vec2.Zero;
+            pose.Blink = false;
+            OriginalFaceState crawlNormal = SpriteRenderer.ResolveOriginalFaceState(pose);
+            pose.LookDirection = Vec2.Up;
+            pose.Blink = true;
+            OriginalFaceState crawlMeow = SpriteRenderer.ResolveOriginalFaceState(pose);
+            True(crawlNormal.FaceElement == "FaceA4", "normal crawl face sprite");
+            True(crawlMeow.FaceElement == "FaceB4", "crawl meow closed-eye face sprite");
+            Near(crawlNormal.FacePosition.Y - 3.0, crawlMeow.FacePosition.Y,
+                0.0001, "crawl meow should preserve the original upward face offset");
         }
 
         private static void AllVisualProfilesRemainStableAcrossStates()
