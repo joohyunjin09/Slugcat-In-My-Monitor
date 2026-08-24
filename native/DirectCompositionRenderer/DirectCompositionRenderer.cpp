@@ -50,14 +50,20 @@ PixelInput VSMain(VertexInput input) { PixelInput output;
     output.position=float4(input.position,0,1); output.uv=input.uv;
     output.color=input.color; output.seed=input.seed; return output; }
 float Hash(float2 value) { return frac(sin(dot(value,float2(12.9898,78.233)))*43758.5453); }
+float Noise(float2 value) { float2 cell=floor(value),f=frac(value);
+    f=f*f*(3-2*f); float a=Hash(cell),b=Hash(cell+float2(1,0));
+    float c=Hash(cell+float2(0,1)),d=Hash(cell+1);
+    return lerp(lerp(a,b,f.x),lerp(c,d,f.x),f.y); }
 float4 PSMain(PixelInput input) : SV_TARGET { float2 p=input.uv*2-1;
-    float radial=saturate(1-length(p));
-    float2 cell=floor(input.position.xy*.18+input.seed*float2(17,31));
-    float coarse=Hash(cell); float fine=Hash(cell*2.37+input.seed*13);
-    float curl=.5+.5*sin((p.x*4+p.y*3+input.seed)*3.14159265);
-    float density=saturate(radial*1.25+coarse*.32+fine*.18+curl*.12-.48);
-    density*=smoothstep(0,.22,radial); float alpha=density*input.color.a;
-    return float4(input.color.rgb*alpha,alpha); }
+    float dist=saturate(1-length(p)); float2 screen=input.position.xy;
+    float h=Noise(screen*.052+input.seed*float2(7,13));
+    h*=Noise(screen*.117+input.seed*float2(19,3));
+    float inside=.3+.5*input.color.a;
+    h=lerp(h*dist,h+(1-h)*inside,dist);
+    h-=Noise(screen*.151+input.seed*float2(5,23))*lerp(.7,.3,input.color.a);
+    h+=.25*dist;
+    clip(h*input.color.a-.35);
+    return float4(input.color.rgb*input.color.a,input.color.a); }
 )";
 
     struct Renderer

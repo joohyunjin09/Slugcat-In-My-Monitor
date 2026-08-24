@@ -82,10 +82,10 @@ signed distance의 부호는 좌표 반사 때 한 번 뒤집어야 한다. 기�
 - `Spark`: 하나의 삼각형 trail
 
 설치된 `resources.assets`에서 `Futile/FireSmoke`, `Futile/FlatLight`,
-`Futile/LightSource`, `Futile/ShockWave` 등록을 확인했다. GDI+는 Unity의 컴파일된 shader를
-실행할 수 없으므로, 동일 역할을 나타내는 64×64 alpha mask 네 개를 시작 시 한 번 만들고
-재사용한다. 개수, 수명, 크기/alpha 곡선, 계층은 원작 대응이지만 픽셀 단위 shader 출력과
-room palette는 근사치다.
+`Futile/LightSource`, `Futile/ShockWave` 등록을 확인했다. 연기는 D3D11 절차형 noise를
+DirectComposition 효과 surface에 직접 그린다. 원본의 세 noise 결합과 `.35` discard,
+개수, 수명, 크기/alpha 곡선, 두 계층은 유지하지만 Unity texture의 픽셀과 room palette는
+근사치다. 나머지 효과는 시작 시 만든 64×64 alpha mask를 재사용한다.
 
 ## 5. Saint Tongue
 
