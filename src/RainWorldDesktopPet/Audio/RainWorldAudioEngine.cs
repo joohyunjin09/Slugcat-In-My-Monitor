@@ -480,6 +480,17 @@ public void Play(SoundEvent sound, Vec2 listener, long simulationTick,
         return;
     }
 
+    // Defensive backstop for old/queued callers. Slugcat.EmitImpactSound no
+    // longer creates this event for desktop-pet high-speed contacts, but its
+    // bassOnly source is the same low cue users perceive as game-over audio.
+    if (string.Equals(sound.Id, "Slugcat_Terrain_Impact_Hard",
+        StringComparison.OrdinalIgnoreCase))
+    {
+        lastEvent = "suppressed high-impact sound: " + sound.Id;
+        LogDiagnostic("[Audio] Suppressed desktop high-impact sound: " + sound.Id);
+        return;
+    }
+
     // Events are intentionally consumed while disabled. Re-enabling
     // starts with the next event and never replays a stale effect.
     if (!enabled) return;

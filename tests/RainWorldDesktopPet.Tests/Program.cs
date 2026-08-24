@@ -2779,6 +2779,12 @@ namespace RainWorldDesktopPet.Tests
                 "original lethal result becomes maximum impact stun");
             True(high.LastTerrainImpact.DesktopResult == DesktopPetImpactResult.MaximumStun,
                 "desktop impact result is MaximumStun");
+            SoundEvent[] highSounds = high.DrainSoundEvents();
+            for (int index = 0; index < highSounds.Length; index++)
+            {
+                True(highSounds[index].Id != "Slugcat_Terrain_Impact_Hard",
+                    "high-speed desktop safety impact never queues bassOnly death-like audio");
+            }
         }
 
         private static void TerrainFirstContactUsesDirection()

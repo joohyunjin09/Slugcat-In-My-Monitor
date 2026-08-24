@@ -544,14 +544,15 @@ namespace RainWorldDesktopPet.Creature
 
         private void EmitImpactSound(TerrainImpactData impact)
         {
+            // Desktop-pet impacts are intentionally non-lethal. The original
+            // hard-impact event maps to bassOnly (the low "dung" cue that is
+            // easily mistaken for the game-over/death sound), so never emit it
+            // for the high-speed collision path. Medium and light contacts
+            // retain their normal feedback.
+            if (impact.ImpactSpeed > 25.0) return;
             string id;
             double volume;
-            if (impact.ImpactSpeed > 25.0)
-            {
-                id = SelectedSlugcat.Audio.ImpactHard;
-                volume = 1.0;
-            }
-            else if (impact.ImpactSpeed > 12.0)
+            if (impact.ImpactSpeed > 12.0)
             {
                 id = SelectedSlugcat.Audio.ImpactMedium;
                 volume = 0.75;
