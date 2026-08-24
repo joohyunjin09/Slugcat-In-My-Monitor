@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Imaging;
 using System.IO;
+using System.Linq;
 using RainWorldDesktopPet.AI;
 using RainWorldDesktopPet.Core;
 using RainWorldDesktopPet.Creature;
@@ -10,6 +11,8 @@ using RainWorldDesktopPet.Desktop;
 using RainWorldDesktopPet.Physics;
 using RainWorldDesktopPet.RainWorld;
 using RainWorldDesktopPet.Graphics;
+using RainWorldDesktopPet.Audio;
+using RainWorldDesktopPet.Workshop;
 
 namespace RainWorldDesktopPet.Tests
 {
@@ -25,7 +28,8 @@ namespace RainWorldDesktopPet.Tests
                 {
                     RenderPreview(args[1], args.Length >= 3 ? ReadVariant(args[2]) : SlugcatVariant.Survivor,
                         args.Length >= 4 ? args[3] : "walk",
-                        args.Length >= 5 ? ReadSkin(args[4]) : SlugcatSkin.Default);
+                        args.Length >= 5 ? ReadSkin(args[4]) : SlugcatSkin.Default,
+                        args.Length >= 6 ? args[5] : null);
                     return 0;
                 }
                 catch (Exception exception)
@@ -127,7 +131,11 @@ namespace RainWorldDesktopPet.Tests
             if (localInstallation == null)
                 Console.WriteLine("SKIP  Local embedded original atlas (Rain World installation not found)");
             else
-            Run("Local embedded original atlas loads without DMS", delegate { EmbeddedOriginalAtlasLoads(localInstallation); });
+            {
+                Run("Local embedded original atlas loads without DMS", delegate { EmbeddedOriginalAtlasLoads(localInstallation); });
+                Run("Installed Workshop mods parse without loading their DLLs",
+                    delegate { LocalWorkshopIntegrationsParse(localInstallation); });
+            }
 
             Console.WriteLine(failures == 0
                 ? "All RainWorldDesktopPet tests passed."
@@ -136,7 +144,7 @@ namespace RainWorldDesktopPet.Tests
         }
 
         private static void RenderPreview(string outputPath, SlugcatVariant variant, string scenario,
-            SlugcatSkin skin)
+            SlugcatSkin skin, string dmsSkinId)
         {
             RainWorldInstallation installation = new RainWorldLocator().Locate(null);
             if (installation == null) throw new InvalidOperationException("Rain World installation was not found.");
@@ -174,10 +182,23 @@ namespace RainWorldDesktopPet.Tests
                 proceduralGraphics.Step(ai.Attention, world);
             }
 
+            WorkshopCatalog workshop = null;
+            DmsSkinCatalog dms = null;
             using (SpriteRenderer renderer = new SpriteRenderer(set))
             using (Bitmap bitmap = new Bitmap(560, 420, PixelFormat.Format32bppPArgb))
             using (System.Drawing.Graphics drawing = System.Drawing.Graphics.FromImage(bitmap))
             {
+                if (!string.IsNullOrWhiteSpace(dmsSkinId))
+                {
+                    WorkshopLog log = new WorkshopLog(Path.Combine(Path.GetTempPath(),
+                        "SlugcatInMyMonitor-tests", "preview.log"), false);
+                    workshop = new WorkshopCatalog(installation, log);
+                    dms = new DmsSkinCatalog(workshop, log);
+                    DmsSkinDefinition dmsSkin = dms.Find(dmsSkinId);
+                    if (dmsSkin == null) throw new InvalidOperationException(
+                        "DMS spritesheet unavailable: " + dmsSkinId);
+                    renderer.SetDmsSkin(dmsSkin);
+                }
                 drawing.Clear(Color.Transparent);
                 SlugcatPose pose = proceduralGraphics.BuildPose(1.0, ai.Attention);
                 Vec2 origin = pose.ToRenderedWorld((pose.Chest + pose.Hips) * 0.5) -
@@ -187,10 +208,98 @@ namespace RainWorldDesktopPet.Tests
                 if (!Directory.Exists(directory)) Directory.CreateDirectory(directory);
                 bitmap.Save(outputPath, ImageFormat.Png);
             }
+            if (dms != null) dms.Dispose();
+            if (workshop != null) workshop.Dispose();
             Console.WriteLine("Preview written to " + Path.GetFullPath(outputPath));
             Console.WriteLine(loader.Status);
             Console.WriteLine("Scenario " + scenario);
             Console.WriteLine("Skin " + skin);
+            Console.WriteLine("DMS " + (dmsSkinId ?? "none"));
+        }
+
+        private static void LocalWorkshopIntegrationsParse(RainWorldInstallation installation)
+        {
+            string logPath = Path.Combine(Path.GetTempPath(), "SlugcatInMyMonitor-tests",
+                "workshop.log");
+            WorkshopLog log = new WorkshopLog(logPath, false);
+            using (WorkshopCatalog workshop = new WorkshopCatalog(installation, log))
+            {
+                RainWorldMod pushMod = workshop.FindById("pushtomeow");
+                if (pushMod != null)
+                {
+                    PushToMeowLibrary push = new PushToMeowLibrary(workshop, log, 12345);
+                    True(push.IsAvailable == pushMod.IsActive,
+                        "Push To Meow playback availability must follow its Remix active state");
+                    string[] ids = { "White", "Yellow", "Red", "Gourmand", "Artificer",
+                        "Rivulet", "Spear", "Saint" };
+                    foreach (string id in ids)
+                    {
+                        MeowVoiceSet voice = push.GetVoice(id);
+                        True(voice != null && voice.ShortVariations.Count > 0 &&
+                            voice.LongVariations.Count > 0, id + " must have short and long variations");
+                        True(voice.ShortVariations.All(item => item.DurationSeconds > 0.0) &&
+                            voice.LongVariations.All(item => item.DurationSeconds > 0.0),
+                            id + " WAV durations must be decoded");
+                    }
+                }
+
+                if (workshop.FindById("dressmyslugcat") != null)
+                {
+                    using (DmsSkinCatalog dms = new DmsSkinCatalog(workshop, log))
+                    {
+                        True(dms.Skins.Count > 0, "installed DMS must expose at least one valid spritesheet");
+                        foreach (DmsSkinDefinition skin in dms.Skins)
+                            True(skin.AvailableParts.Any(), skin.Id + " must contain a complete DMS sprite group");
+
+                        AtlasSprite sprite;
+                        DmsSkinDefinition saintRaincoat = dms.Find("homeobox.raincoatsaint");
+                        if (saintRaincoat != null)
+                            True(saintRaincoat.TryGetSprite("HeadB0", "Saint", DmsSpriteSide.None,
+                                out sprite), "Saint HeadB sprites must map to the generic DMS HeadA family");
+
+                        DmsSkinDefinition template = dms.Find("dressmyslugcat.template");
+                        if (template != null)
+                            True(template.TryGetSprite("FaceC0", "Artificer", DmsSpriteSide.None,
+                                out sprite), "Artificer FaceC sprites must map to the generic FaceA family");
+
+                        DmsSkinDefinition bow = dms.Find("InanimateSwagsanity.Bow");
+                        if (bow != null)
+                        {
+                            True(bow.TryGetSprite("HeadA0", "White", DmsSpriteSide.None, out sprite),
+                                "valid parts from a partly broken installed atlas set must remain available");
+                            True(!bow.TryGetSprite("HipsA", "White", DmsSpriteSide.None, out sprite),
+                                "an invalid atlas pair must fall back instead of exposing corrupt sprites");
+                        }
+
+                        DmsSkinDefinition rivulet = dms.Find("VNNYS.RIVL.REDRWN");
+                        if (rivulet != null)
+                        {
+                            True(rivulet.TryGetSprite("LizardScaleA3", "Rivulet", DmsSpriteSide.None,
+                                out sprite), "valid Rivulet gills from an installed DMS skin must load");
+                            True(!rivulet.TryGetSprite("TailTexture", "Rivulet", DmsSpriteSide.None,
+                                out sprite), "a corrupt optional tail atlas must preserve the base tail");
+                        }
+                    }
+                }
+
+                List<RainWorldMod> removedPush = workshop.Mods.Where(mod =>
+                    string.Equals(mod.Id, "pushtomeow", StringComparison.OrdinalIgnoreCase)).ToList();
+                foreach (RainWorldMod mod in removedPush) workshop.Mods.Remove(mod);
+                PushToMeowLibrary absentPush = new PushToMeowLibrary(workshop, log, 24680);
+                True(!absentPush.IsInstalled && !absentPush.IsAvailable,
+                    "missing Push To Meow must leave automatic meowing disabled");
+                foreach (RainWorldMod mod in removedPush) workshop.Mods.Add(mod);
+
+                List<RainWorldMod> removedDms = workshop.Mods.Where(mod =>
+                    string.Equals(mod.Id, "dressmyslugcat", StringComparison.OrdinalIgnoreCase)).ToList();
+                foreach (RainWorldMod mod in removedDms) workshop.Mods.Remove(mod);
+                using (DmsSkinCatalog absentDms = new DmsSkinCatalog(workshop, log))
+                {
+                    True(!absentDms.IsFrameworkInstalled && absentDms.Skins.Count == 0,
+                        "missing Dress My Slugcat must leave the base appearance available");
+                }
+                foreach (RainWorldMod mod in removedDms) workshop.Mods.Add(mod);
+            }
         }
 
         private static void Run(string name, Action test)
