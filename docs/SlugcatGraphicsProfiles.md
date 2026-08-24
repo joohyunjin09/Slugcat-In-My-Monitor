@@ -133,4 +133,4 @@ MSC의 마지막 gown 예약 슬롯은 cloak story state가 없는 데스크톱 
 
 tray의 `Slugcat skin` 또는 `--skin default|artificer|spearmaster|rivulet|saint`로 선택한다. 프로필 전환은 tail graphics simulation과 extension 배열만 다시 만들며 `BodyChunk` 위치/속도/질량, `SlugcatVariant`, AI, stun, terrain state는 변경하지 않는다. 기존 tail control point의 pos/lastPos/vel은 같은 4-segment topology 사이에서 승계한다. 선택한 프로필의 로컬 element가 하나라도 없으면 메뉴를 비활성화하며 Default로 조용히 대체하지 않는다.
 
-F1에는 skin, 원작 ID, profile, base/extra sprite count, face, tail profile, extension 목록과 각 extra part의 last/current/render position, element, rotation, layer를 표시한다. Rivulet은 connection-control-target wire도 함께 그린다.
+트레이 메뉴의 `Debug Overlay`에는 skin, 원작 ID, profile, base/extra sprite count, face, tail profile, extension 목록과 각 extra part의 last/current/render position, element, rotation, layer를 표시한다. Rivulet은 connection-control-target wire도 함께 그린다.

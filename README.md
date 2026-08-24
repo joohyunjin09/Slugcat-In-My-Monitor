@@ -1,148 +1,131 @@
 # SlugcatInMyMonitor
 
-로컬 Rain World 설치본의 **원작 플레이어 atlas**를 읽어 Windows 바탕화면에서 독립 실행되는 Shimeji 스타일 Slugcat 펫입니다. Rain World `v1.11.8`의 `Assembly-CSharp.dll`을 정적 분석해 확인한 40 Hz 루프, 두 `BodyChunk`, 거리 제약, `TailSegment`, `Limb`, `PlayerGraphics` 구조를 데스크톱 환경에 맞게 재구현합니다.
+[![여러 Slugcat이 바탕화면을 돌아다니는 예시 영상](docs/media/readme/example-preview.gif)](docs/media/readme/example.mp4)
 
-RainWorld.exe, Steam 게임 프로세스, Unity Player, BepInEx를 실행하거나 런타임 의존성으로 사용하지 않습니다. 게임 자산도 저장소나 빌드 산출물에 복사하지 않고, 실행 중 사용자 PC의 설치 폴더에서만 읽습니다.
+미리보기를 클릭하면 원본 MP4 영상을 볼 수 있습니다.
 
-## 현재 구현
+Rain World의 Slugcat이 Windows 바탕화면을 돌아다니는 데스크톱 펫입니다.
+Slugcat은 모니터와 실제 창의 경계를 바닥이나 벽처럼 이용하고, 걷기·점프·낙하·벽
+오르기·휴식 같은 행동을 스스로 선택합니다. 마우스로 잡아서 옮기거나 던질 수도 있습니다.
 
-- 40 Hz 고정 시뮬레이션과 DWM/모니터 주사율 렌더링 보간(`lastPosition → position`)
-- 원작 단위 물리를 유지하고 Windows 좌표 경계에서 X/Y 모두 적용하는 `DesktopWorldScale=2.20`
-- 원작과 같은 반지름 9/8의 두 몸통 chunk, 17 px connection, 질량·탄성·대칭값
-- 중력, 공기 저항, 바닥 마찰, 낙하, 착지 압축, 점프 준비, 벽 오르기, 원작 body-mode 힘
-- 원작 기본형과 같은 4개 `TailSegment` 물리점과 보간된 stretched radius, 모든 렌더 경로에서 하나로 이어지는 15-vertex/13-triangle tail mesh
-- 원작 `GenericBodyPart` 머리/단일 legs particle과 `SlugcatHand` mode·retract·20 px constraint
-- `DesktopPetAI → VirtualInput → SlugcatMovement` 계층과 13개 utility 행동
-- 모니터별 floor·작업 표시줄 상단·노출된 좌우 경계와 실제 top-level 창의 윗면/옆면을 하나의 충돌 snapshot으로 사용
-- 창 끝 낙하 시 아래 창 또는 monitor floor와 swept 충돌하며, 음수 좌표·엇갈린 멀티 모니터 경계를 연속 topology로 추적
-- 원작 공중 수평 제어와 충돌 직전 방향 성분 기반 `TerrainImpact`, Survivor/Hunter/Monk `35/60` 및 Gourmand `40/80` severity 임계값
-- lethal terrain severity를 최대 3초(`120` tick) 기절로 바꾸고 연속 충돌에도 최초 recovery deadline을 연장하지 않는 데스크톱 펫 안전 계층
-- 원작 충돌→연결 제약 순서는 유지하되 제약이 만든 모니터 바닥/외곽 모서리 관통은 같은 terrain snapshot에서 즉시 접촉 재투영
-- 원작 tick stun 감소, 기절 중 계속되는 BodyChunk·꼬리 물리, `FaceStunned`, 손 retract와 mouse attention 차단
-- HWND 수명/누락 유예, 이동하는 창 surface 및 멀티 모니터 추적
-- 전체 virtual desktop persistent DIB 기반 투명 layered overlay, 음수 모니터 좌표, click-through, tray/F1 디버그
-- 창·커서 desktop pixel을 원작 simulation unit으로 변환하고 렌더/화면 이동에 일관되게 적용하는 2.20배 world scale
-- 마우스로 몸통을 잡아 끌고 놓아 던지는 상호작용
-- 머리에서 원작 90-unit 이내의 실제 좌/우/중 클릭에만 1.5초간 활성화되는 임시 마우스 시선
+프로그램은 로컬 Rain World 설치본에서 원작 플레이어 atlas를 실행 중에 읽습니다.
+Rain World나 Steam을 함께 실행할 필요가 없으며, 게임 자산을 저장소나 배포 파일에
+포함하지 않습니다.
 
-## 원작 Slugcat
+## 지원 Slugcat
 
-DMS 스킨 에디터는 실행 파일과 같은 폴더 또는 그 주변의 `skins`, 개발 저장소의 `assets/skins`,
-`%LOCALAPPDATA%\SlugcatInMyMonitor\skins`, Rain World의 로컬 mod 폴더에서
-`metadata.json`과 파츠별 PNG/TXT 아틀라스 쌍을 검색합니다. 검색된 세트를 선택하면
-원본 `rainWorld` 아틀라스의 해당 파츠 위에 실제 프레임을 오버라이드합니다.
+각 Slugcat은 원작에서 확인한 기본 색상과 일부 능력치 차이를 사용합니다.
 
-| 실행 이름 | 캐릭터 | 원작 내부 이름 | 색 |
-|---|---|---|---|
-| `white` | Survivor | `White` | `#FFFFFF` |
-| `yellow` | Monk | `Yellow` | `#FFFF73` |
-| `red` | Hunter | `Red` | `#FF7373` |
-| `gourmand` | Gourmand | `Gourmand` | `#F0C197` |
+| Slugcat | 실행 이름 | 기본 색상 |
+|---|---|---|
+| Survivor | `white` | White |
+| Monk | `yellow` | Yellow |
+| Hunter | `red` | Red |
+| Gourmand | `gourmand` | Light brown |
 
-Gourmand는 원작 `PlayerGraphics.DrawSprites`처럼 body의 X scale을 1.4, hips의 X scale을 1.6으로 적용합니다. Monk/Hunter/Gourmand의 몸무게와 Hunter의 달리기 계수도 `SlugcatStats`에서 확인한 값을 사용합니다.
+Downpour가 설치되어 필요한 atlas를 찾을 수 있으면 아래 외형도 선택할 수 있습니다.
+이 항목들은 현재 물리나 AI가 다른 별도 캐릭터가 아니라, 선택한 Slugcat에 적용되는
+**실험적 시각 스킨**입니다.
 
-Downpour가 설치되어 `rainworldmsc`의 필수 element가 모두 확인되면 tray의 `Slugcat skin`에서 Artificer, Spearmaster, Rivulet, Saint 외형을 별도로 선택할 수 있습니다. 이 선택은 물리/AI를 바꾸지 않습니다. 캐릭터별 DLL 분기와 sprite index는 [docs/SlugcatGraphicsProfiles.md](docs/SlugcatGraphicsProfiles.md)에 기록되어 있습니다.
+- Artificer
+- Spearmaster
+- Rivulet
+- Saint
 
-## 빌드와 실행
+## 설정 패널
 
-요구 사항:
+![SlugcatInMyMonitor 설정 패널](docs/media/readme/settingPanel.png)
 
-- Windows 10/11
-- .NET Framework 4.8 runtime
-- PowerShell 5.1 이상
+시스템 트레이의 Slugcat 아이콘을 왼쪽 클릭하면 설정 패널이 열립니다.
+
+- Slugcat 추가, 선택 및 삭제
+- 캐릭터와 기본 색상 변경
+- 실험적 시각 스킨 선택
+- 디버그 표시와 전체 일시 정지
+- 렌더링 재시도 및 프로그램 종료
+
+시스템 단축키와 충돌하지 않도록 전역 단축키는 등록하지 않습니다. 트레이 우클릭
+메뉴는 설정 창을 열 수 없을 때 사용할 수 있는 보조 경로입니다.
+
+## 스킨 패널 (Experimental)
+
+> [!WARNING]
+> 스킨 설정 시스템은 현재 테스트 목적으로 개발 중인 임시 기능입니다.
+> UI, 프리셋 형식, 지원 범위와 결과가 이후 버전에서 변경될 수 있습니다.
+
+![실험적 Slugcat 스킨 패널](docs/media/readme/skinPanel.png)
+
+스킨 패널에서는 Slugcat 외형을 미리 보면서 머리, 얼굴, 몸, 팔, 엉덩이, 다리,
+꼬리와 The Mark의 스프라이트 또는 색상을 바꿀 수 있습니다. 설정을 복사하거나
+프리셋 파일로 저장하고 다시 불러오는 기능도 제공합니다.
+
+Dress My Slugcat 형식의 스킨은 `metadata.json`과 파츠별 PNG/TXT atlas 쌍으로
+구성됩니다. 프로그램은 다음 위치에서 스킨을 검색합니다.
+
+- 실행 파일 주변의 `skins` 폴더
+- 개발 저장소의 `assets/skins`
+- `%LOCALAPPDATA%\SlugcatInMyMonitor\skins`
+- Rain World의 로컬 mod 폴더
+
+## 설치 및 실행
+
+### 요구 사항
+
+- Windows 10 또는 Windows 11
+- .NET Framework 4.8
 - 로컬 Rain World 설치본
 
+[GitHub Releases](https://github.com/leesiuuuu/Slugcat-In-My-Monitor/releases)에서 최신
+Windows ZIP을 내려받아 압축을 푼 뒤 `SlugcatInMyMonitor.exe`를 실행합니다. Rain World
+설치 경로를 자동으로 찾지 못하면 프로그램이 폴더 선택 창을 표시합니다.
+
+명령줄에서 캐릭터나 설치 경로를 지정할 수도 있습니다.
+
 ```powershell
-# Release 빌드 + 테스트
-.\build.ps1
+# Gourmand로 실행
+.\SlugcatInMyMonitor.exe --slugcat gourmand
 
-# 기본 Survivor
-.\artifacts\Release\SlugcatInMyMonitor.exe
-
-# 원작 캐릭터 선택과 디버그 표시
-.\artifacts\Release\SlugcatInMyMonitor.exe --slugcat gourmand --debug
-
-# Player 물리는 유지하고 Downpour 외형만 선택
-.\artifacts\Release\SlugcatInMyMonitor.exe --skin rivulet --debug
-
-# 자동 탐색이 실패할 때 설치 경로 지정
-.\artifacts\Release\SlugcatInMyMonitor.exe `
+# Rain World 설치 경로 직접 지정
+.\SlugcatInMyMonitor.exe `
   --rain-world "C:\Program Files (x86)\Steam\steamapps\common\Rain World"
 ```
 
-빌드 스크립트는 필요한 경우 Microsoft의 .NET Framework 4.8 reference-assembly NuGet 패키지를 `.tools/`에 내려받습니다. 실행 프로그램 자체에는 외부 런타임 패키지가 없습니다.
-
-## 개발 및 릴리즈
-
-일반 변경은 `feature/*` 또는 `fix/*`에서 작업한 뒤 `develop`으로 합칩니다.
-배포할 변경이 모이면 `develop`에서 `main`으로 한 번의 PR을 만들고,
-Release Drafter가 갱신한 초안 릴리즈를 게시합니다. 게시 후 Windows ZIP과
-SHA-256 파일이 해당 GitHub Release에 자동으로 첨부됩니다. 자세한 규칙은
-[`CONTRIBUTING.md`](CONTRIBUTING.md)를 참고하세요.
-
-### 조작
+## 조작
 
 - Slugcat 위에서 마우스 왼쪽 버튼: 잡기
-- 잡은 채 이동 후 놓기: 던지기
-- 모든 모니터 밖으로 던져진 경우: 1초 후 마지막 모니터의 안전한 바닥으로 자동 복귀
-- `F1`: physics/AI/procedural graphics 디버그 표시
-- `F2`: Slugcat 외형 편집기 열기/닫기
-- `F3`: 현재 선택된 종류와 스킨으로 Slugcat 추가 스폰(최대 8마리)
-- `F4`: 다음 Slugcat 선택
-- Slugcat을 클릭하거나 잡기: 해당 개체 선택
-- tray의 `Slugcats`: 개체 스폰·선택·선택 개체 제거
-- tray 메뉴: 선택 개체의 Player 물리/기본색 및 Slugcat skin 변경, 전체 일시 정지, 종료
+- 잡은 채 이동한 후 놓기: 던지기
+- Slugcat 클릭 또는 잡기: 설정할 Slugcat 선택
+- 트레이 아이콘 왼쪽 클릭: 설정 패널 열기
+- 모든 모니터 밖으로 벗어남: 약 1초 후 안전한 바닥으로 자동 복귀
 
-스킨 편집기는 일반적인 Windows 프로그램 구조를 사용합니다. 왼쪽 캐릭터 목록,
-가운데 파츠별 스프라이트 선택·색상 버튼, 오른쪽 실제 아틀라스 미리보기와 하단
-Reset/Copy/Paste/Reload 버튼을 제공합니다. DMS 폴더 탐색과 atlas 재적용을 지원하며,
-여러 마리를 실행할 때 편집기와 외형 메뉴는 현재 선택된 Slugcat 한 마리에만 적용됩니다.
+## 개발
 
-## 로컬 자산 처리
-
-앱은 Steam registry, `libraryfolders.vdf`, `appmanifest_312520.acf`, 일반 설치 경로 순으로 Rain World를 찾습니다. 못 찾으면 폴더 선택 창을 표시합니다.
-
-원작 플레이어 atlas는 loose PNG가 아니라 보통 다음 Unity resource 안에 있습니다.
-
-```text
-Rain World/
-└─ RainWorld_Data/
-   ├─ resources.assets
-   └─ resources.assets.resS
-```
-
-loader는 asset의 class/name과 Futile atlas descriptor를 찾아 texture와 frame metadata를 메모리에서 조립합니다. 분석 중 확인한 path ID나 byte offset을 런타임 상수로 사용하지 않습니다. 지원하지 않는 설치 버전에서는 원작 파일을 수정하거나 추출본을 남기지 않고 procedural fallback으로 동작합니다.
-
-## 구조
-
-```text
-src/RainWorldDesktopPet/
-├─ Core/       # 40 Hz loop, interpolation, constants
-├─ RainWorld/  # install discovery, Unity resource/atlas loading
-├─ Physics/    # BodyChunk, connection, tail, desktop collision
-├─ Creature/   # Slugcat state/movement and VirtualInput
-├─ Graphics/   # body parts, limbs, tail, pose, sprite renderer
-├─ AI/         # utility selection and attention
-├─ Desktop/    # Win32 window/monitor/mouse wrappers
-└─ UI/         # transparent layered overlay and tray controls
-```
-
-전체 데이터 흐름은 [`docs/Architecture.md`](docs/Architecture.md), 원본과 독립 구현의 대응은 [`docs/RainWorldBehaviorMap.md`](docs/RainWorldBehaviorMap.md), 자산 조사 근거는 [`docs/analysis/AssetFindings.md`](docs/analysis/AssetFindings.md), DLL 조사 근거는 [`docs/analysis/DllFindings.md`](docs/analysis/DllFindings.md)에 기록합니다.
-
-현재 실행 구현은 C#/.NET Framework 기반 네이티브 Windows 애플리케이션입니다. 이전 Godot 프로토타입의 검토 기록은 `docs/analysis/PrototypeReview.md`에 역사적 참고 자료로 남겨 두었습니다.
-
-## 테스트
+PowerShell 5.1 이상에서 Release 빌드와 전체 테스트를 실행할 수 있습니다.
 
 ```powershell
-.\build.ps1 -Configuration Debug
+.\build.ps1 -Configuration Release
 ```
 
-테스트는 fixed-step, 원작 connection/Stand/jump/air-control 식, monitor topology와 창 끝 낙하, pre-impact TerrainImpact, 극단·반복 충돌의 비치명 3초 stun cap, 단일 tail mesh topology, stunned graphics/mouse recovery, AI/physics 분리와 행동 도달성, DropDown, 휴식 frame, atlas metadata, 설치 경로 탐색을 검증합니다. 로컬 설치본이 있으면 embedded 원작 atlas가 DMS 없이 로드되는지도 검사합니다.
+일반 변경은 `feature/*` 또는 `fix/*`에서 작업해 `develop`으로 합치고, 배포할 변경은
+`develop`에서 `main`으로 PR을 만듭니다. Release Drafter가 작성한 릴리즈를 게시하면
+Windows ZIP과 SHA-256 파일이 자동으로 첨부됩니다. 자세한 절차는
+[CONTRIBUTING.md](CONTRIBUTING.md)를 참고하세요.
+
+구현 세부사항은 다음 문서에 분리되어 있습니다.
+
+- [전체 구조](docs/Architecture.md)
+- [원작 동작 대응표](docs/RainWorldBehaviorMap.md)
+- [Slugcat 그래픽 프로필](docs/SlugcatGraphicsProfiles.md)
+- [로컬 자산 조사](docs/analysis/AssetFindings.md)
+- [DLL 조사](docs/analysis/DllFindings.md)
 
 ## 에셋 및 상표
 
-이 저장소는 Rain World, Dress My Slugcat 또는 커뮤니티 스킨의 이미지와 게임 에셋을 배포하지 않습니다. 로컬 분석 도구와 추출 결과도 Git에서 제외됩니다. 자세한 내용은 [`THIRD_PARTY_TEST_ASSETS.md`](THIRD_PARTY_TEST_ASSETS.md)를 참고하세요.
+이 저장소는 Rain World, Dress My Slugcat 또는 커뮤니티 스킨의 이미지와 게임 에셋을
+배포하지 않습니다. 자세한 내용은 [THIRD_PARTY_TEST_ASSETS.md](THIRD_PARTY_TEST_ASSETS.md)를
+참고하세요.
 
-이 프로젝트는 비공식 팬 프로젝트이며 Videocult 또는 Akupara Games와 제휴하거나 승인을 받은 프로젝트가 아닙니다. Rain World 및 관련 명칭과 자산의 권리는 각 권리자에게 있습니다.
-
-프로젝트 코드는 [MIT License](LICENSE)로 배포됩니다. 제3자 자산에는 이 라이선스가 적용되지 않습니다.
+이 프로젝트는 비공식 팬 프로젝트이며 Videocult 또는 Akupara Games와 제휴하거나
+승인받은 프로젝트가 아닙니다. Rain World 및 관련 명칭과 자산의 권리는 각 권리자에게
+있습니다. 프로젝트 코드는 [MIT License](LICENSE)로 배포되며 제3자 자산에는 이
+라이선스가 적용되지 않습니다.

@@ -10,7 +10,7 @@
     <TargetFrameworkVersion>v4.8</TargetFrameworkVersion>
     <TargetFrameworkProfile></TargetFrameworkProfile>
     <FileAlignment>512</FileAlignment>
-    <ApplicationIcon></ApplicationIcon>
+    <ApplicationIcon>..\..\docs\media\icon.ico</ApplicationIcon>
     <StartupObject>RainWorldDesktopPet.Program</StartupObject>
     <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
     <NoStdLib>true</NoStdLib>
@@ -97,6 +97,7 @@
     <Compile Include="RainWorld\RainWorldLocator.cs" />
     <Compile Include="RainWorld\UnitySerializedFileReader.cs" />
     <Compile Include="UI\LayeredOverlayWindow.cs" />
+    <Compile Include="UI\SettingsWindow.cs" />
     <Compile Include="UI\SkinEditorWindow.cs" />
   </ItemGroup>
   <ItemGroup>
