@@ -67,6 +67,10 @@ namespace RainWorldDesktopPet.Tests
                 ArtificerExplosiveJumpReplay);
             run("Artificer down input follows the original parry counter branch",
                 ArtificerParryReplay);
+            run("Gourmand AI does not fabricate a fall-roll diagonal",
+                GourmandAiDoesNotForceFallRoll);
+            run("SlugNPC-inspired AI keeps per-slugcat personalities",
+                AutonomousAiPersonalitiesDiffer);
             run("Artificer effects retain original smoke and light lifecycles",
                 ArtificerEffectLifecycleReplay);
             run("Spearmaster extraction creates the needle on original progress tick",
@@ -226,6 +230,29 @@ namespace RainWorldDesktopPet.Tests
             Equal(40, ability.ParryCooldown, "parry cooldown");
             True(HasEffect(slugcat, AbilityEffectKind.ShockWave),
                 "parry shockwave exists");
+        }
+
+        private static void GourmandAiDoesNotForceFallRoll()
+        {
+            DesktopCollisionWorld world = CreateAirWorld();
+            Slugcat slugcat = CreateAirSlugcat(SlugcatId.Gourmand);
+            slugcat.BodyChunks[0].Velocity.Y = 12.0;
+            slugcat.BodyChunks[1].Velocity.Y = 12.0;
+            DesktopPetAI ai = new DesktopPetAI(4401);
+            MouseTracker mouse = new MouseTracker();
+            VirtualInput input = ai.Step(slugcat, world, mouse, null);
+            True(!(input.X != 0 && input.Y > 0),
+                "falling alone does not synthesize Player.downDiagonal for Gourmand");
+        }
+
+        private static void AutonomousAiPersonalitiesDiffer()
+        {
+            DesktopPetAI first = new DesktopPetAI(1001, 1);
+            DesktopPetAI second = new DesktopPetAI(1002, 2);
+            True(Math.Abs(first.PersonalityEnergy - second.PersonalityEnergy) > 0.000001 ||
+                Math.Abs(first.PersonalityNervous - second.PersonalityNervous) > 0.000001 ||
+                Math.Abs(first.PersonalityAggression - second.PersonalityAggression) > 0.000001,
+                "distinct SlugNPC seeds retain distinct behavior personalities");
         }
 
         private static void ArtificerEffectLifecycleReplay()

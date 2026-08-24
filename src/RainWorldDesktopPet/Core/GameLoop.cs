@@ -79,7 +79,14 @@ namespace RainWorldDesktopPet.Core
             Slugcat = new Slugcat(spawn, selectedSlugcat);
             lastVisibleCenter = Slugcat.Center;
             hasVisibleCenter = true;
-            AI = new DesktopPetAI(Environment.TickCount, spawnIndex);
+            // SlugNPCAI owns an AbstractCreature personality per NPC.  A
+            // process-wide timestamp alone gives simultaneous desktop pets
+            // the same random stream, which makes them select the same
+            // action on the same tick.  Keep spawnIndex in the seed so every
+            // pet receives an independent personality and decision stream.
+            int aiSeed = unchecked(Environment.TickCount * 397 ^
+                (spawnIndex + 1) * 7919);
+            AI = new DesktopPetAI(aiSeed, spawnIndex);
             AI.Attention.SetTarget(AttentionKind.RandomPoint,
                 spawn + new Vec2(Slugcat.State.Facing * 60.0, -20.0));
             RainWorldAssetLoader assetLoader = new RainWorldAssetLoader(installation);

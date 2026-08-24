@@ -18,6 +18,7 @@ namespace RainWorldDesktopPet.AI
         public int SaferDirection;
         public bool JumpReady;
         public bool DropReady;
+        public bool TransitionAvailable;
     }
 
     public static class UtilityEvaluator
@@ -56,7 +57,8 @@ namespace RainWorldDesktopPet.AI
                         : 0.0;
                     break;
                 case DesktopBehavior.Jump:
-                    score = context.Grounded && context.JumpReady && context.Curiosity > 0.5
+                    score = context.Grounded && context.TransitionAvailable &&
+                            context.JumpReady && context.Curiosity > 0.5
                         ? 0.72 + context.Curiosity * 0.42
                         : 0.0;
                     break;

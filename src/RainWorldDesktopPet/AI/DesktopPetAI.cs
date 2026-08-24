@@ -70,6 +70,11 @@ namespace RainWorldDesktopPet.AI
         private int dropCooldownTicks;
         private int wallContactGraceTicks;
         private int lastWallDirection = 1;
+        private readonly double personalityEnergy;
+        private readonly double personalityNervous;
+        private readonly double personalityAggression;
+        private bool specialTransitionArmed;
+        private long specialTransitionTargetSurfaceId;
         private bool originalAttentionInitialized;
         private AttentionKind originalAttentionKind;
         private Vec2 originalAttentionTarget;
@@ -77,8 +82,6 @@ namespace RainWorldDesktopPet.AI
         private int spearmasterStateTicks;
         private int spearmasterIdleDuration = 80;
         private int spearmasterMoveDuration = 35;
-        private int spearmasterHoldDuration = 45;
-        private int spearmasterAimDuration = 30;
         private int spearmasterRecoveryDuration = 110;
         private Vec2 spearmasterTarget;
 
@@ -91,6 +94,18 @@ namespace RainWorldDesktopPet.AI
         {
             if (evaluationPhase < 0) throw new ArgumentOutOfRangeException("evaluationPhase");
             random = new Random(seed);
+            // SlugNPCAI reads AbstractCreature.Personality (energy, nervous
+            // and aggression) instead of sharing one behavior profile among
+            // every NPC.  The desktop has no AbstractCreature, so retain one
+            // deterministic personality per AI instance.
+            Random personalityRandom = new Random(unchecked(seed ^ 0x51A7C3D));
+            personalityEnergy = personalityRandom.NextDouble();
+            personalityNervous = personalityRandom.NextDouble();
+            personalityAggression = personalityRandom.NextDouble();
+            fatigue = MathUtil.Lerp(0.30, 0.08, personalityEnergy);
+            curiosity = MathUtil.Lerp(0.36, 0.86,
+                MathUtil.Clamp01((personalityEnergy + (1.0 - personalityNervous)) * 0.5));
+            desiredDirection = random.Next(0, 2) == 0 ? -1 : 1;
             // Avoid making every spawned Slugcat scan all desktop surfaces on
             // the same 40 Hz tick. The first still evaluates immediately.
             evaluationCountdown = evaluationPhase == 0 ? 0 : evaluationPhase + 1;
@@ -107,6 +122,9 @@ namespace RainWorldDesktopPet.AI
         public bool MouseAttentionActive { get; private set; }
         public PlatformTransitionPlan TransitionPlan { get; private set; }
         public SpearmasterActionState SpearmasterState { get { return spearmasterState; } }
+        public double PersonalityEnergy { get { return personalityEnergy; } }
+        public double PersonalityNervous { get { return personalityNervous; } }
+        public double PersonalityAggression { get { return personalityAggression; } }
 
         public VirtualInput Step(Slugcat slugcat, DesktopCollisionWorld world, MouseTracker mouse)
         {
@@ -128,8 +146,11 @@ namespace RainWorldDesktopPet.AI
             {
                 evaluationCountdown = 8 + random.Next(0, 8);
                 PlanPlatformTransition(slugcat, world);
+                context.TransitionAvailable = TransitionPlan.IsValid;
                 SelectBehavior(context);
             }
+            else context.TransitionAvailable = TransitionPlan.IsValid;
+            ApplyOriginalIdlePosture(slugcat, context);
 
             VirtualInput input = ProduceInput(slugcat, mouse, context);
             VirtualInput abilityInput;
@@ -197,40 +218,52 @@ namespace RainWorldDesktopPet.AI
             }
             ResetSpearmasterState();
 
-            GourmandAbilityController gourmand =
-                slugcat.AbilityController as GourmandAbilityController;
-            if (gourmand != null && !context.Grounded &&
-                (slugcat.BodyChunks[0].Velocity.Y +
-                 slugcat.BodyChunks[1].Velocity.Y) * 0.5 > 2.0)
+            ArtificerAbilityController artificer =
+                slugcat.AbilityController as ArtificerAbilityController;
+            if (artificer == null)
             {
-                Behavior = DesktopBehavior.GourmandRoll;
-                input = new VirtualInput(desiredDirection, 1, false, false);
-                return true;
+                specialTransitionArmed = false;
+                return false;
             }
 
-            if (!TransitionPlan.IsValid) return false;
-            int direction = TransitionPlan.HorizontalDistance < 0.0 ? -1 : 1;
-            if (context.Grounded && behaviorTicks % 60 == 1)
+            // Player.ClassMechanicsArtificer only reacts to a real Jump +
+            // Pickup request after the normal jump grace has elapsed.  Arm a
+            // special jump while taking a planned long transition, then send
+            // one matching input pulse; never synthesize one from a modulo
+            // timer while the cat happens to be airborne.
+            if (context.Grounded && Behavior == DesktopBehavior.Jump &&
+                behaviorTicks <= 8 && RequiresExplosiveTransition())
             {
-                Behavior = DesktopBehavior.Jump;
-                input = new VirtualInput(direction, 0, true, false);
-                return true;
+                specialTransitionArmed = true;
+                specialTransitionTargetSurfaceId = TransitionPlan.TargetSurfaceId;
+                return false;
             }
-            if (TransitionPlan.Mode == PlatformTransitionMode.ExplosiveJump &&
-                !context.Grounded && behaviorTicks % 14 == 1)
+            if (specialTransitionArmed &&
+                (!TransitionPlan.IsValid ||
+                 TransitionPlan.TargetSurfaceId != specialTransitionTargetSurfaceId))
             {
+                specialTransitionArmed = false;
+            }
+            if (specialTransitionArmed && !context.Grounded &&
+                slugcat.State.CanJump <= 0 && slugcat.State.Conscious)
+            {
+                int direction = TransitionPlan.HorizontalDistance < 0.0 ? -1 : 1;
+                specialTransitionArmed = false;
                 Behavior = DesktopBehavior.ExplosiveJump;
                 input = new VirtualInput(direction, -1, true, true);
                 return true;
             }
-            if (TransitionPlan.Mode == PlatformTransitionMode.TongueSwing &&
-                !context.Grounded && behaviorTicks % 18 == 1)
-            {
-                Behavior = DesktopBehavior.TongueSwing;
-                input = new VirtualInput(direction, -1, true, false);
-                return true;
-            }
             return false;
+        }
+
+        private bool RequiresExplosiveTransition()
+        {
+            // Standard desktop path jumps are planned inside the normal
+            // 105-unit reach.  Artificer's extended 250-unit candidate range
+            // is the only desktop equivalent that needs the original
+            // Jump+Pickup branch.
+            return TransitionPlan.Mode == PlatformTransitionMode.ExplosiveJump &&
+                Math.Abs(TransitionPlan.HorizontalDistance) > 105.0;
         }
 
         private bool ProduceSpearmasterInput(Slugcat slugcat,
@@ -277,7 +310,6 @@ namespace RainWorldDesktopPet.AI
                     input = new VirtualInput(0, 0, false, true);
                     if (spear.HeldSpear != null)
                     {
-                        spearmasterHoldDuration = 35 + random.Next(0, 65);
                         ChangeSpearmasterState(SpearmasterActionState.HoldingSpear);
                     }
                     return true;
@@ -293,21 +325,21 @@ namespace RainWorldDesktopPet.AI
                     // Holding a spear is a normal mobile state. Only a valid
                     // click-attention target temporarily takes control for an
                     // aim/throw sequence; no target must not pin the pet.
-                    if (!hasTarget) return false;
-                    if (targetDistance < 80.0)
-                    {
+                    if (!hasTarget || targetDistance < 80.0 || targetDistance > 450.0)
                         return false;
-                    }
-                    if (targetDistance > 450.0)
+                    // SlugNPCAI sets throwAtTarget only after a valid tracked
+                    // target is available, then uses its personality-based
+                    // 0.035..0.1 attack chance. Mouse attention is the
+                    // desktop target proxy; this preserves target-gated
+                    // throws while avoiding the former long fixed hold timer
+                    // that usually outlived the attention window.
+                    double throwChance = MathUtil.Lerp(0.035, 0.1,
+                        personalityAggression);
+                    if (random.NextDouble() < throwChance)
                     {
-                        return false;
-                    }
-                    if (spearmasterStateTicks >= spearmasterHoldDuration)
-                    {
-                        spearmasterAimDuration = 24 + random.Next(0, 18);
                         ChangeSpearmasterState(SpearmasterActionState.Aiming);
                     }
-                    return true;
+                    return false;
 
                 case SpearmasterActionState.Aiming:
                     spear.SetActionState(spearmasterState, spearmasterTarget);
@@ -317,10 +349,11 @@ namespace RainWorldDesktopPet.AI
                         ChangeSpearmasterState(SpearmasterActionState.HoldingSpear);
                         return true;
                     }
-                    // The held-spear controller turns the arm/body toward the
-                    // target. Aiming itself does not walk into a valid target.
-                    input = VirtualInput.Neutral;
-                    if (spearmasterStateTicks >= spearmasterAimDuration)
+                    int aimX = spearmasterTarget.X < slugcat.Center.X ? -1 : 1;
+                    input = new VirtualInput(aimX, 0, false, false);
+                    // SlugNPCAI first turns toward throwAtTarget, then sends
+                    // the throw input on the following aligned update.
+                    if (slugcat.State.Facing == aimX && spearmasterStateTicks > 0)
                         ChangeSpearmasterState(SpearmasterActionState.Throwing);
                     return true;
 
@@ -337,7 +370,7 @@ namespace RainWorldDesktopPet.AI
                         VirtualPosture.None, false);
                     if (spearmasterStateTicks > 1 || spear.HeldSpear == null)
                     {
-                        spearmasterRecoveryDuration = 90 + random.Next(0, 80);
+                        spearmasterRecoveryDuration = 5;
                         ChangeSpearmasterState(SpearmasterActionState.Recovering);
                     }
                     return true;
@@ -365,6 +398,25 @@ namespace RainWorldDesktopPet.AI
             spearmasterState = SpearmasterActionState.Idle;
             spearmasterStateTicks = 0;
             spearmasterTarget = Vec2.Zero;
+        }
+
+        private void ApplyOriginalIdlePosture(Slugcat slugcat, UtilityContext context)
+        {
+            if (Behavior != DesktopBehavior.Idle || !context.Grounded) return;
+            // SlugNPCAI.Move changes standing state at its idle destination
+            // with these exact energy-weighted probabilities.  This keeps
+            // low-energy cats restful without making every spawned cat lie
+            // down on the same cadence.
+            if (random.NextDouble() < MathUtil.InverseLerp(0.35, 0.0,
+                personalityEnergy) * 0.01)
+            {
+                slugcat.State.Standing = false;
+            }
+            else if (random.NextDouble() < MathUtil.InverseLerp(0.65, 1.0,
+                personalityEnergy) * 0.01)
+            {
+                slugcat.State.Standing = true;
+            }
         }
 
         private UtilityContext BuildContext(Slugcat slugcat, DesktopCollisionWorld world, MouseTracker mouse)

@@ -1074,6 +1074,7 @@ namespace RainWorldDesktopPet.Tests
                 Grounded = true,
                 Curiosity = 1.0,
                 JumpReady = true,
+                TransitionAvailable = true,
                 EdgeDistance = 200.0
             };
             double worstJump = UtilityEvaluator.Score(DesktopBehavior.Jump, jump, -0.06);
