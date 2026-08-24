@@ -47,7 +47,8 @@ namespace RainWorldDesktopPet
                 bool debug = HasFlag(args, "--debug");
                 SlugcatVariant variant = ReadVariant(ReadOption(args, "--slugcat"));
                 SlugcatSkin skin = ReadSkin(ReadOption(args, "--skin"));
-                Application.Run(new LayeredOverlayWindow(installation, debug, variant, skin));
+                string dmsSkin = ReadOption(args, "--dms-skin");
+                Application.Run(new LayeredOverlayWindow(installation, debug, variant, skin, dmsSkin));
             }
         }
 

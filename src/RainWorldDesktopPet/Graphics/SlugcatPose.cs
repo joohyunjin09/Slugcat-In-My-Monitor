@@ -76,6 +76,11 @@ namespace RainWorldDesktopPet.Graphics
         public bool Conscious = true;
         public bool Dead;
         public bool Blink;
+        public bool IsMeowing;
+        public bool MeowIsShort;
+        public double MeowProgress;
+        public double MeowDurationSeconds;
+        public string MeowAsset;
         public bool IsAirborne;
         public bool IsRising;
         public bool IsFalling;

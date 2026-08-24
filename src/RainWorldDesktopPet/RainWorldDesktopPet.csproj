@@ -48,6 +48,9 @@
     <Reference Include="System.Xml" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="Audio\NaturalMeowController.cs" />
+    <Compile Include="Audio\PushToMeowLibrary.cs" />
+    <Compile Include="Audio\WaveAudio.cs" />
     <Compile Include="AI\AttentionSystem.cs" />
     <Compile Include="AI\DesktopPetAI.cs" />
     <Compile Include="AI\UtilityEvaluator.cs" />
@@ -99,6 +102,10 @@
     <Compile Include="UI\LayeredOverlayWindow.cs" />
     <Compile Include="UI\SettingsWindow.cs" />
     <Compile Include="UI\SkinEditorWindow.cs" />
+    <Compile Include="Workshop\DmsSkinCatalog.cs" />
+    <Compile Include="Workshop\WorkshopCatalog.cs" />
+    <Compile Include="Workshop\WorkshopAssetCache.cs" />
+    <Compile Include="Workshop\WorkshopLog.cs" />
   </ItemGroup>
   <ItemGroup>
     <None Include="App.config" />

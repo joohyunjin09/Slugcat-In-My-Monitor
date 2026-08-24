@@ -8,6 +8,8 @@ using RainWorldDesktopPet.Desktop;
 using RainWorldDesktopPet.Graphics;
 using RainWorldDesktopPet.Physics;
 using RainWorldDesktopPet.RainWorld;
+using RainWorldDesktopPet.Audio;
+using RainWorldDesktopPet.Workshop;
 
 namespace RainWorldDesktopPet.Core
 {
@@ -31,6 +33,13 @@ namespace RainWorldDesktopPet.Core
         private int offscreenTicks;
         private Vec2 lastVisibleCenter;
         private bool hasVisibleCenter;
+        private readonly string baseAssetStatus;
+        private readonly WorkshopLog workshopLog;
+        private WorkshopCatalog workshopCatalog;
+        private DmsSkinCatalog dmsSkins;
+        private PushToMeowLibrary pushToMeow;
+        private NaturalMeowController meowController;
+        private readonly WorkshopAssetCache workshopAssetCache = new WorkshopAssetCache();
 
         public GameLoop(IntPtr overlayHandle, RainWorldInstallation installation, SlugcatVariant variant)
             : this(overlayHandle, installation, variant, SlugcatSkin.Default)
@@ -82,9 +91,17 @@ namespace RainWorldDesktopPet.Core
                 requested = SlugcatVisualProfiles.Default;
                 AssetStatus += " Requested skin is unavailable (missing " + missing + "); Default is active.";
             }
+            baseAssetStatus = AssetStatus;
             Graphics = new SlugcatGraphics(Slugcat, requested, atlas);
             mouse.Sample(SimulationConstants.LogicStepSeconds);
             Renderer = new SpriteRenderer(atlas);
+#if DEBUG
+            workshopLog = new WorkshopLog(true);
+#else
+            workshopLog = new WorkshopLog(false);
+#endif
+            workshopCatalog = new WorkshopCatalog(installation, workshopLog);
+            ReloadWorkshopIntegrations(null);
         }
 
         public readonly DesktopCollisionWorld World;
@@ -141,13 +158,13 @@ namespace RainWorldDesktopPet.Core
         public Color GetPartColor(string part) { return Graphics.GetPartColor(part); }
         public void SetPartColor(string part, Color color) { Graphics.SetPartColor(part, color); }
         public void ClearPartColors() { Graphics.ClearPartColors(); }
-
-        public void Dispose()
+        public WorkshopCatalog WorkshopCatalog { get { return workshopCatalog; } }
+        public IList<DmsSkinDefinition> DmsSkins
         {
-            if (disposed) return;
-            disposed = true;
-            Renderer.Dispose();
+            get { return dmsSkins == null ? new DmsSkinDefinition[0] : dmsSkins.Skins; }
         }
+        public DmsSkinDefinition ActiveDmsSkin { get { return Renderer.ActiveDmsSkin; } }
+        public bool PushToMeowAvailable { get { return pushToMeow != null && pushToMeow.IsAvailable; } }
 
         public void RecordRenderFrame(double displayRefreshRate)
         {
@@ -209,6 +226,12 @@ namespace RainWorldDesktopPet.Core
                     AI.MouseAttentionActive && Slugcat.State.Conscious &&
                         !Slugcat.State.Dead && Slugcat.State.StunCounter < 1,
                     World);
+                UtilityContext meowContext = AI.LastContext;
+                meowController.Step(now, CurrentSlugcatId(), AI.Behavior,
+                    Slugcat.State.Stillness,
+                    meowContext == null ? double.MaxValue : meowContext.MouseDistance,
+                    mouseAttention.IsActive, Slugcat.IsGrabbed,
+                    Slugcat.State.Conscious && !Slugcat.State.Dead && Slugcat.State.StunCounter < 1);
                 simulationTick++;
                 steps++;
             }
@@ -221,6 +244,7 @@ namespace RainWorldDesktopPet.Core
         public SlugcatPose BuildPose()
         {
             SlugcatPose pose = Graphics.BuildPose(Interpolation, AI.Attention, simulationTick);
+            meowController.ApplyPose(pose, clock.Elapsed.TotalSeconds);
             pose.LogicTicksPerSecond = SimulationConstants.LogicTicksPerSecond;
             pose.LogicStepSeconds = fixedTimeStep.StepSeconds;
             pose.AccumulatorSeconds = fixedTimeStep.AccumulatorSeconds;
@@ -370,6 +394,73 @@ namespace RainWorldDesktopPet.Core
             if (!CanUseSkin(skin, out reason)) return false;
             Graphics.SetVisualProfile(SlugcatVisualProfiles.Get(skin), atlas);
             return true;
+        }
+
+        public bool SetDmsSkin(string id, out string reason)
+        {
+            if (string.IsNullOrWhiteSpace(id))
+            {
+                Renderer.SetDmsSkin(null);
+                reason = null;
+                return true;
+            }
+            DmsSkinDefinition skin = dmsSkins == null ? null : dmsSkins.Find(id);
+            if (skin == null)
+            {
+                reason = "DMS spritesheet is no longer installed: " + id;
+                return false;
+            }
+            if (!skin.IsModActive)
+            {
+                reason = "The source mod is installed but disabled in Rain World Remix: " + skin.ModName;
+                return false;
+            }
+            Renderer.SetDmsSkin(skin);
+            reason = null;
+            return true;
+        }
+
+        public void RefreshWorkshopIntegration()
+        {
+            string selected = ActiveDmsSkin == null ? null : ActiveDmsSkin.Id;
+            workshopCatalog.Refresh();
+            ReloadWorkshopIntegrations(selected);
+        }
+
+        private void ReloadWorkshopIntegrations(string selectedDmsId)
+        {
+            Renderer.SetDmsSkin(null);
+            if (meowController != null) meowController.Dispose();
+            if (dmsSkins != null) dmsSkins.Dispose();
+            dmsSkins = new DmsSkinCatalog(workshopCatalog, workshopLog);
+            workshopAssetCache.RemoveMissingEntries();
+            pushToMeow = new PushToMeowLibrary(workshopCatalog, workshopLog,
+                Environment.TickCount ^ workshopCatalog.Revision, workshopAssetCache);
+            meowController = new NaturalMeowController(pushToMeow, workshopLog,
+                Environment.TickCount ^ 0x514D454F);
+            if (!string.IsNullOrWhiteSpace(selectedDmsId))
+            {
+                string ignored;
+                SetDmsSkin(selectedDmsId, out ignored);
+            }
+            AssetStatus = baseAssetStatus + " Workshop: " + workshopCatalog.Mods.Count + " mods, " +
+                DmsSkins.Count + " DMS sheets, Push To Meow " +
+                (PushToMeowAvailable ? "ready." : "unavailable.");
+        }
+
+        private string CurrentSlugcatId()
+        {
+            return Graphics.VisualProfile.ResolveOriginalSlugcatId(Slugcat.Appearance);
+        }
+
+        public void Dispose()
+        {
+            if (disposed) return;
+            disposed = true;
+            if (meowController != null) meowController.Dispose();
+            if (dmsSkins != null) dmsSkins.Dispose();
+            if (workshopCatalog != null) workshopCatalog.Dispose();
+            Renderer.Dispose();
         }
     }
 }

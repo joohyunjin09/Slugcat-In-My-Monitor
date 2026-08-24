@@ -10,6 +10,7 @@ using RainWorldDesktopPet.Creature;
 using RainWorldDesktopPet.Desktop;
 using RainWorldDesktopPet.Physics;
 using RainWorldDesktopPet.RainWorld;
+using RainWorldDesktopPet.Workshop;
 
 namespace RainWorldDesktopPet.Graphics
 {
@@ -61,6 +62,7 @@ namespace RainWorldDesktopPet.Graphics
         };
         private SlugcatPose activePose;
         private RenderSpace activeRenderSpace;
+        private DmsSkinDefinition dmsSkin;
 
         public SpriteRenderer(RainWorldAtlasSet atlas)
         {
@@ -75,6 +77,12 @@ namespace RainWorldDesktopPet.Graphics
         }
 
         public bool UsesLocalAtlas { get { return atlas != null; } }
+        public DmsSkinDefinition ActiveDmsSkin { get { return dmsSkin; } }
+
+        public void SetDmsSkin(DmsSkinDefinition skin)
+        {
+            dmsSkin = skin;
+        }
 
         public void Render(
             System.Drawing.Graphics graphics,
@@ -170,6 +178,10 @@ namespace RainWorldDesktopPet.Graphics
                 builder.AppendFormat("skin {0} originalID={1} profile={2} sprites base={3} extra={4}\n",
                     pose.CurrentSkin, pose.OriginalSlugcatId, pose.VisualProfileName,
                     pose.BaseSpriteCount, pose.ExtraSpriteCount);
+                builder.AppendFormat("DMS {0} | meow={1} {2} {3:0.000}/{4:0.000}s\n",
+                    dmsSkin == null ? "none" : dmsSkin.Id, pose.IsMeowing,
+                    pose.MeowAsset ?? "-", pose.MeowProgress * pose.MeowDurationSeconds,
+                    pose.MeowDurationSeconds);
                 builder.AppendFormat("face {0} tail={1} extensions={2}\n",
                     pose.SelectedFaceElement, pose.TailProfileName, pose.GraphicsExtensions);
                 for (int i = 0; i < pose.ExtraParts.Length; i++)
@@ -314,6 +326,7 @@ namespace RainWorldDesktopPet.Graphics
 
         private void DrawOriginalTailMesh(System.Drawing.Graphics graphics, SlugcatPose pose, Color bodyColor)
         {
+            pose.TailRenderMode = null;
             PopulateOriginalTailMeshVertices(pose, tailMeshVertices);
             for (int i = 0; i < tailMeshVertices.Length; i++)
                 tailMeshPoints[i] = tailMeshVertices[i].ToPointF();
@@ -341,16 +354,30 @@ namespace RainWorldDesktopPet.Graphics
             if (rasterWidth <= TailRasterSize && rasterHeight <= TailRasterSize)
             {
                 tailRasterGraphics.Clear(Color.Transparent);
-                for (int i = 0; i < TailTriangles.GetLength(0); i++)
+                AtlasSprite dmsTail = null;
+                bool textured = dmsSkin != null && dmsSkin.TryGetSprite("TailTexture",
+                    pose.OriginalSlugcatId, DmsSpriteSide.None, out dmsTail);
+                Color tailColor = dmsSkin != null && dmsSkin.DefaultTail.Color.A > 0
+                    ? dmsSkin.DefaultTail.Color
+                    : bodyColor;
+                if (textured)
                 {
-                    for (int j = 0; j < 3; j++)
+                    RasterizeDmsTail(dmsTail, tailColor, rasterLeft, rasterTop);
+                    pose.TailRenderMode = "DMS-UV-TriangleMesh";
+                }
+                else
+                {
+                    for (int i = 0; i < TailTriangles.GetLength(0); i++)
                     {
-                        PointF point = tailMeshPoints[TailTriangles[i, j]];
-                        tailTrianglePoints[j] = new PointF(
-                            point.X - rasterLeft, point.Y - rasterTop);
+                        for (int j = 0; j < 3; j++)
+                        {
+                            PointF point = tailMeshPoints[TailTriangles[i, j]];
+                            tailTrianglePoints[j] = new PointF(
+                                point.X - rasterLeft, point.Y - rasterTop);
+                        }
+                        tailRasterGraphics.FillPolygon(GetBodyBrush(tailColor),
+                            tailTrianglePoints, FillMode.Winding);
                     }
-                    tailRasterGraphics.FillPolygon(GetBodyBrush(bodyColor),
-                        tailTrianglePoints, FillMode.Winding);
                 }
 
                 tailRasterDestinationPoints[0] = new PointF(rasterLeft, rasterTop);
@@ -384,8 +411,110 @@ namespace RainWorldDesktopPet.Graphics
             }
             Array.Copy(tailMeshVertices, pose.TailMeshVertices,
                 OriginalTailMeshVertexCount);
-            pose.TailRenderMode = "OriginalTriangleMesh";
+            if (string.IsNullOrEmpty(pose.TailRenderMode)) pose.TailRenderMode = "OriginalTriangleMesh";
             pose.TailMeshVertexCount = tailMeshVertices.Length;
+        }
+
+        private void RasterizeDmsTail(AtlasSprite sprite, Color tint, int rasterLeft, int rasterTop)
+        {
+            PointF[] uv = BuildTailTextureCoordinates(sprite.Element);
+            PointF[] sourceTriangle = new PointF[3];
+            PointF[] destinationTriangle = new PointF[3];
+            GraphicsState baseState = tailRasterGraphics.Save();
+            try
+            {
+                tailRasterGraphics.CompositingMode = CompositingMode.SourceOver;
+                for (int triangle = 0; triangle < TailTriangles.GetLength(0); triangle++)
+                {
+                    for (int point = 0; point < 3; point++)
+                    {
+                        int vertex = TailTriangles[triangle, point];
+                        sourceTriangle[point] = uv[vertex];
+                        destinationTriangle[point] = new PointF(
+                            tailMeshPoints[vertex].X - rasterLeft,
+                            tailMeshPoints[vertex].Y - rasterTop);
+                    }
+                    using (Matrix transform = CreateTriangleTransform(sourceTriangle,
+                        destinationTriangle))
+                    {
+                        if (transform == null) continue;
+                        GraphicsState state = tailRasterGraphics.Save();
+                        try
+                        {
+                            using (GraphicsPath clip = new GraphicsPath())
+                            {
+                                clip.AddPolygon(destinationTriangle);
+                                tailRasterGraphics.SetClip(clip, CombineMode.Replace);
+                            }
+                            tailRasterGraphics.Transform = transform;
+                            tailRasterGraphics.DrawImage(sprite.Atlas.Image,
+                                new Rectangle(0, 0, sprite.Atlas.Image.Width, sprite.Atlas.Image.Height),
+                                0, 0, sprite.Atlas.Image.Width, sprite.Atlas.Image.Height,
+                                GraphicsUnit.Pixel, GetTintAttributes(tint));
+                        }
+                        finally
+                        {
+                            tailRasterGraphics.Restore(state);
+                        }
+                    }
+                }
+            }
+            finally
+            {
+                tailRasterGraphics.Restore(baseState);
+            }
+        }
+
+        private static PointF[] BuildTailTextureCoordinates(AtlasElement element)
+        {
+            PointF[] result = new PointF[OriginalTailMeshVertexCount];
+            for (int index = 0; index < result.Length; index++)
+            {
+                double u;
+                double v;
+                if (index == result.Length - 1)
+                {
+                    u = 1.0;
+                    v = 0.5;
+                }
+                else
+                {
+                    u = (index / 2) / 7.0;
+                    v = index % 2 == 0 ? 0.0 : 1.0;
+                }
+                result[index] = new PointF(
+                    element.Frame.Left + (float)(u * element.Frame.Width),
+                    element.Frame.Top + (float)(v * element.Frame.Height));
+            }
+            return result;
+        }
+
+        private static Matrix CreateTriangleTransform(PointF[] source, PointF[] destination)
+        {
+            double denominator = source[0].X * (source[1].Y - source[2].Y) +
+                source[1].X * (source[2].Y - source[0].Y) +
+                source[2].X * (source[0].Y - source[1].Y);
+            if (Math.Abs(denominator) < 0.000001) return null;
+            double m11 = (destination[0].X * (source[1].Y - source[2].Y) +
+                destination[1].X * (source[2].Y - source[0].Y) +
+                destination[2].X * (source[0].Y - source[1].Y)) / denominator;
+            double m21 = (destination[0].X * (source[2].X - source[1].X) +
+                destination[1].X * (source[0].X - source[2].X) +
+                destination[2].X * (source[1].X - source[0].X)) / denominator;
+            double dx = (destination[0].X * (source[1].X * source[2].Y - source[2].X * source[1].Y) +
+                destination[1].X * (source[2].X * source[0].Y - source[0].X * source[2].Y) +
+                destination[2].X * (source[0].X * source[1].Y - source[1].X * source[0].Y)) / denominator;
+            double m12 = (destination[0].Y * (source[1].Y - source[2].Y) +
+                destination[1].Y * (source[2].Y - source[0].Y) +
+                destination[2].Y * (source[0].Y - source[1].Y)) / denominator;
+            double m22 = (destination[0].Y * (source[2].X - source[1].X) +
+                destination[1].Y * (source[0].X - source[2].X) +
+                destination[2].Y * (source[1].X - source[0].X)) / denominator;
+            double dy = (destination[0].Y * (source[1].X * source[2].Y - source[2].X * source[1].Y) +
+                destination[1].Y * (source[2].X * source[0].Y - source[0].X * source[2].Y) +
+                destination[2].Y * (source[0].X * source[1].Y - source[1].X * source[0].Y)) / denominator;
+            return new Matrix((float)m11, (float)m12, (float)m21, (float)m22,
+                (float)dx, (float)dy);
         }
 
         public static Vec2[] BuildOriginalTailMeshVertices(SlugcatPose pose)
@@ -487,12 +616,12 @@ namespace RainWorldDesktopPet.Graphics
 
             Vec2 bodyPosition = pose.Chest + new Vec2(0.0, -0.5 * pose.Breath * (1.0 - verticality));
             DrawElement(graphics, pose.BodyElement, bodyPosition, bodyAngle, bodyWidth, 1.0,
-                0.5, 0.7894737, pose.VisualBodyColor);
+                0.5, 0.7894737, pose.VisualBodyColor, SelectTorsoSide(pose));
             Vec2 hipsPosition = (pose.Hips * 2.0 + pose.Chest) / 3.0;
             Vec2 tailTarget = pose.Tail.Length > 0 ? pose.Tail[0] : pose.Hips + (pose.Hips - pose.Chest);
             double hipsAngle = AimScreen(pose.Chest, tailTarget);
             DrawElement(graphics, pose.HipsElement, hipsPosition, hipsAngle, hipsWidth, 1.0,
-                0.5, 0.5, pose.VisualHipsColor);
+                0.5, 0.5, pose.VisualHipsColor, SelectTorsoSide(pose));
         }
 
         private void DrawAtlasLegs(System.Drawing.Graphics graphics, SlugcatPose pose)
@@ -511,7 +640,8 @@ namespace RainWorldDesktopPet.Graphics
                 ? pose.Facing
                 : 1.0;
             DrawElement(graphics, legsName, pose.Legs, legsAngle, legsScaleX, 1.0,
-                0.5, 0.25, pose.VisualLegsColor);
+                0.5, 0.25, pose.VisualLegsColor,
+                legsScaleX < 0.0 ? DmsSpriteSide.Left : DmsSpriteSide.Right);
         }
 
         private void DrawAtlasArm(System.Drawing.Graphics graphics, SlugcatPose pose, int index, Color bodyColor)
@@ -524,7 +654,7 @@ namespace RainWorldDesktopPet.Graphics
             double angle = ComputeArmRotation(pose, index);
             double scaleY = ComputeArmScaleY(pose, index);
             DrawElement(graphics, "PlayerArm" + frame, hand, angle, 1.0, scaleY,
-                0.9, 0.5, bodyColor);
+                0.9, 0.5, bodyColor, index == 0 ? DmsSpriteSide.Left : DmsSpriteSide.Right);
         }
 
         private void DrawExtraGraphics(System.Drawing.Graphics graphics, SlugcatPose pose,
@@ -536,7 +666,8 @@ namespace RainWorldDesktopPet.Graphics
                 ExtraGraphicsPartPose part = pose.ExtraParts[i];
                 if (part == null || !part.Visible || part.Layer != layer) continue;
                 DrawElement(graphics, part.Element, part.SpritePosition, part.Rotation,
-                    part.ScaleX, part.ScaleY, part.AnchorX, part.AnchorY, part.Tint);
+                    part.ScaleX, part.ScaleY, part.AnchorX, part.AnchorY, part.Tint,
+                    part.ScaleX < 0.0 ? DmsSpriteSide.Left : DmsSpriteSide.Right);
             }
         }
 
@@ -548,7 +679,8 @@ namespace RainWorldDesktopPet.Graphics
             {
                 DrawElement(graphics, state.HeadElement, state.HeadPosition,
                     state.HeadRotation, state.HeadScaleX,
-                    1.0, 0.5, 0.5, bodyColor);
+                    1.0, 0.5, 0.5, bodyColor,
+                    state.HeadScaleX < 0.0 ? DmsSpriteSide.Left : DmsSpriteSide.Right);
                 return;
             }
 
@@ -562,7 +694,8 @@ namespace RainWorldDesktopPet.Graphics
             pose.FaceScaleX = state.FaceScaleX;
             pose.FaceSelectionReason = state.Reason;
                 DrawElement(graphics, state.FaceElement, state.FacePosition,
-                    state.FaceRotation, state.FaceScaleX, 1.0, 0.5, 0.5, pose.VisualEyeColor);
+                    state.FaceRotation, state.FaceScaleX, 1.0, 0.5, 0.5, pose.VisualEyeColor,
+                    state.FaceScaleX < 0.0 ? DmsSpriteSide.Left : DmsSpriteSide.Right);
         }
 
         private void DrawHead(System.Drawing.Graphics graphics, SlugcatPose pose, bool useAtlas, Color bodyColor)
@@ -790,11 +923,22 @@ namespace RainWorldDesktopPet.Graphics
 
         private void DrawElement(System.Drawing.Graphics graphics, string name, Vec2 position, double angle, double scaleX, double scaleY, double anchorX, double anchorY, Color tint)
         {
+            DrawElement(graphics, name, position, angle, scaleX, scaleY, anchorX,
+                anchorY, tint, DmsSpriteSide.None);
+        }
+
+        private void DrawElement(System.Drawing.Graphics graphics, string name, Vec2 position,
+            double angle, double scaleX, double scaleY, double anchorX, double anchorY,
+            Color tint, DmsSpriteSide side)
+        {
             // Futile accepts zero-scale sprites (for example the outside row of
             // Spearmaster's tinyStar speckles); GDI+ rejects a singular matrix.
             if (Math.Abs(scaleX) < 0.000001 || Math.Abs(scaleY) < 0.000001) return;
-            AtlasSprite sprite;
-            if (!atlas.TryGet(name, out sprite)) return;
+            AtlasSprite sprite = null;
+            bool dmsApplied = dmsSkin != null && activePose != null &&
+                dmsSkin.TryGetSprite(name, activePose.OriginalSlugcatId, side, out sprite);
+            if (!dmsApplied && !atlas.TryGet(name, out sprite)) return;
+            if (dmsApplied) tint = dmsSkin.ResolveTint(name, activePose.OriginalSlugcatId, tint);
             AtlasElement element = sprite.Element;
             GraphicsState state = graphics.Save();
             try
@@ -828,6 +972,15 @@ namespace RainWorldDesktopPet.Graphics
             {
                 graphics.Restore(state);
             }
+        }
+
+        private static DmsSpriteSide SelectTorsoSide(SlugcatPose pose)
+        {
+            if (pose.BodyMode == BodyModeIndex.Stand && pose.InputX != 0)
+                return pose.InputX < 0 ? DmsSpriteSide.Left : DmsSpriteSide.Right;
+            double axis = pose.Chest.X - pose.Hips.X;
+            if (Math.Abs(axis) > 0.5) return axis < 0.0 ? DmsSpriteSide.Left : DmsSpriteSide.Right;
+            return pose.Facing < 0.0 ? DmsSpriteSide.Left : DmsSpriteSide.Right;
         }
 
         private ImageAttributes GetTintAttributes(Color tint)
