@@ -373,10 +373,17 @@ namespace RainWorldDesktopPet.Physics
         public void Resolve(BodyChunk chunk, DesktopCollisionSnapshot snapshot,
             long ignoredHorizontalSurfaceId, double surfaceFriction)
         {
+            Resolve(chunk, snapshot, ignoredHorizontalSurfaceId, surfaceFriction,
+                SimulationConstants.Bounce);
+        }
+
+        public void Resolve(BodyChunk chunk, DesktopCollisionSnapshot snapshot,
+            long ignoredHorizontalSurfaceId, double surfaceFriction, double bounce)
+        {
             if (snapshot == null) throw new ArgumentNullException("snapshot");
             ResolveHorizontal(chunk, snapshot.Surfaces, ignoredHorizontalSurfaceId,
-                surfaceFriction);
-            ResolveVertical(chunk, snapshot.Surfaces, surfaceFriction);
+                surfaceFriction, bounce);
+            ResolveVertical(chunk, snapshot.Surfaces, surfaceFriction, bounce);
             chunk.CollisionSnapshotVersion = snapshot.Version;
         }
 
@@ -451,7 +458,7 @@ namespace RainWorldDesktopPet.Physics
 
         private static void ResolveHorizontal(BodyChunk chunk,
             IList<DesktopSurface> tickSurfaces, long ignoredSurfaceId,
-            double surfaceFriction)
+            double surfaceFriction, double bounce)
         {
             DesktopSurface best = null;
             double bestTop = double.MaxValue;
@@ -515,8 +522,8 @@ namespace RainWorldDesktopPet.Physics
 
             chunk.Position.Y = best.Top - chunk.Radius;
             chunk.FloorImpactSpeed = Math.Max(chunk.FloorImpactSpeed, impactSpeed);
-            double rebound = impactSpeed * SimulationConstants.Bounce;
-            double stopThreshold = 1.0 + 9.0 * (1.0 - SimulationConstants.Bounce);
+            double rebound = impactSpeed * bounce;
+            double stopThreshold = 1.0 + 9.0 * (1.0 - bounce);
             if (rebound < SimulationConstants.GravityPerTick || rebound < stopThreshold)
             {
                 chunk.Velocity.Y = 0.0;
@@ -534,7 +541,7 @@ namespace RainWorldDesktopPet.Physics
         }
 
         private static void ResolveVertical(BodyChunk chunk,
-            IList<DesktopSurface> tickSurfaces, double surfaceFriction)
+            IList<DesktopSurface> tickSurfaces, double surfaceFriction, double bounce)
         {
             DesktopSurface best = null;
             bool positiveMotion = false;
@@ -588,8 +595,8 @@ namespace RainWorldDesktopPet.Physics
 
             chunk.Position.X = bestWall + (positiveMotion ? -chunk.Radius : chunk.Radius);
             chunk.Velocity.X = (positiveMotion ? -1.0 : 1.0) *
-                impactSpeed * SimulationConstants.Bounce;
-            double stopThreshold = 1.0 + 9.0 * (1.0 - SimulationConstants.Bounce);
+                impactSpeed * bounce;
+            double stopThreshold = 1.0 + 9.0 * (1.0 - bounce);
             if (Math.Abs(chunk.Velocity.X) < stopThreshold) chunk.Velocity.X = 0.0;
             chunk.Velocity.Y *= MathUtil.Clamp(surfaceFriction * 2.0, 0.0, 1.0);
             chunk.ContactRight = positiveMotion;

@@ -76,6 +76,24 @@ namespace RainWorldDesktopPet.Graphics
 
         public bool UsesLocalAtlas { get { return atlas != null; } }
 
+        public void Render(System.Drawing.Graphics graphics, SlugcatPose pose,
+            Vec2 windowOrigin, bool debug, DesktopCollisionWorld world,
+            Slugcat slugcat, DesktopPetAI ai, string assetStatus,
+            SlugcatAppearance appearance)
+        {
+            Render(graphics, pose, windowOrigin, debug, world, slugcat, ai,
+                assetStatus, slugcat.SelectedSlugcat);
+        }
+
+        public void Render(System.Drawing.Graphics graphics, SlugcatPose pose,
+            RenderSpace renderSpace, bool debug, DesktopCollisionWorld world,
+            Slugcat slugcat, DesktopPetAI ai, string assetStatus,
+            SlugcatAppearance appearance)
+        {
+            Render(graphics, pose, renderSpace, debug, world, slugcat, ai,
+                assetStatus, slugcat.SelectedSlugcat);
+        }
+
         public void Render(
             System.Drawing.Graphics graphics,
             SlugcatPose pose,
@@ -85,10 +103,10 @@ namespace RainWorldDesktopPet.Graphics
             Slugcat slugcat,
             DesktopPetAI ai,
             string assetStatus,
-            SlugcatAppearance appearance)
+            SlugcatProfile selectedSlugcat)
         {
             Render(graphics, pose, new RenderSpace(new Rectangle((int)windowOrigin.X,
-                (int)windowOrigin.Y, 1, 1)), debug, world, slugcat, ai, assetStatus, appearance);
+                (int)windowOrigin.Y, 1, 1)), debug, world, slugcat, ai, assetStatus, selectedSlugcat);
         }
 
         public void Render(
@@ -100,7 +118,7 @@ namespace RainWorldDesktopPet.Graphics
             Slugcat slugcat,
             DesktopPetAI ai,
             string assetStatus,
-            SlugcatAppearance appearance)
+            SlugcatProfile selectedSlugcat)
         {
             graphics.SmoothingMode = SmoothingMode.AntiAlias;
             graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
@@ -117,16 +135,19 @@ namespace RainWorldDesktopPet.Graphics
                     (float)-renderSpace.WorldOrigin.X,
                     (float)-renderSpace.WorldOrigin.Y);
 
-                if (atlas != null)
+                string missingProfileElement;
+                bool profileAtlasAvailable = atlas != null &&
+                    SlugcatGraphicsProfiles.Get(pose.SelectedSlugcat).IsAvailable(
+                        atlas, out missingProfileElement);
+                if (profileAtlasAvailable)
                 {
-                    // Keep the procedural tail and legs behind the torso for
-                    // the desktop view. Broad custom parts otherwise appear
-                    // to pass across the front of the Slugcat.
-                    DrawTail(graphics, pose, pose.VisualTailColor); // 2
-                    DrawAtlasLegs(graphics, pose); // 4
+                    // PlayerGraphics.AddToContainer keeps sprites 0..6 in this
+                    // exact Futile order, then FaceA (9) above both arms.
                     DrawAtlasTorso(graphics, pose); // 0 Body, 1 Hips
+                    DrawTail(graphics, pose, pose.VisualTailColor); // 2
                     DrawExtraGraphics(graphics, pose, ExtraGraphicsLayer.AfterTailBeforeHead);
                     DrawAtlasHeadPart(graphics, pose, pose.VisualHeadColor, false); // 3
+                    DrawAtlasLegs(graphics, pose); // 4
                     DrawAtlasArm(graphics, pose, 0, pose.VisualArmColor); // 5
                     DrawAtlasArm(graphics, pose, 1, pose.VisualArmColor); // 6
                     DrawExtraGraphics(graphics, pose, ExtraGraphicsLayer.BehindFace);
@@ -141,6 +162,7 @@ namespace RainWorldDesktopPet.Graphics
                     DrawLimbs(graphics, pose, 1, pose.VisualArmColor);
                     DrawHead(graphics, pose, false, pose.VisualHeadColor);
                 }
+                DrawAbilityObjects(graphics, slugcat, pose, pose.TimeStacker);
 
                 if (debug)
                 {
@@ -167,9 +189,16 @@ namespace RainWorldDesktopPet.Graphics
                 builder.AppendFormat("AI {0} input {1} | body {2} animation {3} frame {4} facing/flip {5}\n",
                     ai.Behavior, slugcat.LastInput, pose.BodyMode, pose.Animation,
                     pose.AnimationFrame, pose.Facing);
-                builder.AppendFormat("skin {0} originalID={1} profile={2} sprites base={3} extra={4}\n",
-                    pose.CurrentSkin, pose.OriginalSlugcatId, pose.VisualProfileName,
+                PlatformTransitionPlan transition = ai.TransitionPlan;
+                builder.AppendFormat("transition {0} valid={1} surface {2}->{3} target={4} dx/dy={5:0.0}/{6:0.0}\n",
+                    transition.Mode, transition.IsValid, transition.SourceSurfaceId,
+                    transition.TargetSurfaceId, transition.TargetPoint,
+                    transition.HorizontalDistance, transition.VerticalDistance);
+                builder.AppendFormat("slugcat {0} originalID={1} profile={2} sprites base={3} extra={4}\n",
+                    pose.SelectedSlugcat, pose.OriginalSlugcatId, pose.VisualProfileName,
                     pose.BaseSpriteCount, pose.ExtraSpriteCount);
+                builder.AppendFormat("movement {0}\nability {1}\naudio {2}\n",
+                    pose.MovementProfileDebug, pose.AbilityDebug, pose.AudioProfileDebug);
                 builder.AppendFormat("face {0} tail={1} extensions={2}\n",
                     pose.SelectedFaceElement, pose.TailProfileName, pose.GraphicsExtensions);
                 for (int i = 0; i < pose.ExtraParts.Length; i++)
@@ -725,7 +754,7 @@ namespace RainWorldDesktopPet.Graphics
             }
 
             if (pose.MouseAttentionActive) reason += "+MouseAttention";
-            SlugcatVisualProfile profile = SlugcatVisualProfiles.Get(pose.CurrentSkin);
+            SlugcatGraphicsProfile profile = ResolvePoseProfile(pose);
             result.HeadElement = profile.HeadFamily + headFrame;
             result.HeadPosition = headPosition;
             result.HeadRotation = rawHeadAngle;
@@ -747,8 +776,15 @@ namespace RainWorldDesktopPet.Graphics
 
         private static string FaceFamily(SlugcatPose pose)
         {
-            return SlugcatVisualProfiles.Get(pose.CurrentSkin).ResolveFaceFamily(
+            return ResolvePoseProfile(pose).ResolveFaceFamily(
                 pose.Blink, SelectFaceScaleX(pose));
+        }
+
+        private static SlugcatGraphicsProfile ResolvePoseProfile(SlugcatPose pose)
+        {
+            if (pose.CurrentSkin != SlugcatSkin.Default)
+                return SlugcatVisualProfiles.Get(pose.CurrentSkin);
+            return SlugcatGraphicsProfiles.Get(pose.SelectedSlugcat);
         }
 
         private static double BodyAxisSign(SlugcatPose pose)
@@ -1049,12 +1085,228 @@ namespace RainWorldDesktopPet.Graphics
             return pen;
         }
 
+        private void DrawAbilityObjects(System.Drawing.Graphics graphics,
+            Slugcat slugcat, SlugcatPose pose, double interpolation)
+        {
+            SaintAbilityController saint = slugcat.AbilityController as SaintAbilityController;
+            if (saint != null && saint.Mode != SaintTongueMode.Retracted)
+            {
+                Vec2[] currentRope = saint.Rope;
+                Vec2[] previousRope = saint.LastRope;
+                Vec2 previous = Vec2.Lerp(previousRope[0], currentRope[0], interpolation);
+                if (currentRope.Length > 1)
+                    previous += (previous - Vec2.Lerp(previousRope[1],
+                        currentRope[1], interpolation)).Normalized;
+                double stretch = saint.RopeStretchFactor;
+                for (int segment = 1; segment < currentRope.Length; segment++)
+                {
+                    double fraction = segment / (double)(currentRope.Length - 1);
+                    Vec2 next = segment < currentRope.Length - 2
+                        ? Vec2.Lerp(previousRope[segment], currentRope[segment], interpolation)
+                        : pose.FacePosition;
+                    Vec2 perpendicular = (previous - next).Normalized.Perpendicular;
+                    double width = 0.2 + 1.6 * MathUtil.Lerp(1.0, stretch,
+                        Math.Pow(Math.Sin(fraction * Math.PI), 0.7));
+                    Vec2 a = previous - perpendicular * width;
+                    Vec2 b = previous + perpendicular * width;
+                    Vec2 c = next - perpendicular * width;
+                    Vec2 d = next + perpendicular * width;
+                    double paletteFraction = Math.Max(0.0,
+                        Math.Sin(fraction * Math.PI));
+                    Color originalTongue = HslToRgb(
+                        MathUtil.Lerp(0.95, 1.0, paletteFraction), 1.0,
+                        MathUtil.Lerp(0.75, 0.9, Math.Pow(paletteFraction, 0.15)));
+                    Color tongueColor = LerpColor(Color.FromArgb(45, 45, 50),
+                        originalTongue, 0.7);
+                    using (Brush tongueBrush = new SolidBrush(tongueColor))
+                    {
+                        graphics.FillPolygon(tongueBrush, new PointF[]
+                        {
+                            a.ToPointF(), b.ToPointF(), d.ToPointF(), c.ToPointF()
+                        });
+                    }
+                    previous = next;
+                }
+            }
+
+            for (int i = 0; i < slugcat.Spears.Count; i++)
+            {
+                DesktopSpear spear = slugcat.Spears[i];
+                Vec2 center = spear.Chunk.RenderPosition(interpolation);
+                Vec2 direction = spear.Rotation.LengthSquared > 0.001
+                    ? spear.Rotation.Normalized : Vec2.Right;
+                if (spear.HasUmbilical)
+                {
+                    Vec2[] current = spear.Umbilical;
+                    Vec2[] previousFrame = spear.LastUmbilical;
+                    Vec2 previous = Vec2.Lerp(previousFrame[0], current[0], interpolation);
+                    using (Pen umbilical = CreateRoundPen(
+                        LerpColor(pose.VisualBodyColor, Color.White, 0.35), 0.65f))
+                    {
+                        for (int segment = 1; segment < current.Length; segment++)
+                        {
+                            Vec2 next = Vec2.Lerp(previousFrame[segment],
+                                current[segment], interpolation);
+                            graphics.DrawLine(umbilical, previous.ToPointF(), next.ToPointF());
+                            previous = next;
+                        }
+                    }
+                }
+
+                Color needleColor = spear.NeedleHasConnection
+                    ? Color.White
+                    : LerpColor(OutlineColor, Color.White, spear.NeedleFadeFraction);
+                if (atlas != null)
+                {
+                    double anchorY = spear.Mode == DesktopSpearMode.Thrown ||
+                        spear.Mode == DesktopSpearMode.StuckInCreature ? 0.85 : 0.5;
+                    DrawElement(graphics, "BioSpear" + (spear.NeedleType + 1), center,
+                        AimScreen(Vec2.Zero, direction), 1.0, 1.0, 0.5, anchorY,
+                        needleColor);
+                }
+            }
+
+            for (int i = 0; i < slugcat.AbilityEffects.Count; i++)
+            {
+                AbilityEffect effect = slugcat.AbilityEffects[i];
+                Vec2 position = Vec2.Lerp(effect.LastPosition, effect.Position, interpolation);
+                double life = MathUtil.Lerp(effect.LastLife, effect.Life, interpolation);
+                if (effect.Kind == AbilityEffectKind.ShockWave)
+                {
+                    double progress = MathUtil.Clamp01(life);
+                    double radius = Math.Sqrt(progress) * effect.Radius;
+                    Color shockColor = Color.FromArgb(
+                        MathUtil.Clamp((int)Math.Round(255.0 * progress), 0, 255),
+                        MathUtil.Clamp((int)Math.Round(255.0 * Math.Pow(progress, 0.1)), 0, 255),
+                        MathUtil.Clamp((int)Math.Round(255.0 * effect.Intensity), 0, 255),
+                        MathUtil.Clamp((int)Math.Round(255.0 * progress), 0, 255));
+                    using (Pen shock = CreateRoundPen(shockColor, 1.2f))
+                        graphics.DrawEllipse(shock, (float)(position.X - radius),
+                            (float)(position.Y - radius), (float)(radius * 2.0),
+                            (float)(radius * 2.0));
+                }
+                else if (effect.Kind == AbilityEffectKind.ExplosionLight)
+                {
+                    double radius = Math.Sqrt(Math.Max(0.0, life)) * effect.Radius;
+                    double rootLife = Math.Sqrt(Math.Max(0.0, life));
+                    FillCircle(graphics, position, radius,
+                        Color.FromArgb(MathUtil.Clamp((int)(255 * life *
+                            effect.Intensity * 0.5), 0, 255), 255, 255, 255));
+                    FillCircle(graphics, position, radius * 0.68,
+                        Color.FromArgb(MathUtil.Clamp((int)(120 * rootLife *
+                            effect.Intensity), 0, 255), 255, 255, 255));
+                    FillCircle(graphics, position, radius * 0.32,
+                        Color.FromArgb(MathUtil.Clamp((int)(150 * rootLife *
+                            effect.Intensity), 0, 255), 255, 255, 255));
+                }
+                else if (effect.Kind == AbilityEffectKind.ExplosionSpikes)
+                {
+                    double progress = MathUtil.Clamp01(1.0 - life);
+                    double radius = effect.Radius * Math.Sin(progress * Math.PI * 0.5);
+                    using (Pen spikes = CreateRoundPen(Color.FromArgb(
+                        MathUtil.Clamp((int)(190 * life), 0, 255), 255, 255, 255), 1.4f))
+                    {
+                        for (int spike = 0; spike < 14; spike++)
+                        {
+                            Vec2 direction = new Vec2(Math.Cos(spike * Math.PI * 2.0 / 14.0),
+                                Math.Sin(spike * Math.PI * 2.0 / 14.0));
+                            graphics.DrawLine(spikes, (position + direction * 30.0).ToPointF(),
+                                (position + direction * radius).ToPointF());
+                        }
+                    }
+                }
+                else if (effect.Kind == AbilityEffectKind.SootMark)
+                {
+                    FillCircle(graphics, position, effect.Radius,
+                        Color.FromArgb(MathUtil.Clamp((int)(105 * life), 0, 105), 18, 18, 18));
+                }
+                else if (effect.Kind == AbilityEffectKind.Spark ||
+                    effect.Kind == AbilityEffectKind.WaterDrip)
+                {
+                    Color trailColor = effect.Kind == AbilityEffectKind.Spark
+                        ? Color.FromArgb(MathUtil.Clamp((int)(255 * life), 0, 255), 255, 255, 255)
+                        : Color.FromArgb(MathUtil.Clamp((int)(210 * life), 0, 255), 220, 225, 235);
+                    Vec2 trail = Vec2.Lerp(effect.PreviousPreviousPosition,
+                        effect.PreviousPreviousPreviousPosition, interpolation);
+                    if (Vec2.Distance(position, trail) < 9.0)
+                        trail = position - effect.Velocity.Normalized * 9.0;
+                    trail = Vec2.Lerp(position, trail,
+                        MathUtil.InverseLerp(0.0, 0.1, life));
+                    using (Pen trailPen = CreateRoundPen(trailColor,
+                        effect.Kind == AbilityEffectKind.Spark ? 2.0f : 1.0f))
+                        graphics.DrawLine(trailPen, position.ToPointF(), trail.ToPointF());
+                }
+                else if (effect.Kind == AbilityEffectKind.Smoke ||
+                    effect.Kind == AbilityEffectKind.FlashingSmoke)
+                {
+                    double scale = life > 0.5
+                        ? MathUtil.Lerp(1.0, 0.5, MathUtil.InverseLerp(0.5, 1.0, life))
+                        : Math.Sin(Math.Max(0.0, life) * Math.PI);
+                    double alpha = Math.Pow(Math.Max(0.0, life), 1.8);
+                    Color colorA = effect.Kind == AbilityEffectKind.FlashingSmoke
+                        ? Color.White : Color.FromArgb(58, 60, 66);
+                    Color colorB = effect.Kind == AbilityEffectKind.FlashingSmoke
+                        ? Color.FromArgb(185, 185, 190) : Color.FromArgb(28, 30, 35);
+                    Color back = LerpColor(colorB, colorA,
+                        0.2 + 0.8 * Math.Sqrt(Math.Max(0.0, life)));
+                    Color front = LerpColor(colorB, colorA, Math.Max(0.0, life));
+                    back = Color.FromArgb(MathUtil.Clamp((int)(255 * alpha * 0.8),
+                        0, 255), back.R, back.G, back.B);
+                    front = Color.FromArgb(MathUtil.Clamp((int)(255 * alpha * 0.6),
+                        0, 255), front.R, front.G, front.B);
+                    double baseRadius = 11.0 * effect.Radius * Math.Max(0.0, scale);
+                    FillCircle(graphics, position, baseRadius * 1.1, back);
+                    FillCircle(graphics, position, baseRadius * 0.9, front);
+                }
+                else
+                {
+                    double progress = MathUtil.Clamp01(1.0 - life);
+                    FillCircle(graphics, position, Math.Max(0.5, effect.Radius * progress),
+                        Color.FromArgb(MathUtil.Clamp((int)(160 * life), 0, 255), 255, 255, 255));
+                }
+            }
+        }
+
         private static void FillCircle(System.Drawing.Graphics graphics, Vec2 center, double radius, Color color)
         {
             using (Brush brush = new SolidBrush(color))
             {
                 graphics.FillEllipse(brush, (float)(center.X - radius), (float)(center.Y - radius), (float)(radius * 2.0), (float)(radius * 2.0));
             }
+        }
+
+        private static Color LerpColor(Color from, Color to, double amount)
+        {
+            amount = MathUtil.Clamp01(amount);
+            return Color.FromArgb(
+                MathUtil.Clamp((int)Math.Round(MathUtil.Lerp(from.A, to.A, amount)), 0, 255),
+                MathUtil.Clamp((int)Math.Round(MathUtil.Lerp(from.R, to.R, amount)), 0, 255),
+                MathUtil.Clamp((int)Math.Round(MathUtil.Lerp(from.G, to.G, amount)), 0, 255),
+                MathUtil.Clamp((int)Math.Round(MathUtil.Lerp(from.B, to.B, amount)), 0, 255));
+        }
+
+        private static Color HslToRgb(double hue, double saturation, double lightness)
+        {
+            hue -= Math.Floor(hue);
+            saturation = MathUtil.Clamp01(saturation);
+            lightness = MathUtil.Clamp01(lightness);
+            double chroma = (1.0 - Math.Abs(2.0 * lightness - 1.0)) * saturation;
+            double sector = hue * 6.0;
+            double secondary = chroma * (1.0 - Math.Abs(sector % 2.0 - 1.0));
+            double red = 0.0;
+            double green = 0.0;
+            double blue = 0.0;
+            if (sector < 1.0) { red = chroma; green = secondary; }
+            else if (sector < 2.0) { red = secondary; green = chroma; }
+            else if (sector < 3.0) { green = chroma; blue = secondary; }
+            else if (sector < 4.0) { green = secondary; blue = chroma; }
+            else if (sector < 5.0) { red = secondary; blue = chroma; }
+            else { red = chroma; blue = secondary; }
+            double match = lightness - chroma * 0.5;
+            return Color.FromArgb(255,
+                MathUtil.Clamp((int)Math.Round((red + match) * 255.0), 0, 255),
+                MathUtil.Clamp((int)Math.Round((green + match) * 255.0), 0, 255),
+                MathUtil.Clamp((int)Math.Round((blue + match) * 255.0), 0, 255));
         }
 
         private static void DrawCross(System.Drawing.Graphics graphics, Pen pen, Vec2 point, double radius)

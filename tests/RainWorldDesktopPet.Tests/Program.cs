@@ -39,6 +39,7 @@ namespace RainWorldDesktopPet.Tests
             Run("FixedTimeStep uses 40 Hz independently of render rate", FixedStepUsesFortyHertz);
             Run("Desktop world transform scales original X/Y travel uniformly", DesktopWorldTransformScalesTravelUniformly);
             Run("Original horizontal acceleration and friction match input order", OriginalHorizontalInputParity);
+            Run("Down input changes standing intent before physical Crawl", OriginalPostureTransitionUsesPhysics);
             Run("Both BodyChunks resolve against one immutable tick snapshot", BodyChunksShareFrozenSnapshot);
             Run("60/144/240 Hz rendering preserves identical physics and animation", RefreshRatesPreservePhysicsAndAnimation);
             Run("Original free-fall curve remains per-tick at 40 Hz", OriginalFreeFallCurve);
@@ -120,6 +121,7 @@ namespace RainWorldDesktopPet.Tests
             Run("Spearmaster uses its original tail profile and speckle mapping", SpearmasterTailProfileAndSpeckles);
             Run("Skin face and head families follow PlayerGraphics branches", SkinFaceFamiliesMatchPlayerGraphics);
             Run("Every visual profile remains valid through movement and stun states", AllVisualProfilesRemainStableAcrossStates);
+            AbilityParityReplayTests.Register(Run);
 
             RainWorldInstallation localInstallation = new RainWorldLocator().Locate(null);
             if (localInstallation == null)
@@ -258,10 +260,50 @@ namespace RainWorldDesktopPet.Tests
             crawler.BodyChunks[0].ContactFloor = true;
             crawler.BodyChunks[1].ContactFloor = true;
             crawler.Movement.ApplyInput(new VirtualInput(1, 1, false, false), world);
-            Near(1.0, crawler.BodyChunks[0].Velocity.X, 0.000001,
-                "Crawl with vertical input dynamicRunSpeed upper");
-            Near(1.0, crawler.BodyChunks[1].Velocity.X, 0.000001,
-                "Crawl with vertical input dynamicRunSpeed lower");
+            Near(1.2, crawler.BodyChunks[0].Velocity.X, 0.000001,
+                "first down tick remains physical Stand upper");
+            Near(1.2, crawler.BodyChunks[1].Velocity.X, 0.000001,
+                "first down tick remains physical Stand lower");
+            Equal((int)BodyModeIndex.Stand, (int)crawler.State.BodyMode,
+                "down input does not select Crawl directly");
+        }
+
+        private static void OriginalPostureTransitionUsesPhysics()
+        {
+            DesktopCollisionWorld world = new DesktopCollisionWorld(new WindowEnumerator());
+            world.Refresh(IntPtr.Zero);
+            Slugcat slugcat = new Slugcat(new Vec2(300.0, 300.0));
+            slugcat.State.BodyMode = BodyModeIndex.Stand;
+            for (int tick = 0; tick < 5; tick++)
+            {
+                slugcat.BodyChunks[0].ContactFloor = false;
+                slugcat.BodyChunks[1].ContactFloor = true;
+                slugcat.Movement.ApplyInput(new VirtualInput(0, 1, false, false), world);
+                if (tick == 0)
+                {
+                    True(!slugcat.State.Standing, "down edge clears Player.standing intent");
+                    Equal((int)BodyModeIndex.Stand, (int)slugcat.State.BodyMode,
+                        "first down frame keeps the physical Stand mode");
+                    True(slugcat.State.Animation != AnimationIndex.DownOnFours,
+                        "first down frame is not the final crawl transition");
+                }
+            }
+            Equal((int)AnimationIndex.DownOnFours, (int)slugcat.State.Animation,
+                "contact counters enter DownOnFours after the original gate");
+
+            slugcat.BodyChunks[0].Position = slugcat.BodyChunks[1].Position;
+            slugcat.BodyChunks[1].ContactFloor = true;
+            slugcat.Movement.ApplyInput(new VirtualInput(0, 1, false, false), world);
+            Equal((int)BodyModeIndex.Crawl, (int)slugcat.State.BodyMode,
+                "BodyChunk geometry establishes Crawl");
+
+            slugcat.BodyChunks[1].ContactFloor = true;
+            slugcat.Movement.ApplyInput(new VirtualInput(0, -1, false, false), world);
+            True(slugcat.State.Standing, "up edge restores Player.standing intent");
+            Equal((int)BodyModeIndex.Crawl, (int)slugcat.State.BodyMode,
+                "StandUp begins while the body is still physically low");
+            Equal((int)AnimationIndex.StandUp, (int)slugcat.State.Animation,
+                "low body enters StandUp instead of swapping to standing sprite");
         }
 
         private static void BodyChunksShareFrozenSnapshot()
@@ -1571,6 +1613,17 @@ namespace RainWorldDesktopPet.Tests
                 AtlasSprite specialFace;
                 True(set.TryGet("FaceDead", out specialFace), "dead face element");
                 True(set.TryGet("FaceStunned", out specialFace), "stunned face element");
+                for (int i = 1; i <= 3; i++)
+                {
+                    AtlasSprite bioSpear;
+                    True(set.TryGet("BioSpear" + i, out bioSpear),
+                        "embedded original BioSpear" + i);
+                    True(bioSpear.Atlas.ImagePath.EndsWith("#rainWorld",
+                        StringComparison.OrdinalIgnoreCase) ||
+                        bioSpear.Atlas.ImagePath.EndsWith("#rainworldmsc",
+                            StringComparison.OrdinalIgnoreCase),
+                        "BioSpear must resolve from the installed original atlas");
+                }
                 for (int i = 0; i < SlugcatVisualProfiles.All.Count; i++)
                 {
                     SlugcatVisualProfile profile = SlugcatVisualProfiles.All[i];
@@ -2368,9 +2421,9 @@ namespace RainWorldDesktopPet.Tests
             Slugcat hunter = CreateAirSlugcat(SlugcatVariant.Hunter, out world);
             for (int tick = 0; tick < 12; tick++)
                 hunter.Step(new VirtualInput(1, 0, false, false), world, Vec2.Zero, Vec2.Zero);
-            Near(3.6, hunter.BodyChunks[0].Velocity.X, 0.000001,
-                "Player dynamicRunSpeed is 3.6 in ordinary air for Hunter too");
-            True(hunter.BodyChunks[0].Velocity.X < 3.6 * hunter.Appearance.RunSpeedFactor,
+            Near(4.0, hunter.BodyChunks[0].Velocity.X, 0.000001,
+                "Player UpdateBodyMode dynamicRunSpeed is 4 in ordinary air for Hunter too");
+            True(hunter.BodyChunks[0].Velocity.X < 4.0 * hunter.Appearance.RunSpeedFactor,
                 "ground runspeedFac must not leak into air control");
         }
 
@@ -2656,7 +2709,7 @@ namespace RainWorldDesktopPet.Tests
 
         private static double ExpectedOriginalAirInput(double velocity, int direction)
         {
-            const double speed = 3.6;
+            const double speed = 4.0;
             double amount = 2.4 * SimulationConstants.SurfaceFriction;
             if (direction < 0)
             {

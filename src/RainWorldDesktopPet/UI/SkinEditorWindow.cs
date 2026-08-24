@@ -18,17 +18,7 @@ namespace RainWorldDesktopPet.UI
         private static readonly string[] PartNames =
         { "Head", "Face", "Body", "Arms", "Hips", "Legs", "Tail", "The Mark" };
 
-        private static readonly CharacterChoice[] Characters =
-        {
-            new CharacterChoice("Survivor", SlugcatVariant.Survivor, SlugcatSkin.Default),
-            new CharacterChoice("Monk", SlugcatVariant.Monk, SlugcatSkin.Default),
-            new CharacterChoice("Hunter", SlugcatVariant.Hunter, SlugcatSkin.Default),
-            new CharacterChoice("Gourmand", SlugcatVariant.Gourmand, SlugcatSkin.Default),
-            new CharacterChoice("Artificer", SlugcatVariant.Survivor, SlugcatSkin.Artificer),
-            new CharacterChoice("Spearmaster", SlugcatVariant.Survivor, SlugcatSkin.Spearmaster),
-            new CharacterChoice("Rivulet", SlugcatVariant.Survivor, SlugcatSkin.Rivulet),
-            new CharacterChoice("Saint", SlugcatVariant.Survivor, SlugcatSkin.Saint)
-        };
+        private static readonly CharacterChoice[] Characters = BuildCharacterChoices();
 
         private readonly GameLoop gameLoop;
         private readonly Action stateChanged;
@@ -164,9 +154,9 @@ namespace RainWorldDesktopPet.UI
             updatingControls = true;
             try
             {
-                string current = CurrentCharacterName();
                 for (int i = 0; i < Characters.Length; i++)
-                    if (Characters[i].Name == current) characterList.SelectedIndex = i;
+                    if (Characters[i].Id == gameLoop.SelectedSlugcat.Id)
+                        characterList.SelectedIndex = i;
                 for (int i = 0; i < PartNames.Length; i++)
                 {
                     string part = PartNames[i];
@@ -218,11 +208,7 @@ namespace RainWorldDesktopPet.UI
             if (updatingControls) return;
             CharacterChoice choice = characterList.SelectedItem as CharacterChoice;
             if (choice == null) return;
-            string reason;
-            if (!gameLoop.CanUseSkin(choice.Skin, out reason))
-            { SetStatus(reason ?? "The selected skin is unavailable."); RefreshFromGame(); return; }
-            gameLoop.SetVariant(choice.Variant);
-            gameLoop.SetSkin(choice.Skin);
+            gameLoop.SetSelectedSlugcat(choice.Id);
             Changed(choice.Name + " applied.");
         }
 
@@ -279,8 +265,7 @@ namespace RainWorldDesktopPet.UI
 
         private void ResetAll(object sender, EventArgs e)
         {
-            gameLoop.SetVariant(SlugcatVariant.Survivor);
-            gameLoop.SetSkin(SlugcatSkin.Default);
+            gameLoop.SetSelectedSlugcat(SlugcatId.White);
             gameLoop.ClearPartColors();
             for (int i = 0; i < PartNames.Length; i++)
             { gameLoop.ClearPartAtlas(PartNames[i]); partSelections[PartNames[i]] = "default"; }
@@ -352,8 +337,8 @@ namespace RainWorldDesktopPet.UI
 
         private string BuildAppearanceData()
         {
-            StringBuilder value = new StringBuilder("SIMM_SKIN_V2|");
-            value.Append(gameLoop.Appearance.Variant).Append('|').Append(gameLoop.Skin);
+            StringBuilder value = new StringBuilder("SIMM_SKIN_V3|");
+            value.Append(gameLoop.SelectedSlugcat.Id);
             for (int i = 0; i < PartNames.Length; i++)
             {
                 string part = PartNames[i];
@@ -366,21 +351,32 @@ namespace RainWorldDesktopPet.UI
         private void ApplyAppearanceData(string value, string successMessage)
         {
             string[] fields = (value ?? string.Empty).Trim().Split('|');
-            if (fields.Length < 3 || fields[0] != "SIMM_SKIN_V2")
+            SlugcatId character;
+            int firstPart;
+            if (fields.Length >= 2 && fields[0] == "SIMM_SKIN_V3")
+            {
+                if (!SlugcatProfiles.TryParse(fields[1], out character))
+                    throw new InvalidOperationException("The preset character data is invalid.");
+                firstPart = 2;
+            }
+            else if (fields.Length >= 3 && fields[0] == "SIMM_SKIN_V2")
+            {
+                SlugcatVariant variant;
+                SlugcatSkin skin;
+                if (!Enum.TryParse(fields[1], true, out variant) ||
+                    !Enum.TryParse(fields[2], true, out skin))
+                    throw new InvalidOperationException("The preset character data is invalid.");
+                character = LegacyCharacterId(variant, skin);
+                firstPart = 3;
+            }
+            else
                 throw new InvalidOperationException("The file is not a Slugcat appearance preset.");
-
-            SlugcatVariant variant;
-            SlugcatSkin skin;
-            if (!Enum.TryParse(fields[1], true, out variant) || !Enum.TryParse(fields[2], true, out skin))
-                throw new InvalidOperationException("The preset character data is invalid.");
-            string reason;
-            if (!gameLoop.CanUseSkin(skin, out reason)) throw new InvalidOperationException(reason);
 
             Dictionary<string, DmsSpriteSet> sets =
                 new Dictionary<string, DmsSpriteSet>(StringComparer.OrdinalIgnoreCase);
             Dictionary<string, Color> colors =
                 new Dictionary<string, Color>(StringComparer.OrdinalIgnoreCase);
-            for (int i = 3; i < fields.Length; i++)
+            for (int i = firstPart; i < fields.Length; i++)
             {
                 int equals = fields[i].IndexOf('=');
                 int comma = fields[i].LastIndexOf(',');
@@ -406,8 +402,7 @@ namespace RainWorldDesktopPet.UI
                 colors[part] = Color.FromArgb(unchecked((int)argb));
             }
 
-            gameLoop.SetVariant(variant);
-            gameLoop.SetSkin(skin);
+            gameLoop.SetSelectedSlugcat(character);
             for (int i = 0; i < PartNames.Length; i++)
             {
                 string part = PartNames[i];
@@ -564,7 +559,37 @@ namespace RainWorldDesktopPet.UI
         { if (stateChanged != null) stateChanged(); previewPanel.Invalidate(); SetStatus(message); }
         private void SetStatus(string message) { statusLabel.Text = message ?? string.Empty; }
         private string CurrentCharacterName()
-        { return gameLoop.Skin == SlugcatSkin.Default ? gameLoop.Appearance.Variant.ToString() : gameLoop.Skin.ToString(); }
+        { return gameLoop.SelectedSlugcat.DisplayName; }
+
+        private static CharacterChoice[] BuildCharacterChoices()
+        {
+            CharacterChoice[] choices = new CharacterChoice[SlugcatProfiles.All.Count];
+            for (int i = 0; i < choices.Length; i++)
+            {
+                SlugcatProfile profile = SlugcatProfiles.All[i];
+                choices[i] = new CharacterChoice(
+                    SlugcatProfiles.SelectionLabel(profile.Id), profile.Id);
+            }
+            return choices;
+        }
+
+        private static SlugcatId LegacyCharacterId(SlugcatVariant variant, SlugcatSkin skin)
+        {
+            switch (skin)
+            {
+                case SlugcatSkin.Artificer: return SlugcatId.Artificer;
+                case SlugcatSkin.Spearmaster: return SlugcatId.SpearMaster;
+                case SlugcatSkin.Rivulet: return SlugcatId.Rivulet;
+                case SlugcatSkin.Saint: return SlugcatId.Saint;
+            }
+            switch (variant)
+            {
+                case SlugcatVariant.Monk: return SlugcatId.Yellow;
+                case SlugcatVariant.Hunter: return SlugcatId.Red;
+                case SlugcatVariant.Gourmand: return SlugcatId.Gourmand;
+                default: return SlugcatId.White;
+            }
+        }
 
         private DmsSpriteSet FindSet(string id)
         {
@@ -613,11 +638,10 @@ namespace RainWorldDesktopPet.UI
 
         private sealed class CharacterChoice
         {
-            public CharacterChoice(string name, SlugcatVariant variant, SlugcatSkin skin)
-            { Name = name; Variant = variant; Skin = skin; }
+            public CharacterChoice(string name, SlugcatId id)
+            { Name = name; Id = id; }
             public readonly string Name;
-            public readonly SlugcatVariant Variant;
-            public readonly SlugcatSkin Skin;
+            public readonly SlugcatId Id;
             public override string ToString() { return Name; }
         }
     }

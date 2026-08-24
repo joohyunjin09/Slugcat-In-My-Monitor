@@ -4,7 +4,7 @@ using RainWorldDesktopPet.Physics;
 
 namespace RainWorldDesktopPet.Creature
 {
-    public sealed class SlugcatMovement
+    public sealed partial class SlugcatMovement
     {
         private readonly Slugcat owner;
         private bool previousJump;
@@ -29,17 +29,41 @@ namespace RainWorldDesktopPet.Creature
         public double[] LastAirHorizontalVelocityBefore { get { return lastAirHorizontalVelocityBefore; } }
         public double[] LastAirHorizontalVelocityAfter { get { return lastAirHorizontalVelocityAfter; } }
         public string LastAirControlBranch { get { return lastAirControlBranch; } }
+        public double JumpBoost { get { return jumpBoost; } }
+
+        internal void SetJumpBoost(double value)
+        {
+            jumpBoost = Math.Max(jumpBoost, value);
+        }
 
         public void ApplyInput(VirtualInput input, DesktopCollisionWorld world)
         {
+            // The retail-state adapter lives in a separate partial file so this
+            // compatibility implementation remains available for diagnostics.
+            if (owner.SelectedSlugcat != null)
+            {
+                ApplyOriginalInput(input, world);
+                return;
+            }
             RecordInput(input);
             if (dropThroughTicks > 0) dropThroughTicks--;
             BodyChunk chest = owner.BodyChunks[0];
             BodyChunk hips = owner.BodyChunks[1];
             SlugcatState state = owner.State;
-            double recoveryDenominator = (input.X == 0 && input.Y == 0 ? 400.0 : 1100.0) *
+            GourmandAbilityController gourmand = owner.AbilityController as GourmandAbilityController;
+            bool gourmandExhausted = gourmand != null &&
+                (gourmand.Exhausted || state.AerobicLevel >= 0.95);
+            double idleRecovery = gourmandExhausted ? 200.0 : 400.0;
+            double movingRecovery = gourmandExhausted ? 800.0 : 1100.0;
+            if (gourmandExhausted && state.BodyMode == BodyModeIndex.Crawl)
+            {
+                idleRecovery = 125.0;
+                movingRecovery = 400.0;
+            }
+            double recoveryDenominator = (input.X == 0 && input.Y == 0 ? idleRecovery : movingRecovery) *
                 (1.0 + 3.0 * MathUtil.InverseLerp(0.9, 1.0, state.AerobicLevel));
             state.AerobicLevel = Math.Max(0.0, state.AerobicLevel - 1.0 / recoveryDenominator);
+            if (state.SlowMovementStun > 0) state.SlowMovementStun--;
             bool wasGrounded = chest.ContactFloor || hips.ContactFloor;
             bool wallContact = chest.ContactLeft || chest.ContactRight || hips.ContactLeft || hips.ContactRight;
             BodyModeIndex previousBodyMode = state.BodyMode;
@@ -87,12 +111,22 @@ namespace RainWorldDesktopPet.Creature
 
             bool resting = input.Posture == VirtualPosture.Sit || input.Posture == VirtualPosture.Sleep;
             bool crawl = input.Y > 0 || resting;
+            SlugcatMovementProfile movement = owner.SelectedSlugcat.Movement;
+            bool crawlBodyMode = wasGrounded &&
+                (crawl || previousBodyMode == BodyModeIndex.Crawl);
             double mainRunSpeed = wasGrounded
-                ? (crawl ? (input.Y != 0 ? 1.0 : 2.5) : 4.2) * owner.Appearance.RunSpeedFactor
-                : 3.6;
+                ? (crawlBodyMode
+                    ? (input.Y != 0 ? 1.0 : movement.CrawlSpeed)
+                    : 4.2 * movement.RunSpeedFactor)
+                : (input.Y != 0 ? movement.CrawlSpeed : movement.AirRunSpeed);
             double hipsRunSpeed = wasGrounded
-                ? (crawl ? mainRunSpeed : 4.0 * owner.Appearance.RunSpeedFactor)
-                : 3.6;
+                ? (crawlBodyMode ? mainRunSpeed :
+                    (input.Y != 0 ? 2.0 : 4.0 * movement.RunSpeedFactor))
+                : mainRunSpeed;
+            double slowMovementFactor = MathUtil.Lerp(1.0, 0.5,
+                MathUtil.Clamp01(state.SlowMovementStun / 10.0));
+            mainRunSpeed *= slowMovementFactor;
+            hipsRunSpeed *= slowMovementFactor;
             lastAirHorizontalVelocityBefore[0] = chest.Velocity.X;
             lastAirHorizontalVelocityBefore[1] = hips.Velocity.X;
             double chestAirX = ApplyOriginalHorizontalMovement(
@@ -121,9 +155,13 @@ namespace RainWorldDesktopPet.Creature
             if (wallContact && input.Y < 0 && !wasGrounded)
             {
                 state.BodyMode = BodyModeIndex.WallClimb;
-                state.Animation = AnimationIndex.WallClimb;
-                chest.Velocity.Y = MathUtil.MoveTowards(chest.Velocity.Y, -2.1, 0.9);
-                hips.Velocity.Y = MathUtil.MoveTowards(hips.Velocity.Y, -1.8, 0.8);
+                state.Animation = AnimationIndex.None;
+                chest.Velocity.Y = MathUtil.MoveTowards(chest.Velocity.Y,
+                    -2.1 * movement.PoleClimbSpeedFactor,
+                    0.9 * movement.PoleClimbSpeedFactor);
+                hips.Velocity.Y = MathUtil.MoveTowards(hips.Velocity.Y,
+                    -1.8 * movement.PoleClimbSpeedFactor,
+                    0.8 * movement.PoleClimbSpeedFactor);
                 chest.Velocity.X *= 0.5;
                 hips.Velocity.X *= 0.5;
             }
@@ -143,18 +181,36 @@ namespace RainWorldDesktopPet.Creature
             }
 
             bool launchedThisTick = false;
-            if (input.Jump && !previousJump && wasGrounded)
+            if (input.Jump && !previousJump && !wasGrounded &&
+                (previousBodyMode == BodyModeIndex.WallClimb || wallContact))
+            {
+                int direction = (chest.ContactRight || hips.ContactRight) ? -1 :
+                    ((chest.ContactLeft || hips.ContactLeft) ? 1 : -state.Facing);
+                bool rivulet = owner.SelectedSlugcat.Id == SlugcatId.Rivulet;
+                chest.Velocity.Y = rivulet ? -10.0 : -8.0;
+                hips.Velocity.Y = rivulet ? -9.0 : -7.0;
+                chest.Velocity.X = (rivulet ? 9.0 : 6.0) * direction;
+                hips.Velocity.X = (rivulet ? 7.0 : 5.0) * direction;
+                jumpBoost = rivulet ? 4.0 : 0.0;
+                state.BodyMode = BodyModeIndex.Default;
+                state.Animation = AnimationIndex.None;
+                state.Standing = true;
+                launchedThisTick = true;
+                owner.EmitSound("Slugcat_Wall_Jump", owner.Center, 1.0, 1.0, 1);
+            }
+            else if (input.Jump && !previousJump && wasGrounded)
             {
                 // Player.Jump's ordinary standing branch assigns 4/3 in
                 // Rain World's y-up coordinates and leaves animation=None.
-                chest.Velocity.Y = -4.0;
-                hips.Velocity.Y = -3.0;
+                chest.Velocity.Y = -movement.StandingJumpChest;
+                hips.Velocity.Y = -movement.StandingJumpHips;
                 jumpBoost = 8.0;
                 state.AerobicLevel = MathUtil.Clamp01(state.AerobicLevel + 0.75 / 9.0);
                 state.Animation = AnimationIndex.None;
                 state.Grounded = false;
                 state.BodyMode = BodyModeIndex.Default;
                 launchedThisTick = true;
+                owner.EmitSound(owner.SelectedSlugcat.Audio.Jump, owner.Center, 1.0, 1.0, 3);
             }
             // Player keeps the normal body connection at 17 in Stand, Crawl,
             // ordinary air, and landing. Only specialized Roll/Corridor modes
@@ -222,6 +278,19 @@ namespace RainWorldDesktopPet.Creature
                 }
             }
 
+            if (gourmand != null && gourmand.Rolling)
+            {
+                state.Animation = AnimationIndex.Roll;
+                state.BodyMode = BodyModeIndex.Default;
+                state.Standing = false;
+            }
+            else if (gourmand != null && gourmand.Sliding)
+            {
+                state.Animation = AnimationIndex.BellySlide;
+                state.BodyMode = BodyModeIndex.Default;
+                state.Standing = false;
+            }
+
             double speed = Math.Abs((chest.Velocity.X + hips.Velocity.X) * 0.5);
             state.RunCycle += speed * (crawl ? 0.07 : 0.11);
             if (wasGrounded && !launchedThisTick)
@@ -235,6 +304,15 @@ namespace RainWorldDesktopPet.Creature
                     state.AnimationFrame++;
                     int lastFrame = crawl ? 10 : 6;
                     if (state.AnimationFrame > lastFrame) state.AnimationFrame = 0;
+                    if (state.AnimationFrame == 0)
+                    {
+                        string step = ((int)Math.Floor(state.RunCycle) & 1) == 0
+                            ? owner.SelectedSlugcat.Audio.FootstepA
+                            : owner.SelectedSlugcat.Audio.FootstepB;
+                        if (crawl) step = "Slugcat_Crawling_Step";
+                        owner.EmitSound(step, owner.BodyChunks[1].Position,
+                            crawl ? 0.65 : 1.0, 1.0, 2);
+                    }
                     if (state.AnimationFrame == 0 && state.AerobicLevel < 0.7)
                         state.AerobicLevel = MathUtil.Clamp01(state.AerobicLevel + 0.05 / 9.0);
                 }
@@ -251,6 +329,8 @@ namespace RainWorldDesktopPet.Creature
         // force is synthesized and recovery is not forced to Stand or Idle.
         public void ApplyDisabledInput(VirtualInput input)
         {
+            LaunchedThisTick = false;
+            StopOriginalMovementLoops();
             RecordInput(input);
             BodyChunk chest = owner.BodyChunks[0];
             BodyChunk hips = owner.BodyChunks[1];

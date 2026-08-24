@@ -45,16 +45,20 @@ namespace RainWorldDesktopPet.Graphics
 
     internal static class SlugcatGraphicsExtensionFactory
     {
-        public static ISlugcatGraphicsExtension[] Create(SlugcatVisualProfile profile,
+        public static ISlugcatGraphicsExtension[] Create(SlugcatGraphicsProfile profile,
             Slugcat slugcat, RainWorldAtlasSet atlas)
         {
-            if (profile.Skin == SlugcatSkin.Rivulet)
-                return new ISlugcatGraphicsExtension[] { new RivuletGillsExtension(slugcat, atlas) };
-            if (profile.Skin == SlugcatSkin.Artificer)
-                return new ISlugcatGraphicsExtension[] { new ArtificerScarExtension() };
-            if (profile.Skin == SlugcatSkin.Spearmaster)
-                return new ISlugcatGraphicsExtension[] { new SpearmasterTailSpecklesExtension() };
-            return new ISlugcatGraphicsExtension[0];
+            switch (profile.ExtensionKind)
+            {
+                case SlugcatGraphicsExtensionKind.RivuletGills:
+                    return new ISlugcatGraphicsExtension[] { new RivuletGillsExtension(slugcat, atlas) };
+                case SlugcatGraphicsExtensionKind.ArtificerScar:
+                    return new ISlugcatGraphicsExtension[] { new ArtificerScarExtension() };
+                case SlugcatGraphicsExtensionKind.SpearmasterSpeckles:
+                    return new ISlugcatGraphicsExtension[] { new SpearmasterTailSpecklesExtension(slugcat) };
+                default:
+                    return new ISlugcatGraphicsExtension[0];
+            }
         }
     }
 
@@ -267,6 +271,13 @@ namespace RainWorldDesktopPet.Graphics
 
     public sealed class SpearmasterTailSpecklesExtension : ISlugcatGraphicsExtension
     {
+        private readonly Slugcat slugcat;
+
+        public SpearmasterTailSpecklesExtension(Slugcat slugcat)
+        {
+            this.slugcat = slugcat;
+        }
+
         public string Name { get { return "TailSpeckles+CosmeticPearl"; } }
         public int SpriteCount { get { return 19; } }
         public void Step(Slugcat slugcat, Vec2 lookDirection) { }
@@ -274,6 +285,9 @@ namespace RainWorldDesktopPet.Graphics
         public int BuildPose(SlugcatPose pose, int outputIndex, double timeStacker)
         {
             int first = outputIndex;
+            SpearmasterAbilityController ability =
+                slugcat.AbilityController as SpearmasterAbilityController;
+            double spearProgress = ability == null ? 0.0 : ability.SpearProgress;
             for (int row = 0; row < 5; row++)
             {
                 double fraction = row / 4.0;
@@ -302,6 +316,22 @@ namespace RainWorldDesktopPet.Graphics
                     part.Rotation = VecToDegrees(spine.Direction);
                     part.ScaleX = LerpMap(Math.Abs(around), 0.4, 1.0, 1.0, 0.0);
                     part.ScaleY = 1.0;
+                    if (ability != null && spearProgress > 0.0)
+                    {
+                        if (row == ability.SpearRow && line == ability.SpearLine)
+                        {
+                            part.ScaleX *= 1.0 + spearProgress * 2.0;
+                            part.ScaleY *= 1.0 + spearProgress * 2.0;
+                        }
+                        else if ((row == ability.SpearRow + 1 && line == ability.SpearLine) ||
+                            (row == ability.SpearRow - 1 && line == ability.SpearLine) ||
+                            (row == ability.SpearRow && line == ability.SpearLine + 1) ||
+                            (row == ability.SpearRow && line == ability.SpearLine - 1))
+                        {
+                            part.ScaleX *= 1.0 + spearProgress;
+                            part.ScaleY *= 1.0 + spearProgress;
+                        }
+                    }
                     part.AnchorX = 0.5;
                     part.AnchorY = 0.5;
                     part.Tint = tint;
@@ -312,6 +342,25 @@ namespace RainWorldDesktopPet.Graphics
 
             ExtraGraphicsPartPose spear = pose.ExtraParts[outputIndex++];
             ResetHidden(spear, 27, "TailSpeckles", "BioSpear1");
+            if (ability != null && spearProgress > 0.0)
+            {
+                double rowFraction = ability.SpearRow / 4.0;
+                SpineSample spine = SampleSpine(pose,
+                    MathUtil.Lerp(0.4, 0.95, Math.Pow(rowFraction, 0.8)));
+                spear.Element = "BioSpear" + (ability.SpearType % 3 + 1);
+                spear.LastPosition = spine.Position;
+                spear.CurrentPosition = spine.Position;
+                spear.RenderPosition = spine.Position;
+                spear.SpritePosition = spine.Position;
+                Vec2 direction = new Vec2(spine.Direction.Y, -spine.Direction.X);
+                if (direction.Normalized.Y > 0.35) direction *= -1.0;
+                spear.Rotation = VecToDegrees(direction);
+                spear.ScaleX = 1.0;
+                spear.ScaleY = -spearProgress * 0.5;
+                spear.AnchorX = 0.5;
+                spear.AnchorY = 0.0;
+                spear.Visible = true;
+            }
             for (int i = 0; i < 3; i++)
             {
                 ExtraGraphicsPartPose pearl = pose.ExtraParts[outputIndex++];

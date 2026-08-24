@@ -8,7 +8,7 @@
 - 자산: `RainWorld_Data\resources.assets` / `resources.assets.resS`
 - 확인 코드: `PlayerGraphics.ctor`, `InitiateSprites`, `Update`/`MSCUpdate`, `DrawSprites`, `ApplyPalette`, `AddToContainer`, `DefaultFaceSprite`, `SpinePosition`, `BodyPart`, `TailSegment`
 
-로컬 Unity 자산에서 `rainWorld` 620개, `rainworldmsc` 188개 atlas element를 확인했다. 런타임에는 이 파일을 메모리에서 읽을 뿐 원본 파일을 수정하거나 자산을 빌드 결과에 복사하지 않는다. Downpour 프로필은 필요한 모든 head/face/arm/leg 및 전용 element가 존재할 때만 선택 가능하다.
+로컬 Unity 자산에서 `rainWorld` 620개, `rainworldmsc` 188개 atlas element를 확인했다. 런타임에는 이 파일을 메모리에서 읽을 뿐 원본 파일을 수정하거나 자산을 빌드 결과에 복사하지 않는다. 8종 캐릭터 선택은 항상 유지되며, 원본 element가 없는 렌더 경로만 기존 procedural fallback을 사용한다.
 
 ## 공통 sprite index
 
@@ -27,9 +27,11 @@
 
 MSC의 마지막 gown 예약 슬롯은 cloak story state가 없는 데스크톱 펫에서는 만들지 않는다. 따라서 디버그의 `Base Sprite Count`는 실제 공통 인덱스 `0..11`인 12이며 `Extra Sprite Count`는 활성 프로필 전용 할당만 센다.
 
-## Default
+## White / Yellow / Red / Gourmand
 
-**Original Slugcat ID:** `White`가 기본이며 기존 `SlugcatVariant`에서 `Yellow`, `Red`, `Gourmand` 색/체형을 유지한다.
+**Original Slugcat ID:** `White`, `Yellow`, `Red`, `Gourmand` 각각이 독립
+`SlugcatId`와 `SlugcatProfile`을 갖는다. `SlugcatVariant`는 이전 호출자와
+V2 프리셋을 위한 호환 경로에서만 유지한다.
 
 **PlayerGraphics branches:** 공통 `HeadA`, `FaceA`/blink `FaceB`, `FaceStunned`, `FaceDead` 경로다.
 
@@ -43,7 +45,9 @@ MSC의 마지막 gown 예약 슬롯은 cloak story state가 없는 데스크톱 
 
 **Draw order:** body → hips → tail → head → legs → arms → face.
 
-**Desktop implementation:** 기존 Survivor/Monk/Hunter/Gourmand 물리 프로필과 색을 그대로 사용한다.
+**Desktop implementation:** White/Yellow/Red/Gourmand의 원본 색, 무게,
+이동/투척 통계를 각 프로필에 보존한다. Gourmand는 추가로
+원본 피로·구르기·벨리 슬라이드 controller를 사용한다.
 
 ## Artificer / 기술병
 
@@ -61,9 +65,9 @@ MSC의 마지막 gown 예약 슬롯은 cloak story state가 없는 데스크톱 
 
 **Draw order:** body → hips → tail → head → legs → arms → scar(index 12) → face(index 9). 이는 `AddToContainer`가 index 9를 넣기 직전에 scar를 추가하는 순서와 같다.
 
-**Desktop implementation:** `DefaultSlugcatColor(Artificer)=(0.43922,0.13725,0.23529)`를 반올림한 `#70233C`, 흰 눈, 독립 scar extension을 사용한다. 폭발 점프 등 능력은 추가하지 않는다.
+**Desktop implementation:** `DefaultSlugcatColor(Artificer)=(0.43922,0.13725,0.23529)`를 반올림한 `#70233C`, 흰 눈, 독립 scar extension을 사용한다. 폭발 점프/패리/과열 분기는 `ArtificerAbilityController`가 담당한다.
 
-## Spearmaster / 창술가
+## SpearMaster / 창술가
 
 **Original Slugcat ID:** enum 필드명은 `Spear`, 등록 문자열도 `Spear`다.
 
@@ -81,7 +85,7 @@ MSC의 마지막 gown 예약 슬롯은 cloak story state가 없는 데스크톱 
 
 **Draw order:** body → hips → (비활성 pearl) → tail → tail speckles → head → legs → arms → face.
 
-**Desktop implementation:** 기본색 `#4F2E69`, 흰 눈, 전용 비율과 tail profile 및 speckle extension을 사용한다. 창 생성 능력은 추가하지 않는다.
+**Desktop implementation:** 기본색 `#4F2E69`, 흰 눈, 전용 비율과 tail profile 및 speckle extension을 사용한다. 원본 progress/speckle/hand target을 따르는 needle 추출·파지·투척은 `SpearmasterAbilityController`가 담당한다.
 
 ## Rivulet / 물살이
 
@@ -127,10 +131,16 @@ MSC의 마지막 gown 예약 슬롯은 cloak story state가 없는 데스크톱 
 
 **Draw order:** 활성 normal 외형은 공통 순서이며 head index 3만 `HeadB`다.
 
-**Desktop implementation:** 기본색 `#AAF156`, 어두운 눈 `#101010`, `HeadB` 머리와 닫힌 눈 `FaceB` family를 사용한다. 혀/승천/karma 능력은 추가하지 않는다.
+**Desktop implementation:** 기본색 `#AAF156`, 어두운 눈 `#101010`, `HeadB` 머리와 닫힌 눈 `FaceB` family를 사용한다. 일반 tongue 발사·부착·스윙·해제와 20개 rope segment는 `SaintAbilityController`/`DesktopRope`가 담당하며, story ascension/karma 분기만 데스크톱 세션에 없다.
 
 ## 런타임 전환과 안전성
 
-tray의 `Slugcat skin` 또는 `--skin default|artificer|spearmaster|rivulet|saint`로 선택한다. 프로필 전환은 tail graphics simulation과 extension 배열만 다시 만들며 `BodyChunk` 위치/속도/질량, `SlugcatVariant`, AI, stun, terrain state는 변경하지 않는다. 기존 tail control point의 pos/lastPos/vel은 같은 4-segment topology 사이에서 승계한다. 선택한 프로필의 로컬 element가 하나라도 없으면 메뉴를 비활성화하며 Default로 조용히 대체하지 않는다.
+트레이, 설정 창, 스킨 편집기, `--slugcat`은 모두 같은
+`SlugcatProfiles.All`의 White/Yellow/Red/Gourmand/Artificer/SpearMaster/Rivulet/Saint
+8종을 선택한다. 전환은 stats, 능력 controller, audio, graphics를 하나의
+profile로 같이 바꾸고 체형에 맞게 `BodyChunk` 질량을 갱신한다. 위치/속도,
+AI, stun, terrain state는 보존하되 이전 캐릭터의 effect, spear, tongue/rope,
+대기 SoundEvent, 전용 graphics extension은 즉시 정리한다. 같은 4-segment topology에서
+tail control point의 pos/lastPos/vel은 승계한다.
 
 트레이 메뉴의 `Debug Overlay`에는 skin, 원작 ID, profile, base/extra sprite count, face, tail profile, extension 목록과 각 extra part의 last/current/render position, element, rotation, layer를 표시한다. Rivulet은 connection-control-target wire도 함께 그린다.
