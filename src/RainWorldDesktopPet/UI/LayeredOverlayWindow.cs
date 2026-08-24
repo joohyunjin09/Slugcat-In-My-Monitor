@@ -22,7 +22,6 @@ namespace RainWorldDesktopPet.UI
         private readonly NotifyIcon trayIcon;
         private readonly Icon applicationIcon;
         private readonly ToolStripMenuItem slugcatMenu;
-        private readonly ToolStripMenuItem dmsSkinMenu;
         private readonly ToolStripMenuItem refreshWorkshopItem;
         private readonly ToolStripMenuItem debugItem;
         private readonly ToolStripMenuItem retryRenderItem;
@@ -126,8 +125,6 @@ namespace RainWorldDesktopPet.UI
                 slugcatMenu.DropDownItems.Add(CreateSlugcatItem(
                     SlugcatProfiles.SelectionLabel(profile.Id), profile.Id, startSlugcat));
             }
-            dmsSkinMenu = new ToolStripMenuItem("Dress My Slugcat skins");
-            dmsSkinMenu.DropDownOpening += VisualSkinMenuOpening;
             refreshWorkshopItem = new ToolStripMenuItem("Refresh Workshop mods");
             refreshWorkshopItem.Click += RefreshWorkshopItemClick;
             activeSlugcatsMenu = new ToolStripMenuItem("Slugcats");
@@ -145,7 +142,6 @@ namespace RainWorldDesktopPet.UI
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add(activeSlugcatsMenu);
             menu.Items.Add(slugcatMenu);
-            menu.Items.Add(dmsSkinMenu);
             menu.Items.Add(skinEditorItem);
             menu.Items.Add(debugItem);
             menu.Items.Add(soundItem);
@@ -192,13 +188,11 @@ namespace RainWorldDesktopPet.UI
             base.OnHandleCreated(e);
             ConfigureVirtualDesktopOverlay(false);
             AddSlugcat(startSlugcat);
-            RebuildDmsSkinMenu();
             if (!string.IsNullOrWhiteSpace(startDmsSkinId))
             {
                 string reason;
                 if (!gameLoop.SetDmsSkin(startDmsSkinId, out reason))
                     trayIcon.ShowBalloonTip(5000, "DMS skin unavailable", reason, ToolTipIcon.Warning);
-                RebuildDmsSkinMenu();
             }
         }
 
@@ -525,7 +519,6 @@ namespace RainWorldDesktopPet.UI
                 skinEditor.Close();
             gameLoop = selected;
             RefreshSlugcatSelectionMenu();
-            RebuildDmsSkinMenu();
             RefreshActiveSlugcatsMenu();
         }
 
@@ -682,12 +675,6 @@ namespace RainWorldDesktopPet.UI
         }
         internal SlugcatId SettingsSlugcatId
         { get { return gameLoop == null ? startSlugcat : gameLoop.SelectedSlugcat.Id; } }
-        internal IList<DmsSkinDefinition> SettingsDmsSkins
-        { get { return gameLoop == null ? new DmsSkinDefinition[0] : gameLoop.DmsSkins; } }
-        internal string SettingsActiveDmsSkinId
-        { get { return gameLoop == null || gameLoop.ActiveDmsSkin == null
-            ? null : gameLoop.ActiveDmsSkin.Id; } }
-
         internal void SettingsSelectSlugcat(int index)
         {
             if (index >= 0 && index < gameLoops.Count) SelectSlugcat(gameLoops[index]);
@@ -703,20 +690,6 @@ namespace RainWorldDesktopPet.UI
             RefreshSlugcatSelectionMenu();
             RefreshActiveSlugcatsMenu();
             if (skinEditor != null && !skinEditor.IsDisposed) skinEditor.RefreshFromGame();
-        }
-
-        internal bool SettingsTrySetDmsSkin(string id, out string reason)
-        {
-            reason = null;
-            if (gameLoop == null)
-            {
-                reason = "No Slugcat is selected.";
-                return false;
-            }
-            if (!gameLoop.SetDmsSkin(id, out reason)) return false;
-            RebuildDmsSkinMenu();
-            RefreshActiveSlugcatsMenu();
-            return true;
         }
 
         internal string SettingsRefreshWorkshop()
@@ -741,24 +714,6 @@ namespace RainWorldDesktopPet.UI
         internal void SettingsRetryRendering() { RetryRendering(null, EventArgs.Empty); }
         internal void SettingsExitApplication() { Close(); }
 
-        private void VisualSkinMenuOpening(object sender, EventArgs e)
-        {
-            bool dirty = false;
-            for (int index = 0; index < gameLoops.Count; index++)
-                dirty |= gameLoops[index].WorkshopCatalog.HasPendingChanges;
-            if (!dirty) return;
-            try
-            {
-                RefreshAllWorkshopIntegrations();
-            }
-            catch (Exception exception)
-            {
-                Program.LogException(exception);
-                trayIcon.ShowBalloonTip(5000, "Workshop refresh failed", exception.Message,
-                    ToolTipIcon.Warning);
-            }
-        }
-
         private void RefreshWorkshopItemClick(object sender, EventArgs e)
         {
             if (gameLoop == null) return;
@@ -780,62 +735,6 @@ namespace RainWorldDesktopPet.UI
         {
             for (int index = 0; index < gameLoops.Count; index++)
                 gameLoops[index].RefreshWorkshopIntegration();
-            RebuildDmsSkinMenu();
-            RefreshSettingsWindow();
-        }
-
-        private void RebuildDmsSkinMenu()
-        {
-            foreach (ToolStripItem existing in dmsSkinMenu.DropDownItems)
-                if (existing.Image != null) existing.Image.Dispose();
-            dmsSkinMenu.DropDownItems.Clear();
-
-            ToolStripMenuItem none = new ToolStripMenuItem("No DMS overlay");
-            none.Tag = null;
-            none.Checked = gameLoop == null || gameLoop.ActiveDmsSkin == null;
-            none.Click += DmsSkinItemClick;
-            dmsSkinMenu.DropDownItems.Add(none);
-            if (gameLoop == null || gameLoop.DmsSkins.Count == 0)
-            {
-                ToolStripMenuItem empty = new ToolStripMenuItem("No compatible spritesheets found");
-                empty.Enabled = false;
-                dmsSkinMenu.DropDownItems.Add(empty);
-                return;
-            }
-
-            dmsSkinMenu.DropDownItems.Add(new ToolStripSeparator());
-            foreach (DmsSkinDefinition skin in gameLoop.DmsSkins)
-            {
-                string label = skin.Name + " — " + skin.Author + " (" + skin.ModName + ")";
-                if (!skin.IsModActive) label = "[Inactive] " + label;
-                ToolStripMenuItem item = new ToolStripMenuItem(label);
-                item.Tag = skin.Id;
-                item.Enabled = skin.IsModActive;
-                item.Checked = gameLoop.ActiveDmsSkin != null &&
-                    string.Equals(gameLoop.ActiveDmsSkin.Id, skin.Id,
-                        StringComparison.OrdinalIgnoreCase);
-                item.ToolTipText = "DMS id: " + skin.Id + Environment.NewLine +
-                    "Available parts: " + string.Join(", ", skin.AvailableParts) + Environment.NewLine +
-                    "Source: " + skin.DirectoryPath;
-                try { item.Image = skin.CreatePreview(32); }
-                catch (Exception) { }
-                item.Click += DmsSkinItemClick;
-                dmsSkinMenu.DropDownItems.Add(item);
-            }
-        }
-
-        private void DmsSkinItemClick(object sender, EventArgs e)
-        {
-            ToolStripMenuItem selected = sender as ToolStripMenuItem;
-            if (selected == null || gameLoop == null) return;
-            string reason;
-            if (!gameLoop.SetDmsSkin(selected.Tag as string, out reason))
-            {
-                trayIcon.ShowBalloonTip(4000, "DMS skin unavailable", reason,
-                    ToolTipIcon.Warning);
-                return;
-            }
-            RebuildDmsSkinMenu();
             RefreshSettingsWindow();
         }
 

@@ -55,6 +55,11 @@ namespace RainWorldDesktopPet.Workshop
 
         public IEnumerable<string> AvailableParts { get { return availableParts.OrderBy(value => value); } }
 
+        public bool HasPart(string part)
+        {
+            return !string.IsNullOrWhiteSpace(part) && availableParts.Contains(part);
+        }
+
         internal void AddAtlas(RainWorldAtlas atlas)
         {
             atlases.Add(atlas);
@@ -79,7 +84,6 @@ namespace RainWorldDesktopPet.Workshop
                 if (group.Value.All(name => elements.ContainsKey(name))) availableParts.Add(group.Key);
                 if (group.Value.All(name => leftElements.ContainsKey(name) && rightElements.ContainsKey(name)))
                 {
-                    availableParts.Add(group.Key);
                     asymmetricParts.Add(group.Key);
                 }
             }
@@ -145,13 +149,20 @@ namespace RainWorldDesktopPet.Workshop
             elements.Clear();
             leftElements.Clear();
             rightElements.Clear();
+            availableParts.Clear();
             asymmetricParts.Clear();
         }
     }
 
-    internal static class DmsSpriteGroups
+    public static class DmsSpriteGroups
     {
         public static readonly Dictionary<string, string[]> Required = BuildRequired();
+
+        public static readonly string[] SelectableParts =
+        {
+            "HEAD", "FACE", "BODY", "ARMS", "HIPS", "LEGS", "TAIL",
+            "FACESCAR", "GILLS", "TAILSPECKLES", "ASCENSION", "PIXEL"
+        };
 
         private static Dictionary<string, string[]> BuildRequired()
         {
@@ -202,6 +213,27 @@ namespace RainWorldDesktopPet.Workshop
             foreach (KeyValuePair<string, string[]> group in Required)
                 if (group.Value.Contains(element, StringComparer.OrdinalIgnoreCase)) return group.Key;
             return null;
+        }
+
+        public static string PreviewElement(string part)
+        {
+            if (string.IsNullOrWhiteSpace(part)) return null;
+            switch (part.ToUpperInvariant())
+            {
+                case "HEAD": return "HeadA0";
+                case "FACE": return "FaceA0";
+                case "BODY": return "BodyA";
+                case "ARMS": return "PlayerArm0";
+                case "HIPS": return "HipsA";
+                case "LEGS": return "LegsA0";
+                case "TAIL": return "TailTexture";
+                case "FACESCAR": return "MushroomA";
+                case "GILLS": return "LizardScaleA3";
+                case "TAILSPECKLES": return "tinyStar";
+                case "ASCENSION": return "guardEye";
+                case "PIXEL": return "pixel";
+                default: return null;
+            }
         }
     }
 

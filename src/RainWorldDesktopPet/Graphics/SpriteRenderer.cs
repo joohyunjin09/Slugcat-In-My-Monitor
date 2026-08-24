@@ -36,12 +36,22 @@ namespace RainWorldDesktopPet.Graphics
         private readonly Dictionary<int, ImageAttributes> tintAttributes = new Dictionary<int, ImageAttributes>();
         private readonly Dictionary<int, SolidBrush> bodyBrushes = new Dictionary<int, SolidBrush>();
         private readonly PointF[] destinationPoints = new PointF[3];
+        private readonly PointF[] effectDestinationPoints = new PointF[3];
         private readonly Vec2[] tailMeshVertices = new Vec2[15];
         private readonly PointF[] tailMeshPoints = new PointF[15];
         private readonly PointF[] tailTrianglePoints = new PointF[3];
         private readonly PointF[] tailRasterDestinationPoints = new PointF[3];
+        private readonly PointF[] tailTextureCoordinates = new PointF[15];
+        private readonly PointF[] tailTextureSourceTriangle = new PointF[3];
+        private readonly PointF[] tailTextureDestinationTriangle = new PointF[3];
+        private readonly PointF[] abilityQuad = new PointF[4];
+        private readonly PointF[] abilityTriangle = new PointF[3];
         private readonly Bitmap tailRaster;
         private readonly System.Drawing.Graphics tailRasterGraphics;
+        private readonly Bitmap fireSmokeShaderMask;
+        private readonly Bitmap flatLightShaderMask;
+        private readonly Bitmap lightSourceShaderMask;
+        private readonly Bitmap shockWaveShaderMask;
         private const int TailRasterSize = 128;
         public const int OriginalTailMeshVertexCount = 15;
         public const int OriginalTailMeshTriangleCount = 13;
@@ -62,7 +72,8 @@ namespace RainWorldDesktopPet.Graphics
         };
         private SlugcatPose activePose;
         private RenderSpace activeRenderSpace;
-        private DmsSkinDefinition dmsSkin;
+        private readonly Dictionary<string, DmsSkinDefinition> dmsParts =
+            new Dictionary<string, DmsSkinDefinition>(StringComparer.OrdinalIgnoreCase);
 
         public SpriteRenderer(RainWorldAtlasSet atlas)
         {
@@ -74,14 +85,57 @@ namespace RainWorldDesktopPet.Graphics
             tailRasterGraphics.PixelOffsetMode = PixelOffsetMode.Half;
             tailRasterGraphics.CompositingMode = CompositingMode.SourceCopy;
             tailRasterGraphics.CompositingQuality = CompositingQuality.HighSpeed;
+            // Rain World's effect sprites all use the generated Futile_White
+            // quad. The installed resources.assets registers the compiled
+            // FireSmoke, FlatLight, LightSource and ShockWave shaders. GDI+
+            // cannot execute Unity shaders, so deterministic alpha masks for
+            // those four shader roles are built once and reused by every draw.
+            fireSmokeShaderMask = CreateEffectShaderMask(EffectShaderMask.FireSmoke);
+            flatLightShaderMask = CreateEffectShaderMask(EffectShaderMask.FlatLight);
+            lightSourceShaderMask = CreateEffectShaderMask(EffectShaderMask.LightSource);
+            shockWaveShaderMask = CreateEffectShaderMask(EffectShaderMask.ShockWave);
         }
 
         public bool UsesLocalAtlas { get { return atlas != null; } }
-        public DmsSkinDefinition ActiveDmsSkin { get { return dmsSkin; } }
+        public DmsSkinDefinition ActiveDmsSkin
+        {
+            get
+            {
+                foreach (DmsSkinDefinition skin in dmsParts.Values) return skin;
+                return null;
+            }
+        }
 
+        public DmsSkinDefinition GetDmsPart(string part)
+        {
+            DmsSkinDefinition skin;
+            return !string.IsNullOrWhiteSpace(part) && dmsParts.TryGetValue(part, out skin)
+                ? skin : null;
+        }
+
+        public void SetDmsPart(string part, DmsSkinDefinition skin)
+        {
+            if (string.IsNullOrWhiteSpace(part)) return;
+            if (skin == null) dmsParts.Remove(part);
+            else dmsParts[part] = skin;
+        }
+
+        public void ClearDmsParts()
+        {
+            dmsParts.Clear();
+        }
+
+        // Kept for the command-line preview utility. Runtime UI uses only
+        // explicit per-part selections through SetDmsPart.
         public void SetDmsSkin(DmsSkinDefinition skin)
         {
-            dmsSkin = skin;
+            dmsParts.Clear();
+            if (skin == null) return;
+            for (int i = 0; i < DmsSpriteGroups.SelectableParts.Length; i++)
+            {
+                string part = DmsSpriteGroups.SelectableParts[i];
+                if (skin.HasPart(part)) dmsParts[part] = skin;
+            }
         }
 
         public void Render(System.Drawing.Graphics graphics, SlugcatPose pose,
@@ -134,7 +188,10 @@ namespace RainWorldDesktopPet.Graphics
             pose.SpritePlacements.Clear();
             pose.OverlayBounds = renderSpace.VirtualDesktopBounds;
             activePose = pose;
-            activeRenderSpace = renderSpace;
+            // SpritePlacement is debug-overlay metadata. Building one heap
+            // object per atlas sprite at compositor FPS was the renderer's
+            // largest steady allocation source.
+            activeRenderSpace = debug ? renderSpace : null;
             GraphicsState state = graphics.Save();
             try
             {
@@ -208,8 +265,8 @@ namespace RainWorldDesktopPet.Graphics
                     pose.BaseSpriteCount, pose.ExtraSpriteCount);
                 builder.AppendFormat("movement {0}\nability {1}\naudio {2}\n",
                     pose.MovementProfileDebug, pose.AbilityDebug, pose.AudioProfileDebug);
-                builder.AppendFormat("DMS {0} | meow={1} {2} {3:0.000}/{4:0.000}s\n",
-                    dmsSkin == null ? "none" : dmsSkin.Id, pose.IsMeowing,
+                builder.AppendFormat("DMS parts {0} | meow={1} {2} {3:0.000}/{4:0.000}s\n",
+                    dmsParts.Count, pose.IsMeowing,
                     pose.MeowAsset ?? "-", pose.MeowProgress * pose.MeowDurationSeconds,
                     pose.MeowDurationSeconds);
                 builder.AppendFormat("face {0} tail={1} extensions={2}\n",
@@ -222,7 +279,7 @@ namespace RainWorldDesktopPet.Graphics
                         extra.LastPosition, extra.CurrentPosition, extra.RenderPosition,
                         extra.Rotation, extra.Layer, extra.Visible);
                 }
-                VirtualInput[] inputHistory = slugcat.Movement.InputHistory;
+                VirtualInput[] inputHistory = slugcat.Movement.InputHistoryForRead;
                 builder.AppendFormat("input history now/1/2/3: {0} | {1} | {2} | {3}\n",
                     inputHistory[0], inputHistory[1], inputHistory[2], inputHistory[3]);
                 builder.AppendFormat("physics gravity {0:0.###}/tick air {1:0.###} maxFall none connection {2:0.###} world x{3:0.00} snapshot {4}\n",
@@ -385,10 +442,11 @@ namespace RainWorldDesktopPet.Graphics
             {
                 tailRasterGraphics.Clear(Color.Transparent);
                 AtlasSprite dmsTail = null;
-                bool textured = dmsSkin != null && dmsSkin.TryGetSprite("TailTexture",
+                DmsSkinDefinition dmsTailSkin = GetDmsPart("TAIL");
+                bool textured = dmsTailSkin != null && dmsTailSkin.TryGetSprite("TailTexture",
                     pose.OriginalSlugcatId, DmsSpriteSide.None, out dmsTail);
-                Color tailColor = dmsSkin != null && dmsSkin.DefaultTail.Color.A > 0
-                    ? dmsSkin.DefaultTail.Color
+                Color tailColor = dmsTailSkin != null && dmsTailSkin.DefaultTail.Color.A > 0
+                    ? dmsTailSkin.DefaultTail.Color
                     : bodyColor;
                 if (textured)
                 {
@@ -447,9 +505,7 @@ namespace RainWorldDesktopPet.Graphics
 
         private void RasterizeDmsTail(AtlasSprite sprite, Color tint, int rasterLeft, int rasterTop)
         {
-            PointF[] uv = BuildTailTextureCoordinates(sprite.Element);
-            PointF[] sourceTriangle = new PointF[3];
-            PointF[] destinationTriangle = new PointF[3];
+            PopulateTailTextureCoordinates(sprite.Element, tailTextureCoordinates);
             GraphicsState baseState = tailRasterGraphics.Save();
             try
             {
@@ -459,13 +515,13 @@ namespace RainWorldDesktopPet.Graphics
                     for (int point = 0; point < 3; point++)
                     {
                         int vertex = TailTriangles[triangle, point];
-                        sourceTriangle[point] = uv[vertex];
-                        destinationTriangle[point] = new PointF(
+                        tailTextureSourceTriangle[point] = tailTextureCoordinates[vertex];
+                        tailTextureDestinationTriangle[point] = new PointF(
                             tailMeshPoints[vertex].X - rasterLeft,
                             tailMeshPoints[vertex].Y - rasterTop);
                     }
-                    using (Matrix transform = CreateTriangleTransform(sourceTriangle,
-                        destinationTriangle))
+                    using (Matrix transform = CreateTriangleTransform(
+                        tailTextureSourceTriangle, tailTextureDestinationTriangle))
                     {
                         if (transform == null) continue;
                         GraphicsState state = tailRasterGraphics.Save();
@@ -473,7 +529,7 @@ namespace RainWorldDesktopPet.Graphics
                         {
                             using (GraphicsPath clip = new GraphicsPath())
                             {
-                                clip.AddPolygon(destinationTriangle);
+                                clip.AddPolygon(tailTextureDestinationTriangle);
                                 tailRasterGraphics.SetClip(clip, CombineMode.Replace);
                             }
                             tailRasterGraphics.Transform = transform;
@@ -495,9 +551,9 @@ namespace RainWorldDesktopPet.Graphics
             }
         }
 
-        private static PointF[] BuildTailTextureCoordinates(AtlasElement element)
+        private static void PopulateTailTextureCoordinates(AtlasElement element,
+            PointF[] result)
         {
-            PointF[] result = new PointF[OriginalTailMeshVertexCount];
             for (int index = 0; index < result.Length; index++)
             {
                 double u;
@@ -516,7 +572,6 @@ namespace RainWorldDesktopPet.Graphics
                     element.Frame.Left + (float)(u * element.Frame.Width),
                     element.Frame.Top + (float)(v * element.Frame.Height));
             }
-            return result;
         }
 
         private static Matrix CreateTriangleTransform(PointF[] source, PointF[] destination)
@@ -953,9 +1008,13 @@ namespace RainWorldDesktopPet.Graphics
                 return pose.Chest.X < pose.Hips.X ? -1.0 : 1.0;
             if (pose.BodyMode == BodyModeIndex.WallClimb)
                 return pose.Facing == -1 ? -1.0 : 1.0;
+            // Custom.DistanceToLine is evaluated in Futile's y-up space.
+            // Reflecting it into this renderer's y-down space reverses the
+            // signed distance. The arm, hand target and spear keep one shared
+            // coordinate conversion instead of independently flipping sprites.
             return SignedDistanceToLine(pose.Hands[index], pose.Chest, pose.Hips) < 0.0
-                ? -1.0
-                : 1.0;
+                ? 1.0
+                : -1.0;
         }
 
         private void DrawElement(System.Drawing.Graphics graphics, string name, Vec2 position, double angle, double scaleX, double scaleY, double anchorX, double anchorY, Color tint)
@@ -972,10 +1031,18 @@ namespace RainWorldDesktopPet.Graphics
             // Spearmaster's tinyStar speckles); GDI+ rejects a singular matrix.
             if (Math.Abs(scaleX) < 0.000001 || Math.Abs(scaleY) < 0.000001) return;
             AtlasSprite sprite = null;
-            bool dmsApplied = dmsSkin != null && activePose != null &&
-                dmsSkin.TryGetSprite(name, activePose.OriginalSlugcatId, side, out sprite);
+            DmsSkinDefinition selectedPartSkin = null;
+            if (activePose != null)
+            {
+                string generic = DmsSpriteGroups.ToGenericElement(name,
+                    activePose.OriginalSlugcatId);
+                selectedPartSkin = GetDmsPart(DmsSpriteGroups.PartForElement(generic));
+            }
+            bool dmsApplied = selectedPartSkin != null &&
+                selectedPartSkin.TryGetSprite(name, activePose.OriginalSlugcatId, side, out sprite);
             if (!dmsApplied && !atlas.TryGet(name, out sprite)) return;
-            if (dmsApplied) tint = dmsSkin.ResolveTint(name, activePose.OriginalSlugcatId, tint);
+            if (dmsApplied) tint = selectedPartSkin.ResolveTint(name,
+                activePose.OriginalSlugcatId, tint);
             AtlasElement element = sprite.Element;
             GraphicsState state = graphics.Save();
             try
@@ -1245,8 +1312,8 @@ namespace RainWorldDesktopPet.Graphics
             SaintAbilityController saint = slugcat.AbilityController as SaintAbilityController;
             if (saint != null && saint.Mode != SaintTongueMode.Retracted)
             {
-                Vec2[] currentRope = saint.Rope;
-                Vec2[] previousRope = saint.LastRope;
+                Vec2[] currentRope = saint.RopeForRender;
+                Vec2[] previousRope = saint.LastRopeForRender;
                 Vec2 previous = Vec2.Lerp(previousRope[0], currentRope[0], interpolation);
                 if (currentRope.Length > 1)
                     previous += (previous - Vec2.Lerp(previousRope[1],
@@ -1272,13 +1339,11 @@ namespace RainWorldDesktopPet.Graphics
                         MathUtil.Lerp(0.75, 0.9, Math.Pow(paletteFraction, 0.15)));
                     Color tongueColor = LerpColor(Color.FromArgb(45, 45, 50),
                         originalTongue, 0.7);
-                    using (Brush tongueBrush = new SolidBrush(tongueColor))
-                    {
-                        graphics.FillPolygon(tongueBrush, new PointF[]
-                        {
-                            a.ToPointF(), b.ToPointF(), d.ToPointF(), c.ToPointF()
-                        });
-                    }
+                    abilityQuad[0] = a.ToPointF();
+                    abilityQuad[1] = b.ToPointF();
+                    abilityQuad[2] = d.ToPointF();
+                    abilityQuad[3] = c.ToPointF();
+                    graphics.FillPolygon(GetBodyBrush(tongueColor), abilityQuad);
                     previous = next;
                 }
             }
@@ -1293,30 +1358,30 @@ namespace RainWorldDesktopPet.Graphics
                 if (effect.Kind == AbilityEffectKind.ShockWave)
                 {
                     double progress = MathUtil.Clamp01(life);
-                    double radius = Math.Sqrt(progress) * effect.Radius;
-                    Color shockColor = Color.FromArgb(
-                        MathUtil.Clamp((int)Math.Round(255.0 * progress), 0, 255),
-                        MathUtil.Clamp((int)Math.Round(255.0 * Math.Pow(progress, 0.1)), 0, 255),
-                        MathUtil.Clamp((int)Math.Round(255.0 * effect.Intensity), 0, 255),
+                    double shaderScale = Math.Sqrt(progress) * effect.Radius / 8.0;
+                    Color shaderColor = Color.FromArgb(255,
+                        MathUtil.Clamp((int)Math.Round(255.0 *
+                            Math.Pow(progress, 0.1)), 0, 255),
+                        MathUtil.Clamp((int)Math.Round(255.0 *
+                            effect.Intensity), 0, 255),
                         MathUtil.Clamp((int)Math.Round(255.0 * progress), 0, 255));
-                    using (Pen shock = CreateRoundPen(shockColor, 1.2f))
-                        graphics.DrawEllipse(shock, (float)(position.X - radius),
-                            (float)(position.Y - radius), (float)(radius * 2.0),
-                            (float)(radius * 2.0));
+                    DrawEffectShaderSprite(graphics, shockWaveShaderMask, position,
+                        0.0, shaderScale * 16.0, shaderColor);
                 }
                 else if (effect.Kind == AbilityEffectKind.ExplosionLight)
                 {
-                    double radius = Math.Sqrt(Math.Max(0.0, life)) * effect.Radius;
                     double rootLife = Math.Sqrt(Math.Max(0.0, life));
-                    FillRadialCircle(graphics, position, radius,
-                        Color.FromArgb(MathUtil.Clamp((int)(255 * life *
-                            effect.Intensity * 0.5), 0, 255), 255, 255, 255));
-                    FillRadialCircle(graphics, position, radius,
-                        Color.FromArgb(MathUtil.Clamp((int)(255 * rootLife *
-                            effect.Intensity), 0, 255), 255, 255, 255));
-                    FillRadialCircle(graphics, position, radius,
-                        Color.FromArgb(MathUtil.Clamp((int)(255 * rootLife *
-                            effect.Intensity), 0, 255), 255, 255, 255));
+                    double shaderScale = rootLife * effect.Radius / 8.0;
+                    double size = shaderScale * 16.0;
+                    DrawEffectShaderSprite(graphics, flatLightShaderMask, position,
+                        0.0, size, Color.FromArgb(MathUtil.Clamp((int)Math.Round(
+                            255.0 * life * effect.Intensity * 0.5), 0, 255), 0, 0, 0));
+                    int lightAlpha = MathUtil.Clamp((int)Math.Round(255.0 *
+                        rootLife * effect.Intensity), 0, 255);
+                    DrawEffectShaderSprite(graphics, lightSourceShaderMask, position,
+                        0.0, size, Color.FromArgb(lightAlpha, 255, 255, 255));
+                    DrawEffectShaderSprite(graphics, lightSourceShaderMask, position,
+                        0.0, size, Color.FromArgb(lightAlpha, 255, 255, 255));
                 }
                 else if (effect.Kind == AbilityEffectKind.ExplosionSpikes)
                 {
@@ -1354,15 +1419,10 @@ namespace RainWorldDesktopPet.Graphics
                     Vec2 axis = position - trail;
                     if (axis.LengthSquared < 0.000001) axis = Vec2.Down;
                     Vec2 perpendicular = axis.Normalized.Perpendicular * effect.Radius;
-                    using (Brush trailBrush = new SolidBrush(trailColor))
-                    {
-                        graphics.FillPolygon(trailBrush, new PointF[]
-                        {
-                            (position + perpendicular).ToPointF(),
-                            (position - perpendicular).ToPointF(),
-                            trail.ToPointF()
-                        });
-                    }
+                    abilityTriangle[0] = (position + perpendicular).ToPointF();
+                    abilityTriangle[1] = (position - perpendicular).ToPointF();
+                    abilityTriangle[2] = trail.ToPointF();
+                    graphics.FillPolygon(GetBodyBrush(trailColor), abilityTriangle);
                 }
                 else if (effect.Kind == AbilityEffectKind.Smoke ||
                     effect.Kind == AbilityEffectKind.FlashingSmoke)
@@ -1371,18 +1431,26 @@ namespace RainWorldDesktopPet.Graphics
                         ? MathUtil.Lerp(1.0, 0.5, MathUtil.InverseLerp(0.5, 1.0, life))
                         : Math.Sin(Math.Max(0.0, life) * Math.PI);
                     double alpha = Math.Pow(Math.Max(0.0, life), 1.8);
+                    Color paletteBlack = Color.FromArgb(28, 31, 34);
+                    Color paletteFog = Color.FromArgb(92, 98, 105);
+                    Color colorA = LerpColor(paletteBlack, paletteFog, 0.1);
+                    Color colorB = LerpColor(paletteBlack, paletteFog, 0.4);
                     Color back = effect.Kind == AbilityEffectKind.FlashingSmoke
-                        ? Color.White : Color.Black;
-                    Color front = back;
+                        ? Color.White : LerpColor(colorB, colorA,
+                            0.2 + 0.8 * Math.Sqrt(Math.Max(0.0, life)));
+                    Color front = effect.Kind == AbilityEffectKind.FlashingSmoke
+                        ? Color.White : LerpColor(colorB, colorA, life);
                     back = Color.FromArgb(MathUtil.Clamp((int)(255 * alpha * 0.8),
                         0, 255), back.R, back.G, back.B);
                     front = Color.FromArgb(MathUtil.Clamp((int)(255 * alpha * 0.6),
                         0, 255), front.R, front.G, front.B);
-                    double baseRadius = 11.0 * effect.Radius * Math.Max(0.0, scale);
-                    // Futile_White is a generated 16px quad. Its half-size
-                    // converts the DLL sprite scale into world-space radius.
-                    FillRadialCircle(graphics, position, baseRadius * 1.1 * 8.0, back);
-                    FillRadialCircle(graphics, position, baseRadius * 0.9 * 8.0, front);
+                    double baseScale = 11.0 * effect.Radius * Math.Max(0.0, scale);
+                    double rotation = MathUtil.Lerp(effect.LastRotation,
+                        effect.Rotation, interpolation);
+                    DrawEffectShaderSprite(graphics, fireSmokeShaderMask, position,
+                        rotation, baseScale * 1.1 * 16.0, back);
+                    DrawEffectShaderSprite(graphics, fireSmokeShaderMask, position,
+                        rotation, baseScale * 0.9 * 16.0, front);
                 }
                 else
                 {
@@ -1452,26 +1520,74 @@ namespace RainWorldDesktopPet.Graphics
             }
         }
 
-        private static void FillRadialCircle(System.Drawing.Graphics graphics,
-            Vec2 center, double radius, Color centerColor)
+        private enum EffectShaderMask
         {
-            if (radius <= 0.0001 || centerColor.A <= 0) return;
-            RectangleF bounds = new RectangleF((float)(center.X - radius),
-                (float)(center.Y - radius), (float)(radius * 2.0),
-                (float)(radius * 2.0));
-            using (GraphicsPath path = new GraphicsPath())
+            FireSmoke,
+            FlatLight,
+            LightSource,
+            ShockWave
+        }
+
+        private static Bitmap CreateEffectShaderMask(EffectShaderMask kind)
+        {
+            const int size = 64;
+            Bitmap mask = new Bitmap(size, size, PixelFormat.Format32bppPArgb);
+            for (int y = 0; y < size; y++)
             {
-                path.AddEllipse(bounds);
-                using (PathGradientBrush brush = new PathGradientBrush(path))
+                for (int x = 0; x < size; x++)
                 {
-                    brush.CenterPoint = center.ToPointF();
-                    brush.CenterColor = centerColor;
-                    brush.SurroundColors = new Color[]
+                    double nx = (x + 0.5 - size * 0.5) / (size * 0.5);
+                    double ny = (y + 0.5 - size * 0.5) / (size * 0.5);
+                    double radius = Math.Sqrt(nx * nx + ny * ny);
+                    double alpha;
+                    if (kind == EffectShaderMask.LightSource)
+                        alpha = Math.Pow(Math.Max(0.0, 1.0 - radius), 2.0);
+                    else if (kind == EffectShaderMask.FlatLight)
+                        alpha = Math.Pow(Math.Max(0.0, 1.0 - radius), 0.65);
+                    else if (kind == EffectShaderMask.ShockWave)
+                        alpha = Math.Exp(-Math.Pow((radius - 0.76) / 0.055, 2.0));
+                    else
                     {
-                        Color.FromArgb(0, centerColor.R, centerColor.G, centerColor.B)
-                    };
-                    graphics.FillPath(brush, path);
+                        double angle = Math.Atan2(ny, nx);
+                        double warp = 0.11 * Math.Sin(angle * 5.0 + radius * 11.0) +
+                            0.055 * Math.Sin(angle * 9.0 - radius * 17.0);
+                        double edge = 1.0 - (radius + warp);
+                        double cellular = 0.72 + 0.28 * Math.Sin(
+                            x * 0.31 + Math.Sin(y * 0.19) * 2.1) *
+                            Math.Sin(y * 0.27 - Math.Sin(x * 0.23) * 1.7);
+                        alpha = Math.Pow(MathUtil.Clamp01(edge * 2.1), 0.7) *
+                            MathUtil.Clamp01(cellular);
+                    }
+                    int a = MathUtil.Clamp((int)Math.Round(alpha * 255.0), 0, 255);
+                    mask.SetPixel(x, y, Color.FromArgb(a, 255, 255, 255));
                 }
+            }
+            return mask;
+        }
+
+        private void DrawEffectShaderSprite(System.Drawing.Graphics graphics,
+            Bitmap mask, Vec2 center, double rotation, double size, Color tint)
+        {
+            if (mask == null || size <= 0.0001 || tint.A <= 0) return;
+            GraphicsState state = graphics.Save();
+            try
+            {
+                graphics.TranslateTransform((float)center.X, (float)center.Y);
+                graphics.RotateTransform((float)rotation);
+                float half = (float)(size * 0.5);
+                effectDestinationPoints[0] = new PointF(-half, -half);
+                effectDestinationPoints[1] = new PointF(half, -half);
+                effectDestinationPoints[2] = new PointF(-half, half);
+                int quantizedAlpha = MathUtil.Clamp((int)Math.Round(tint.A / 8.0) * 8,
+                    0, 255);
+                Color quantized = Color.FromArgb(quantizedAlpha, tint.R, tint.G, tint.B);
+                graphics.DrawImage(mask, effectDestinationPoints,
+                    new RectangleF(0, 0, mask.Width, mask.Height), GraphicsUnit.Pixel,
+                    GetTintAttributes(quantized), null, 0);
+            }
+            finally
+            {
+                graphics.Restore(state);
             }
         }
 
@@ -1519,6 +1635,10 @@ namespace RainWorldDesktopPet.Graphics
         {
             tailRasterGraphics.Dispose();
             tailRaster.Dispose();
+            fireSmokeShaderMask.Dispose();
+            flatLightShaderMask.Dispose();
+            lightSourceShaderMask.Dispose();
+            shockWaveShaderMask.Dispose();
             debugFont.Dispose();
             foreach (KeyValuePair<int, ImageAttributes> item in tintAttributes)
             {

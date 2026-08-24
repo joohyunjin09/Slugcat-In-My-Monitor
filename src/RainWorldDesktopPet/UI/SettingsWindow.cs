@@ -2,7 +2,6 @@ using System;
 using System.Drawing;
 using System.Windows.Forms;
 using RainWorldDesktopPet.Creature;
-using RainWorldDesktopPet.Workshop;
 
 namespace RainWorldDesktopPet.UI
 {
@@ -14,7 +13,6 @@ namespace RainWorldDesktopPet.UI
         private readonly Button nextButton;
         private readonly Button removeButton;
         private readonly ComboBox characterSelector;
-        private readonly ComboBox dmsSkinSelector;
         private readonly CheckBox debugCheck;
         private readonly CheckBox pauseCheck;
         private readonly CheckBox soundCheck;
@@ -91,12 +89,11 @@ namespace RainWorldDesktopPet.UI
                 Dock = DockStyle.Fill,
                 Padding = new Padding(8),
                 ColumnCount = 2,
-                RowCount = 3
+                RowCount = 2
             };
             appearanceLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 150));
             appearanceLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-            appearanceLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
-            appearanceLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
+            appearanceLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
             appearanceLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 38));
             appearanceLayout.Controls.Add(FieldLabel("Character and Ability"), 0, 0);
             characterSelector = new ComboBox { Dock = DockStyle.Fill,
@@ -105,15 +102,6 @@ namespace RainWorldDesktopPet.UI
                 characterSelector.Items.Add(new CharacterChoice(SlugcatProfiles.All[i]));
             characterSelector.SelectedIndexChanged += CharacterChanged;
             appearanceLayout.Controls.Add(characterSelector, 1, 0);
-            appearanceLayout.Controls.Add(FieldLabel("Workshop DMS Overlay"), 0, 1);
-            dmsSkinSelector = new ComboBox
-            {
-                Dock = DockStyle.Fill,
-                DropDownStyle = ComboBoxStyle.DropDownList,
-                DropDownWidth = 440
-            };
-            dmsSkinSelector.SelectedIndexChanged += DmsSkinChanged;
-            appearanceLayout.Controls.Add(dmsSkinSelector, 1, 1);
             FlowLayoutPanel appearanceActions = new FlowLayoutPanel
             {
                 Dock = DockStyle.Fill,
@@ -128,7 +116,7 @@ namespace RainWorldDesktopPet.UI
             appearanceActions.Controls.Add(editorButton);
             appearanceActions.Controls.Add(ActionButton("Refresh Workshop", RefreshWorkshop));
             appearanceLayout.SetColumnSpan(appearanceActions, 2);
-            appearanceLayout.Controls.Add(appearanceActions, 0, 2);
+            appearanceLayout.Controls.Add(appearanceActions, 0, 1);
             appearanceGroup.Controls.Add(appearanceLayout);
             root.Controls.Add(appearanceGroup, 0, 1);
 
@@ -221,18 +209,6 @@ namespace RainWorldDesktopPet.UI
                         break;
                     }
                 }
-                string selectedDms = app.SettingsActiveDmsSkinId;
-                dmsSkinSelector.Items.Clear();
-                dmsSkinSelector.Items.Add(new DmsSkinChoice(null, "No DMS overlay", true));
-                foreach (DmsSkinDefinition skin in app.SettingsDmsSkins)
-                {
-                    int index = dmsSkinSelector.Items.Add(new DmsSkinChoice(skin.Id,
-                        skin.Name + " — " + skin.Author + " (" + skin.ModName + ")",
-                        skin.IsModActive));
-                    if (string.Equals(skin.Id, selectedDms, StringComparison.OrdinalIgnoreCase))
-                        dmsSkinSelector.SelectedIndex = index;
-                }
-                if (dmsSkinSelector.SelectedIndex < 0) dmsSkinSelector.SelectedIndex = 0;
                 statusLabel.Text = names.Length + " active Slugcat" + (names.Length == 1 ? string.Empty : "s") +
                     ". Left-click the tray icon to reopen this window.";
             }
@@ -252,21 +228,6 @@ namespace RainWorldDesktopPet.UI
             CharacterChoice choice = characterSelector.SelectedItem as CharacterChoice;
             if (choice == null) return;
             app.SettingsSetSlugcat(choice.Id);
-            RefreshFromApp();
-        }
-
-        private void DmsSkinChanged(object sender, EventArgs e)
-        {
-            if (updating) return;
-            DmsSkinChoice choice = dmsSkinSelector.SelectedItem as DmsSkinChoice;
-            if (choice == null) return;
-            string reason;
-            if (!app.SettingsTrySetDmsSkin(choice.Id, out reason))
-            {
-                RefreshFromApp();
-                statusLabel.Text = reason ?? "The selected Workshop DMS skin is unavailable.";
-                return;
-            }
             RefreshFromApp();
         }
 
@@ -315,15 +276,5 @@ namespace RainWorldDesktopPet.UI
             { return Name; }
         }
 
-        private sealed class DmsSkinChoice
-        {
-            public DmsSkinChoice(string id, string label, bool active)
-            { Id = id; Label = label; Active = active; }
-            public readonly string Id;
-            public readonly string Label;
-            public readonly bool Active;
-            public override string ToString()
-            { return (Active ? string.Empty : "[Inactive] ") + Label; }
-        }
     }
 }

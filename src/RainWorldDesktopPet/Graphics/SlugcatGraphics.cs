@@ -434,6 +434,12 @@ namespace RainWorldDesktopPet.Graphics
 
         public SlugcatPose BuildPose(double interpolation, AttentionSystem attention, long simulationTick)
         {
+            return BuildPose(interpolation, attention, simulationTick, true);
+        }
+
+        public SlugcatPose BuildPose(double interpolation, AttentionSystem attention,
+            long simulationTick, bool includeDebugText)
+        {
             double timeStacker = MathUtil.Clamp01(interpolation);
             SlugcatPose pose = renderPose;
             pose.SimulationTick = simulationTick;
@@ -447,9 +453,10 @@ namespace RainWorldDesktopPet.Graphics
             pose.VisualProfileName = graphicsProfile.DisplayName;
             pose.BaseSpriteCount = graphicsProfile.BaseSpriteCount;
             pose.ExtraSpriteCount = graphicsProfile.ExtraSpriteCount;
-            pose.GraphicsExtensions = graphicsProfile.ExtensionNames.Length == 0
-                ? "none"
-                : string.Join(", ", graphicsProfile.ExtensionNames);
+            pose.GraphicsExtensions = includeDebugText
+                ? (graphicsProfile.ExtensionNames.Length == 0
+                    ? "none" : string.Join(", ", graphicsProfile.ExtensionNames))
+                : string.Empty;
             pose.TailProfileName = graphicsProfile.Tail.Name;
             pose.TailRootRadius = graphicsProfile.Tail.RootRadius;
             pose.VisualBodyColor = GetPartColor("Body");
@@ -465,15 +472,23 @@ namespace RainWorldDesktopPet.Graphics
             pose.VisualHipsScale = compatibilityProfile.ResolveHipsScale(slugcat.Appearance);
             pose.VisualHeadScale = graphicsProfile.HeadScale;
             pose.ArmShoulderScale = graphicsProfile.ArmShoulderScale;
-            pose.MovementProfileDebug = string.Format("run:{0:0.##} weight:{1:0.##} throw:{2:0.##} pole:{3:0.##} corridor:{4:0.##}",
-                slugcat.SelectedSlugcat.Movement.RunSpeedFactor,
-                slugcat.SelectedSlugcat.Movement.BodyWeightFactor,
-                slugcat.SelectedSlugcat.Movement.ThrowingSkill,
-                slugcat.SelectedSlugcat.Movement.PoleClimbSpeedFactor,
-                slugcat.SelectedSlugcat.Movement.CorridorClimbSpeedFactor);
-            pose.AbilityDebug = slugcat.AbilityController.DebugState;
-            pose.AudioProfileDebug = slugcat.SelectedSlugcat.Audio.Jump + ", " +
-                slugcat.SelectedSlugcat.Audio.FootstepA;
+            if (includeDebugText)
+            {
+                pose.MovementProfileDebug = string.Format("run:{0:0.##} weight:{1:0.##} throw:{2:0.##} pole:{3:0.##} corridor:{4:0.##}",
+                    slugcat.SelectedSlugcat.Movement.RunSpeedFactor,
+                    slugcat.SelectedSlugcat.Movement.BodyWeightFactor,
+                    slugcat.SelectedSlugcat.Movement.ThrowingSkill,
+                    slugcat.SelectedSlugcat.Movement.PoleClimbSpeedFactor,
+                    slugcat.SelectedSlugcat.Movement.CorridorClimbSpeedFactor);
+                pose.AbilityDebug = slugcat.AbilityController.DebugState;
+                pose.AudioProfileDebug = slugcat.SelectedSlugcat.Audio.Jump + ", " +
+                    slugcat.SelectedSlugcat.Audio.FootstepA;
+            }
+            else
+            {
+                pose.MovementProfileDebug = pose.AbilityDebug = pose.AudioProfileDebug =
+                    string.Empty;
+            }
             for (int i = 0; i < 2; i++)
             {
                 pose.ChunkLast[i] = slugcat.BodyChunks[i].LastPosition;
@@ -506,7 +521,7 @@ namespace RainWorldDesktopPet.Graphics
             pose.BodyMode = slugcat.State.BodyMode;
             pose.AnimationFrame = slugcat.State.AnimationFrame;
             pose.InputX = slugcat.LastInput.X;
-            VirtualInput[] inputHistory = slugcat.Movement.InputHistory;
+            VirtualInput[] inputHistory = slugcat.Movement.InputHistoryForRead;
             pose.PreviousInputX = inputHistory[1].X;
             pose.InputY = slugcat.LastInput.Y;
             pose.InputJump = slugcat.LastInput.Jump;

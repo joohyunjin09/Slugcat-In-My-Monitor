@@ -3,7 +3,11 @@ using System.Collections.Generic;
 using System.IO;
 using System.Media;
 using System.Globalization;
+using System.Diagnostics;
+using System.Threading;
+using System.Runtime.InteropServices;
 using RainWorldDesktopPet.Core;
+using RainWorldDesktopPet.Desktop;
 using RainWorldDesktopPet.RainWorld;
 
 namespace RainWorldDesktopPet.Audio
@@ -45,7 +49,10 @@ namespace RainWorldDesktopPet.Audio
             new Dictionary<string, RainWorldSoundDefinition>(StringComparer.OrdinalIgnoreCase)
             {
                 { "Slugcat_Step_A", Single("Slugcat_Step_A", "walk3A") },
-                { "Slugcat_Step_B", Single("Slugcat_Step_B", "walk3B") }
+                { "Slugcat_Step_B", Single("Slugcat_Step_B", "walk3B") },
+                { "Slugcat_Belly_Slide_Finish_Success", Single("Slugcat_Belly_Slide_Finish_Success", "Slide3A") },
+                { "Slugcat_Belly_Slide_Finish_Fail", Single("Slugcat_Belly_Slide_Finish_Fail", "gravel1b") },
+                { "Slugcat_Regain_Footing", Single("Slugcat_Regain_Footing", "gravel1A") }
             };
 
         private static RainWorldSoundDefinition Single(string id, string clip)
@@ -108,28 +115,180 @@ namespace RainWorldDesktopPet.Audio
         }
     }
 
-    // Fixed-tick event gate. It deliberately never synthesizes replacement
-    // sounds: only non-empty local Rain World WAV files are played. Current
-    // retail installs keep most PCM/Vorbis data inside UnityFS, so the status
-    // remains explicit when the local codec path is unavailable.
+    // Fixed-tick event gate backed by Rain World's own sounds.txt and UnityFS
+    // sound bank. Disk reads, PCM extraction and multi-voice playback stay on
+    // the dedicated worker so a first-time sound can never stall simulation.
     public sealed class RainWorldAudioEngine : IDisposable
     {
-        private sealed class ActiveVoice : IDisposable
+        private sealed class QueuedClip
         {
-            public readonly MemoryStream Stream;
-            public readonly SoundPlayer Player;
-            public ActiveVoice(byte[] wave)
+            public UnityAudioClipInfo Clip;
+            public string LoosePath;
+            public string ClipName;
+            public SoundEvent Sound;
+            public double Volume;
+            public double Pitch;
+            public double Pan;
+            public bool Loop;
+        }
+
+        private sealed class PcmCacheEntry
+        {
+            public byte[] Data;
+            public int Channels;
+            public int Frequency;
+        }
+
+        private sealed class WaveOutVoice : IDisposable
+        {
+            private IntPtr hWaveOut = IntPtr.Zero;
+            private GCHandle dataHandle;
+            private GCHandle headerHandle;
+            private bool prepared;
+            private bool disposed;
+
+            public bool IsDone
             {
-                Stream = new MemoryStream(wave, false);
-                Player = new SoundPlayer(Stream);
-                Player.Load();
+                get
+                {
+                    if (disposed) return true;
+                    if (headerHandle.IsAllocated)
+                    {
+                        NativeMethods.WAVEHDR hdr = (NativeMethods.WAVEHDR)headerHandle.Target;
+                        return (hdr.dwFlags & NativeMethods.WHDR_DONE) != 0;
+                    }
+                    return true;
+                }
             }
+
+            public bool TryStart(byte[] pcmData, int channels, int sampleRate, int bitsPerSample, bool loop)
+            {
+                if (pcmData == null || pcmData.Length == 0 || channels <= 0 || sampleRate <= 0) return false;
+                try
+                {
+                    NativeMethods.WAVEFORMATEX format = new NativeMethods.WAVEFORMATEX();
+                    format.wFormatTag = (ushort)NativeMethods.WAVE_FORMAT_PCM;
+                    format.nChannels = (ushort)channels;
+                    format.nSamplesPerSec = (uint)sampleRate;
+                    format.wBitsPerSample = (ushort)bitsPerSample;
+                    format.nBlockAlign = (ushort)(channels * bitsPerSample / 8);
+                    format.nAvgBytesPerSec = (uint)(sampleRate * format.nBlockAlign);
+                    format.cbSize = 0;
+
+                    int result = NativeMethods.waveOutOpen(out hWaveOut, new IntPtr(-1), ref format, IntPtr.Zero, IntPtr.Zero, 0);
+                    if (result != 0 || hWaveOut == IntPtr.Zero) return false;
+
+                    dataHandle = GCHandle.Alloc(pcmData, GCHandleType.Pinned);
+                    NativeMethods.WAVEHDR header = new NativeMethods.WAVEHDR();
+                    header.lpData = dataHandle.AddrOfPinnedObject();
+                    header.dwBufferLength = pcmData.Length;
+                    header.dwFlags = loop ? (NativeMethods.WHDR_BEGINLOOP | NativeMethods.WHDR_ENDLOOP) : 0;
+                    header.dwLoops = loop ? unchecked((int)0xFFFFFFFF) : 1;
+
+                    headerHandle = GCHandle.Alloc(header, GCHandleType.Pinned);
+                    int prep = NativeMethods.waveOutPrepareHeader(hWaveOut, headerHandle.AddrOfPinnedObject(), Marshal.SizeOf(typeof(NativeMethods.WAVEHDR)));
+                    if (prep != 0)
+                    {
+                        Dispose();
+                        return false;
+                    }
+                    prepared = true;
+
+                    int write = NativeMethods.waveOutWrite(hWaveOut, headerHandle.AddrOfPinnedObject(), Marshal.SizeOf(typeof(NativeMethods.WAVEHDR)));
+                    if (write != 0)
+                    {
+                        Dispose();
+                        return false;
+                    }
+                    return true;
+                }
+                catch
+                {
+                    Dispose();
+                    return false;
+                }
+            }
+
+            public void Stop()
+            {
+                Dispose();
+            }
+
             public void Dispose()
             {
-                try { Player.Stop(); }
-                catch { }
-                Player.Dispose();
-                Stream.Dispose();
+                if (disposed) return;
+                disposed = true;
+                if (hWaveOut != IntPtr.Zero)
+                {
+                    try { NativeMethods.waveOutReset(hWaveOut); } catch { }
+                    if (prepared && headerHandle.IsAllocated)
+                    {
+                        try { NativeMethods.waveOutUnprepareHeader(hWaveOut, headerHandle.AddrOfPinnedObject(), Marshal.SizeOf(typeof(NativeMethods.WAVEHDR))); } catch { }
+                        prepared = false;
+                    }
+                    try { NativeMethods.waveOutClose(hWaveOut); } catch { }
+                    hWaveOut = IntPtr.Zero;
+                }
+                if (headerHandle.IsAllocated) headerHandle.Free();
+                if (dataHandle.IsAllocated) dataHandle.Free();
+            }
+        }
+
+        private sealed class ActiveVoice : IDisposable
+        {
+            private readonly WaveOutVoice waveOutVoice;
+            private readonly MemoryStream stream;
+            private readonly SoundPlayer player;
+            private bool disposed;
+
+            public bool IsDone
+            {
+                get
+                {
+                    if (disposed) return true;
+                    if (waveOutVoice != null) return waveOutVoice.IsDone;
+                    return false;
+                }
+            }
+
+            public ActiveVoice(byte[] pcm, int channels, int sampleRate, int bits, bool loop)
+            {
+                waveOutVoice = new WaveOutVoice();
+                if (!waveOutVoice.TryStart(pcm, channels, sampleRate, bits, loop))
+                {
+                    waveOutVoice.Dispose();
+                    waveOutVoice = null;
+                    try
+                    {
+                        byte[] wave = BuildWave(pcm, channels, sampleRate, bits);
+                        stream = new MemoryStream(wave, false);
+                        player = new SoundPlayer(stream);
+                        player.Load();
+                        if (loop) player.PlayLooping();
+                        else player.Play();
+                    }
+                    catch
+                    {
+                    }
+                }
+            }
+
+            public void Stop()
+            {
+                Dispose();
+            }
+
+            public void Dispose()
+            {
+                if (disposed) return;
+                disposed = true;
+                if (waveOutVoice != null) waveOutVoice.Dispose();
+                if (player != null)
+                {
+                    try { player.Stop(); } catch { }
+                    player.Dispose();
+                }
+                if (stream != null) stream.Dispose();
             }
         }
 
@@ -141,13 +300,33 @@ namespace RainWorldDesktopPet.Audio
             new Dictionary<string, ActiveVoice>(StringComparer.Ordinal);
         private readonly Dictionary<string, UnityAudioClipInfo> clips =
             new Dictionary<string, UnityAudioClipInfo>(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, List<UnityAudioClipInfo>> clipFamilies =
+            new Dictionary<string, List<UnityAudioClipInfo>>(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, string> looseClips =
+            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, List<string>> looseClipFamilies =
+            new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, PcmCacheEntry> pcmCache =
+            new Dictionary<string, PcmCacheEntry>(StringComparer.OrdinalIgnoreCase);
+        private readonly Queue<string> pcmCacheOrder = new Queue<string>();
+        private readonly Dictionary<string, byte[]> looseWaveCache =
+            new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase);
+        private readonly Queue<QueuedClip> queuedClips = new Queue<QueuedClip>();
+        private readonly HashSet<string> pendingLoopKeys =
+            new HashSet<string>(StringComparer.Ordinal);
+        private readonly HashSet<string> cancelledLoopKeys =
+            new HashSet<string>(StringComparer.Ordinal);
+        private readonly object audioSync = new object();
+        private readonly AutoResetEvent queueSignal = new AutoResetEvent(false);
         private IDictionary<string, RainWorldSoundDefinition> soundDefinitions =
             new Dictionary<string, RainWorldSoundDefinition>(StringComparer.OrdinalIgnoreCase);
         private readonly Random random = new Random(0x50A0D);
         private UnityFsBundleReader soundBundle;
+        private Thread audioWorker;
+        private volatile bool stopping;
         private int variantCounter;
         private string lastEvent = "none";
-        private bool enabled = true;
+        private volatile bool enabled = true;
 
         public RainWorldAudioEngine(RainWorldInstallation installation)
         {
@@ -158,6 +337,7 @@ namespace RainWorldDesktopPet.Audio
             }
             looseSoundDirectory = Path.Combine(installation.RootPath,
                 "RainWorld_Data", "StreamingAssets", "loadedsoundeffects");
+            CacheLooseSounds(looseSoundDirectory);
             string map = Path.Combine(installation.RootPath,
                 "RainWorld_Data", "StreamingAssets", "soundeffects", "sounds.txt");
             if (!File.Exists(map))
@@ -176,7 +356,17 @@ namespace RainWorldDesktopPet.Audio
                     soundBundle.ReadNode(serializedNode), serializedNode.Path))
                 {
                     IList<UnityAudioClipInfo> allClips = serialized.ReadAudioClips();
-                    for (int i = 0; i < allClips.Count; i++) clips[allClips[i].Name] = allClips[i];
+                    for (int i = 0; i < allClips.Count; i++)
+                    {
+                        UnityAudioClipInfo clip = allClips[i];
+                        clips[clip.Name] = clip;
+                        string normalized = NormalizeName(clip.Name);
+                        if (!clips.ContainsKey(normalized))
+                            clips[normalized] = clip;
+                        AddClipFamily(clip);
+                        if (!string.Equals(clip.Name, normalized, StringComparison.OrdinalIgnoreCase))
+                            AddClipFamilyExplicit(normalized, clip);
+                    }
                 }
                 Status = "local sounds.txt (" + soundDefinitions.Count +
                     " SoundIDs) + UnityFS sound bank ready (" + clips.Count + " clips)";
@@ -186,12 +376,61 @@ namespace RainWorldDesktopPet.Audio
                 if (soundBundle != null) soundBundle.Dispose();
                 soundBundle = null;
                 Status = "local sounds.txt mapped; UnityFS audio unavailable: " + exception.Message;
+                LogDiagnostic("[Audio] UnityFS initialization failed: " + exception);
             }
+            audioWorker = new Thread(AudioWorkerMain);
+            audioWorker.IsBackground = true;
+            audioWorker.Name = "Rain World audio decode/playback";
+            audioWorker.Start();
         }
 
         public string Status { get; private set; }
         public string LastEvent { get { return lastEvent; } }
         public bool Enabled { get { return enabled; } }
+
+        internal bool TryResolveAndDecodeForDiagnostics(string requested,
+            out string resolved, out int pcmBytes, out string reason)
+        {
+            resolved = null;
+            pcmBytes = 0;
+            UnityAudioClipInfo clip;
+            if (soundBundle != null && TryResolveClip(requested, out clip))
+            {
+                byte[] pcm;
+                if (TryReadPcm(clip, out pcm, out reason))
+                {
+                    resolved = clip.Name;
+                    pcmBytes = pcm.Length;
+                    return true;
+                }
+            }
+            string path;
+            if (TryResolveLooseClip(requested, out path))
+            {
+                try
+                {
+                    byte[] waveBytes = File.ReadAllBytes(path);
+                    byte[] pcm;
+                    int channels, freq, bits;
+                    if (TryReadWav(waveBytes, out pcm, out channels, out freq, out bits))
+                    {
+                        resolved = Path.GetFileNameWithoutExtension(path);
+                        pcmBytes = pcm.Length;
+                        reason = null;
+                        return true;
+                    }
+                    reason = "invalid loose WAV format";
+                    return false;
+                }
+                catch (Exception ex)
+                {
+                    reason = ex.Message;
+                    return false;
+                }
+            }
+            reason = "no exact or indexed family match";
+            return false;
+        }
 
         public void SetEnabled(bool value)
         {
@@ -205,144 +444,642 @@ namespace RainWorldDesktopPet.Audio
             else lastEvent = "sound enabled";
         }
 
-        public void Play(SoundEvent sound, Vec2 listener, long simulationTick,
-            double audibleRange)
-        {
-            if (sound == null) return;
-            // Events are intentionally consumed while disabled. Re-enabling
-            // starts with the next event and never replays a stale effect.
-            if (!enabled) return;
-            if (sound.StopLoop)
-            {
-                StopLoopVoice(sound.LoopKey);
-                lastEvent = "stop loop " + sound.Id;
-                return;
-            }
-            if (sound.Loop && !string.IsNullOrEmpty(sound.LoopKey) &&
-                activeLoops.ContainsKey(sound.LoopKey)) return;
-            long previous;
-            if (lastPlayed.TryGetValue(sound.Id, out previous) &&
-                simulationTick - previous < sound.CooldownTicks) return;
-            lastPlayed[sound.Id] = simulationTick;
-            double pan = MathUtil.Clamp((sound.Position.X - listener.X) /
-                Math.Max(1.0, audibleRange), -1.0, 1.0);
-            lastEvent = string.Format("{0} volume:{1:0.00} pitch:{2:0.00} pan:{3:0.00}",
-                sound.Id, sound.Volume, sound.Pitch, pan);
+public void Play(SoundEvent sound, Vec2 listener, long simulationTick,
+    double audibleRange)
+{
+    if (sound == null) return;
 
-            RainWorldSoundDefinition definition;
-            soundDefinitions.TryGetValue(sound.Id ?? string.Empty, out definition);
-            if (definition == null || definition.Clips.Length == 0 ||
-                string.IsNullOrEmpty(looseSoundDirectory)) return;
-            if (sound.Loop)
+    // 데스크톱 펫에서는 실제 "게임 오버" 개념을 사용하지 않으므로
+    // 원작의 슬러그캣 사망 / 게임 오버 효과음은 재생하지 않습니다.
+    //
+    // 여기서 차단하기 때문에 디코딩 큐에도 들어가지 않아
+    // 뒤늦게 사망음이 재생되는 현상도 방지됩니다.
+    if (IsSuppressedDeathSound(sound.Id))
+    {
+        lastEvent = "suppressed death sound: " + sound.Id;
+        LogDiagnostic("[Audio] Suppressed death/game-over sound: " + sound.Id);
+
+        // 혹시 동일 이벤트가 루프 사운드로 들어온 경우에도 정리합니다.
+        if (sound.Loop && !string.IsNullOrEmpty(sound.LoopKey))
+            StopLoopVoice(sound.LoopKey);
+
+        return;
+    }
+
+    // Events are intentionally consumed while disabled. Re-enabling
+    // starts with the next event and never replays a stale effect.
+    if (!enabled) return;
+
+    if (sound.StopLoop)
+    {
+        StopLoopVoice(sound.LoopKey);
+        lastEvent = "stop loop " + sound.Id;
+        return;
+    }
+
+    if (sound.Loop && !string.IsNullOrEmpty(sound.LoopKey) &&
+        IsLoopActiveOrPending(sound.LoopKey)) return;
+
+    long previous;
+    if (lastPlayed.TryGetValue(sound.Id, out previous) &&
+        simulationTick - previous < sound.CooldownTicks) return;
+
+    lastPlayed[sound.Id] = simulationTick;
+
+    double pan = MathUtil.Clamp((sound.Position.X - listener.X) /
+        Math.Max(1.0, audibleRange), -1.0, 1.0);
+
+    lastEvent = string.Format(
+        "{0} volume:{1:0.00} pitch:{2:0.00} pan:{3:0.00}",
+        sound.Id, sound.Volume, sound.Pitch, pan);
+
+    RainWorldSoundDefinition definition;
+    soundDefinitions.TryGetValue(sound.Id ?? string.Empty, out definition);
+
+    if (definition == null || definition.Clips.Length == 0 ||
+        string.IsNullOrEmpty(looseSoundDirectory))
+    {
+        ReportUnavailable(sound.Id,
+            "SoundID has no active sounds.txt mapping");
+        return;
+    }
+
+    if (sound.Loop)
+    {
+        RainWorldSoundClipDefinition loopClip =
+            definition.Clips[variantCounter++ % definition.Clips.Length];
+
+        PlayClip(loopClip, sound, pan, true);
+        return;
+    }
+
+    if (definition.PlayAll)
+    {
+        for (int i = 0; i < definition.Clips.Length; i++)
+            PlayClip(definition.Clips[i], sound, pan, false);
+    }
+    else
+    {
+        RainWorldSoundClipDefinition clip =
+            definition.Clips[variantCounter++ % definition.Clips.Length];
+
+        PlayClip(clip, sound, pan, false);
+    }
+}
+
+private void PlayClip(RainWorldSoundClipDefinition definition, SoundEvent sound,
+    double pan, bool loop)
+{
+    string clip = definition.Name;
+
+    // Rain World sounds.txt의 "silence"는 실제 효과음이 아니라
+    // 의도적인 무음 placeholder이다.
+    // 파일을 찾으려고 시도하거나 오류로 보고하지 않는다.
+    if (string.Equals(clip, "silence", StringComparison.OrdinalIgnoreCase))
+    {
+        lastEvent = "silent sound: " + sound.Id;
+        return;
+    }
+
+    double clipVolume = MathUtil.Lerp(definition.MinimumVolume,
+        definition.MaximumVolume, random.NextDouble()) * sound.Volume;
+    double clipPitch = MathUtil.Lerp(definition.MinimumPitch,
+        definition.MaximumPitch, random.NextDouble()) * sound.Pitch;
+
+    UnityAudioClipInfo clipInfo;
+    if (soundBundle != null && TryResolveClip(clip, out clipInfo))
+    {
+        PcmCacheEntry cached;
+        string reason;
+
+        if (TryGetCachedPcm(clipInfo, out cached, out reason))
+        {
+            QueueClip(new QueuedClip
             {
-                RainWorldSoundClipDefinition loopClip = definition.Clips[
-                    variantCounter++ % definition.Clips.Length];
-                PlayClip(loopClip, sound, pan, true);
-                return;
+                Clip = clipInfo,
+                ClipName = clipInfo.Name,
+                Sound = sound,
+                Volume = clipVolume,
+                Pitch = clipPitch,
+                Pan = pan,
+                Loop = loop
+            });
+            return;
+        }
+    }
+
+    string path;
+    if (TryResolveLooseClip(clip, out path))
+    {
+        QueueClip(new QueuedClip
+        {
+            LoosePath = path,
+            ClipName = clip,
+            Sound = sound,
+            Volume = clipVolume,
+            Pitch = clipPitch,
+            Pan = pan,
+            Loop = loop
+        });
+        return;
+    }
+
+    ReportUnavailable(sound.Id,
+        "clip '" + clip +
+        "' is absent; no exact or indexed family match");
+}
+        private void CacheLooseSounds(string directory)
+        {
+            if (!Directory.Exists(directory)) return;
+            try
+            {
+                string[] files = Directory.GetFiles(directory, "*.wav",
+                    SearchOption.AllDirectories);
+                for (int i = 0; i < files.Length; i++)
+                {
+                    FileInfo info = new FileInfo(files[i]);
+                    if (info.Length > 44)
+                    {
+                        string baseName = Path.GetFileNameWithoutExtension(files[i]);
+                        looseClips[baseName] = files[i];
+                        string normalized = NormalizeName(baseName);
+                        if (!looseClips.ContainsKey(normalized))
+                            looseClips[normalized] = files[i];
+                        AddLooseClipFamily(baseName, files[i]);
+                        if (!string.Equals(baseName, normalized, StringComparison.OrdinalIgnoreCase))
+                            AddLooseClipFamily(normalized, files[i]);
+                    }
+                }
             }
-            if (definition.PlayAll)
+            catch (Exception exception)
             {
-                for (int i = 0; i < definition.Clips.Length; i++)
-                    PlayClip(definition.Clips[i], sound, pan, false);
-            }
-            else
-            {
-                RainWorldSoundClipDefinition clip = definition.Clips[
-                    variantCounter++ % definition.Clips.Length];
-                PlayClip(clip, sound, pan, false);
+                LogDiagnostic("[Audio] Failed to scan loose WAV cache: " + exception);
             }
         }
 
-        private void PlayClip(RainWorldSoundClipDefinition definition, SoundEvent sound,
-            double pan, bool loop)
+        private void AddClipFamily(UnityAudioClipInfo clip)
         {
-            string clip = definition.Name;
-            double clipVolume = MathUtil.Lerp(definition.MinimumVolume,
-                definition.MaximumVolume, random.NextDouble()) * sound.Volume;
-            double clipPitch = MathUtil.Lerp(definition.MinimumPitch,
-                definition.MaximumPitch, random.NextDouble()) * sound.Pitch;
-            UnityAudioClipInfo clipInfo;
-            if (soundBundle != null && clips.TryGetValue(clip, out clipInfo))
+            AddClipFamilyExplicit(clip.Name, clip);
+            string normalized = NormalizeName(clip.Name);
+            if (!string.Equals(clip.Name, normalized, StringComparison.OrdinalIgnoreCase))
+                AddClipFamilyExplicit(normalized, clip);
+        }
+
+        private void AddClipFamilyExplicit(string name, UnityAudioClipInfo clip)
+        {
+            string family = ClipFamilyName(name);
+            if (string.Equals(family, name, StringComparison.OrdinalIgnoreCase)) return;
+            List<UnityAudioClipInfo> variants;
+            if (!clipFamilies.TryGetValue(family, out variants))
             {
-                byte[] wave;
-                string reason;
-                if (TryDecodePcmWave(clipInfo, clipVolume, clipPitch, pan,
-                    out wave, out reason))
+                variants = new List<UnityAudioClipInfo>();
+                clipFamilies[family] = variants;
+            }
+            if (!variants.Contains(clip)) variants.Add(clip);
+        }
+
+        private void AddLooseClipFamily(string name, string path)
+        {
+            string family = ClipFamilyName(name);
+            if (string.Equals(family, name, StringComparison.OrdinalIgnoreCase)) return;
+            List<string> variants;
+            if (!looseClipFamilies.TryGetValue(family, out variants))
+            {
+                variants = new List<string>();
+                looseClipFamilies[family] = variants;
+            }
+            if (!variants.Contains(path)) variants.Add(path);
+        }
+
+        private static string NormalizeName(string name)
+        {
+            if (string.IsNullOrEmpty(name)) return name;
+            return name.Replace("_", "").Trim();
+        }
+
+// 기존 ClipFamilyName()을 이 버전으로 교체
+private static string ClipFamilyName(string name)
+{
+    if (string.IsNullOrEmpty(name))
+        return name;
+
+    // foo_1, foo_2 같은 형식
+    int underscore = name.LastIndexOf('_');
+    int ignored;
+    if (underscore > 0 &&
+        int.TryParse(name.Substring(underscore + 1), out ignored))
+    {
+        return name.Substring(0, underscore);
+    }
+
+    char last = name[name.Length - 1];
+
+    // walk3A 같은 기존 Rain World 변형 규칙 유지
+    if (last >= 'A' && last <= 'Z' &&
+        name.Length > 1 &&
+        char.IsDigit(name[name.Length - 2]))
+    {
+        return name.Substring(0, name.Length - 1);
+    }
+
+    if (last >= 'A' && last <= 'Z' &&
+        name.Length > 2 &&
+        name[name.Length - 2] >= 'A' &&
+        name[name.Length - 2] <= 'Z')
+    {
+        return name.Substring(0, name.Length - 1);
+    }
+
+    // ★ 추가:
+    // smSpearPull1 / smSpearPull2
+    // smSpearGrab1 / smSpearGrab2
+    // 같은 숫자 suffix를 하나의 family로 묶는다.
+    int digitStart = name.Length;
+
+    while (digitStart > 0 && char.IsDigit(name[digitStart - 1]))
+        digitStart--;
+
+    if (digitStart > 0 && digitStart < name.Length)
+        return name.Substring(0, digitStart);
+
+    return name;
+}
+
+        private bool TryResolveClip(string requested, out UnityAudioClipInfo clip)
+        {
+            if (clips.TryGetValue(requested, out clip)) return true;
+            string normalized = NormalizeName(requested);
+            if (clips.TryGetValue(normalized, out clip)) return true;
+            List<UnityAudioClipInfo> variants;
+            if (clipFamilies.TryGetValue(requested, out variants) && variants.Count > 0)
+            {
+                clip = variants[variantCounter++ % variants.Count];
+                return true;
+            }
+            if (clipFamilies.TryGetValue(normalized, out variants) && variants.Count > 0)
+            {
+                clip = variants[variantCounter++ % variants.Count];
+                return true;
+            }
+            clip = null;
+            return false;
+        }
+
+        private bool TryResolveLooseClip(string requested, out string path)
+        {
+            if (looseClips.TryGetValue(requested, out path)) return true;
+            string normalized = NormalizeName(requested);
+            if (looseClips.TryGetValue(normalized, out path)) return true;
+            List<string> variants;
+            if (looseClipFamilies.TryGetValue(requested, out variants) && variants.Count > 0)
+            {
+                path = variants[variantCounter++ % variants.Count];
+                return true;
+            }
+            if (looseClipFamilies.TryGetValue(normalized, out variants) && variants.Count > 0)
+            {
+                path = variants[variantCounter++ % variants.Count];
+                return true;
+            }
+            path = null;
+            return false;
+        }
+
+        private bool IsLoopActiveOrPending(string loopKey)
+        {
+            lock (audioSync)
+                return activeLoops.ContainsKey(loopKey) || pendingLoopKeys.Contains(loopKey);
+        }
+
+        private void QueueClip(QueuedClip clip)
+        {
+            lock (audioSync)
+            {
+                if (stopping || !enabled) return;
+                if (clip.Loop && !string.IsNullOrEmpty(clip.Sound.LoopKey))
                 {
-                    try
+                    pendingLoopKeys.Add(clip.Sound.LoopKey);
+                    cancelledLoopKeys.Remove(clip.Sound.LoopKey);
+                }
+                // Bound latency after a burst; oldest one-shot effects are less
+                // useful than the current simulation tick.
+                while (queuedClips.Count >= 32)
+                {
+                    QueuedClip dropped = queuedClips.Dequeue();
+                    if (dropped.Loop && !string.IsNullOrEmpty(dropped.Sound.LoopKey))
+                        pendingLoopKeys.Remove(dropped.Sound.LoopKey);
+                }
+                queuedClips.Enqueue(clip);
+            }
+            queueSignal.Set();
+        }
+
+        private void AudioWorkerMain()
+        {
+            while (!stopping)
+            {
+                QueuedClip work = null;
+                lock (audioSync)
+                {
+                    if (queuedClips.Count > 0) work = queuedClips.Dequeue();
+                }
+                if (work == null)
+                {
+                    queueSignal.WaitOne(250);
+                    continue;
+                }
+                ProcessQueuedClip(work);
+            }
+        }
+
+        private void ProcessQueuedClip(QueuedClip work)
+        {
+            string loopKey = work.Sound == null ? null : work.Sound.LoopKey;
+            try
+            {
+                lock (audioSync)
+                {
+                    if (!enabled || stopping || (!string.IsNullOrEmpty(loopKey) &&
+                        cancelledLoopKeys.Contains(loopKey))) return;
+                }
+                byte[] processed;
+                int channels;
+                int sampleRate;
+                int bits = 16;
+                if (work.Clip != null)
+                {
+                    PcmCacheEntry pcm;
+                    string reason;
+                    if (!TryGetCachedPcm(work.Clip, out pcm, out reason))
                     {
-                        ActiveVoice voice = new ActiveVoice(wave);
-                        StartVoice(voice, sound, loop);
+                        ReportUnavailable(work.Sound.Id, work.ClipName + ": " + reason);
                         return;
                     }
-                    catch (Exception exception)
-                    {
-                        Status = "audio playback failed: " + exception.Message;
-                    }
+                    processed = new byte[pcm.Data.Length];
+                    Buffer.BlockCopy(pcm.Data, 0, processed, 0, processed.Length);
+                    channels = pcm.Channels;
+                    sampleRate = MathUtil.Clamp((int)Math.Round(
+                        pcm.Frequency * work.Pitch), 8000, 192000);
                 }
                 else
                 {
-                    lastEvent += " unavailable:" + reason;
+                    byte[] cached;
+                    lock (audioSync)
+                        looseWaveCache.TryGetValue(work.LoosePath, out cached);
+                    byte[] waveFileBytes = cached ?? File.ReadAllBytes(work.LoosePath);
+                    if (cached == null)
+                        lock (audioSync) looseWaveCache[work.LoosePath] = waveFileBytes;
+
+                    byte[] rawPcm;
+                    int srcChannels, srcFreq, srcBits;
+                    if (!TryReadWav(waveFileBytes, out rawPcm, out srcChannels, out srcFreq, out srcBits))
+                    {
+                        ReportUnavailable(work.Sound.Id, "failed to parse WAV " + work.LoosePath);
+                        return;
+                    }
+                    processed = rawPcm;
+                    channels = srcChannels;
+                    bits = srcBits;
+                    sampleRate = MathUtil.Clamp((int)Math.Round(srcFreq * work.Pitch), 8000, 192000);
                 }
-            }
-            string path = Path.Combine(looseSoundDirectory, clip + ".wav");
-            FileInfo info = new FileInfo(path);
-            if (!info.Exists || info.Length <= 44) return;
-            try
-            {
-                byte[] wave = File.ReadAllBytes(path);
-                ActiveVoice voice = new ActiveVoice(wave);
-                StartVoice(voice, sound, loop);
+                ApplyGain(processed, channels, work.Volume, work.Pan);
+                ActiveVoice voice = new ActiveVoice(processed, channels, sampleRate, bits, work.Loop);
+                if (!StartVoice(voice, work.Sound, work.Loop)) return;
+                lastEvent = "playback started: " + work.Sound.Id + " -> " + work.ClipName;
+                LogDiagnostic("[Audio] Playback started: " + work.Sound.Id + " -> " +
+                    work.ClipName + (work.Loop ? " [loop]" : string.Empty));
             }
             catch (Exception exception)
             {
                 Status = "audio playback failed: " + exception.Message;
+                lastEvent = "playback failed: " + work.ClipName + " (" + exception.Message + ")";
+                LogDiagnostic("[Audio] Playback failed for " + work.ClipName + ": " + exception);
+            }
+            finally
+            {
+                if (!string.IsNullOrEmpty(loopKey))
+                {
+                    lock (audioSync) pendingLoopKeys.Remove(loopKey);
+                }
             }
         }
 
-        private void StartVoice(ActiveVoice voice, SoundEvent sound, bool loop)
+        // RainWorldAudioEngine 클래스 내부 필드 영역에 추가합니다.
+// 슬러그캣 사망 / 게임 오버 계열 사운드는 오디오 엔진 단계에서 완전히 차단합니다.
+private static readonly HashSet<string> suppressedDeathSoundIds =
+    new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    {
+        "Slugcat_Death",
+        "Player_Death",
+        "Game_Over",
+        "GameOver",
+        "HUD_Game_Over"
+    };
+
+    private static bool IsSuppressedDeathSound(string soundId)
+    {
+        if (string.IsNullOrEmpty(soundId))
+            return false;
+
+        if (suppressedDeathSoundIds.Contains(soundId))
+            return true;
+
+        // sounds.txt 또는 게임 버전에 따라 이름이 조금 달라도
+        // 슬러그캣/플레이어의 사망 및 게임 오버 이벤트만 차단합니다.
+        string normalized = soundId.Replace("-", "_")
+            .Replace(" ", "_");
+
+        if (normalized.IndexOf("Game_Over",
+            StringComparison.OrdinalIgnoreCase) >= 0)
+            return true;
+
+        if (normalized.IndexOf("GameOver",
+            StringComparison.OrdinalIgnoreCase) >= 0)
+            return true;
+
+        if (normalized.IndexOf("Slugcat_Death",
+            StringComparison.OrdinalIgnoreCase) >= 0)
+            return true;
+
+        if (normalized.IndexOf("Player_Death",
+            StringComparison.OrdinalIgnoreCase) >= 0)
+            return true;
+
+        return false;
+    }
+
+        private static bool TryReadWav(byte[] waveBytes, out byte[] pcm,
+            out int channels, out int sampleRate, out int bits)
         {
-            if (loop && !string.IsNullOrEmpty(sound.LoopKey))
+            pcm = null;
+            channels = 1;
+            sampleRate = 44100;
+            bits = 16;
+            if (waveBytes == null || waveBytes.Length < 44) return false;
+            try
             {
-                StopLoopVoice(sound.LoopKey);
-                activeLoops[sound.LoopKey] = voice;
-                voice.Player.PlayLooping();
-                return;
+                using (MemoryStream stream = new MemoryStream(waveBytes, false))
+                using (BinaryReader reader = new BinaryReader(stream))
+                {
+                    if (new string(reader.ReadChars(4)) != "RIFF") return false;
+                    reader.ReadUInt32();
+                    if (new string(reader.ReadChars(4)) != "WAVE") return false;
+
+                    bool foundFmt = false;
+                    bool foundData = false;
+                    while (stream.Position + 8 <= stream.Length)
+                    {
+                        string chunkId = new string(reader.ReadChars(4));
+                        uint chunkSize = reader.ReadUInt32();
+                        long nextPos = stream.Position + chunkSize + (chunkSize & 1);
+                        if (chunkId == "fmt " && chunkSize >= 16)
+                        {
+                            ushort formatTag = reader.ReadUInt16();
+                            channels = reader.ReadUInt16();
+                            sampleRate = (int)reader.ReadUInt32();
+                            reader.ReadUInt32();
+                            reader.ReadUInt16();
+                            bits = reader.ReadUInt16();
+                            foundFmt = (formatTag == 1);
+                        }
+                        else if (chunkId == "data")
+                        {
+                            int dataLen = (int)Math.Min((long)chunkSize, stream.Length - stream.Position);
+                            if (dataLen > 0)
+                            {
+                                pcm = reader.ReadBytes(dataLen);
+                                foundData = true;
+                            }
+                        }
+                        stream.Position = Math.Min(nextPos, stream.Length);
+                    }
+                    return foundFmt && foundData && pcm != null && pcm.Length > 0 && bits == 16;
+                }
             }
-            activePlayers.Add(voice);
-            voice.Player.Play();
-            TrimVoices();
+            catch
+            {
+                return false;
+            }
+        }
+
+        private bool TryGetCachedPcm(UnityAudioClipInfo clip, out PcmCacheEntry entry,
+            out string reason)
+        {
+            lock (audioSync)
+                if (pcmCache.TryGetValue(clip.Name, out entry))
+                {
+                    reason = null;
+                    return true;
+                }
+            byte[] pcm;
+            if (!TryReadPcm(clip, out pcm, out reason))
+            {
+                entry = null;
+                return false;
+            }
+            entry = new PcmCacheEntry
+            {
+                Data = pcm,
+                Channels = clip.Channels,
+                Frequency = clip.Frequency
+            };
+            lock (audioSync)
+            {
+                pcmCache[clip.Name] = entry;
+                pcmCacheOrder.Enqueue(clip.Name);
+                while (pcmCacheOrder.Count > 64)
+                    pcmCache.Remove(pcmCacheOrder.Dequeue());
+            }
+            return true;
+        }
+
+        private void ReportUnavailable(string id, string reason)
+        {
+            lastEvent = id + " unavailable: " + reason;
+            LogDiagnostic("[Audio] Failed to load " + id + ": " + reason);
+        }
+
+        private static void LogDiagnostic(string message)
+        {
+            Debug.WriteLine(message);
+            Trace.WriteLine(message);
+        }
+
+        private bool StartVoice(ActiveVoice voice, SoundEvent sound, bool loop)
+        {
+            lock (audioSync)
+            {
+                if (!enabled || stopping || (!string.IsNullOrEmpty(sound.LoopKey) &&
+                    cancelledLoopKeys.Contains(sound.LoopKey)))
+                {
+                    voice.Dispose();
+                    return false;
+                }
+                if (loop && !string.IsNullOrEmpty(sound.LoopKey))
+                {
+                    StopLoopVoiceLocked(sound.LoopKey);
+                    activeLoops[sound.LoopKey] = voice;
+                    return true;
+                }
+                activePlayers.Add(voice);
+                TrimVoices();
+                return true;
+            }
         }
 
         private void StopLoopVoice(string loopKey)
         {
             if (string.IsNullOrEmpty(loopKey)) return;
+            lock (audioSync)
+            {
+                cancelledLoopKeys.Add(loopKey);
+                pendingLoopKeys.Remove(loopKey);
+                StopLoopVoiceLocked(loopKey);
+            }
+        }
+
+        private void StopLoopVoiceLocked(string loopKey)
+        {
             ActiveVoice voice;
             if (!activeLoops.TryGetValue(loopKey, out voice)) return;
-            voice.Player.Stop();
-            voice.Dispose();
+            voice.Stop();
             activeLoops.Remove(loopKey);
         }
 
         public void StopAllLoops()
         {
-            string[] keys = new string[activeLoops.Count];
-            activeLoops.Keys.CopyTo(keys, 0);
-            for (int i = 0; i < keys.Length; i++) StopLoopVoice(keys[i]);
+            lock (audioSync)
+            {
+                string[] keys = new string[activeLoops.Count];
+                activeLoops.Keys.CopyTo(keys, 0);
+                for (int i = 0; i < keys.Length; i++)
+                {
+                    cancelledLoopKeys.Add(keys[i]);
+                    StopLoopVoiceLocked(keys[i]);
+                }
+                pendingLoopKeys.Clear();
+            }
         }
 
         public void StopAllVoices()
         {
-            StopAllLoops();
-            for (int i = 0; i < activePlayers.Count; i++)
-                activePlayers[i].Dispose();
-            activePlayers.Clear();
+            lock (audioSync)
+            {
+                string[] keys = new string[activeLoops.Count];
+                activeLoops.Keys.CopyTo(keys, 0);
+                for (int i = 0; i < keys.Length; i++) StopLoopVoiceLocked(keys[i]);
+                for (int i = 0; i < activePlayers.Count; i++)
+                    activePlayers[i].Dispose();
+                activePlayers.Clear();
+                queuedClips.Clear();
+                pendingLoopKeys.Clear();
+            }
         }
 
-        private bool TryDecodePcmWave(UnityAudioClipInfo clip, double volume,
-            double pitch, double pan, out byte[] wave, out string reason)
+        private bool TryReadPcm(UnityAudioClipInfo clip, out byte[] pcm,
+            out string reason)
         {
-            wave = null;
+            pcm = null;
             reason = null;
             if (clip.ResourceSize > int.MaxValue)
             {
@@ -378,12 +1115,8 @@ namespace RainWorldDesktopPet.Audio
                 reason = "invalid PCM range";
                 return false;
             }
-            byte[] pcm = new byte[pcmSize];
+            pcm = new byte[pcmSize];
             Buffer.BlockCopy(fsb, dataOffset, pcm, 0, pcm.Length);
-            ApplyGain(pcm, clip.Channels, volume, pan);
-            int sampleRate = MathUtil.Clamp((int)Math.Round(clip.Frequency * pitch),
-                8000, 192000);
-            wave = BuildWave(pcm, clip.Channels, sampleRate, 16);
             return true;
         }
 
@@ -434,7 +1167,15 @@ namespace RainWorldDesktopPet.Audio
 
         private void TrimVoices()
         {
-            while (activePlayers.Count > 8)
+            for (int i = activePlayers.Count - 1; i >= 0; i--)
+            {
+                if (activePlayers[i].IsDone)
+                {
+                    activePlayers[i].Dispose();
+                    activePlayers.RemoveAt(i);
+                }
+            }
+            while (activePlayers.Count > 16)
             {
                 activePlayers[0].Dispose();
                 activePlayers.RemoveAt(0);
@@ -443,8 +1184,13 @@ namespace RainWorldDesktopPet.Audio
 
         public void Dispose()
         {
+            stopping = true;
+            queueSignal.Set();
+            if (audioWorker != null && audioWorker.IsAlive)
+                audioWorker.Join(2000);
             StopAllVoices();
             if (soundBundle != null) soundBundle.Dispose();
+            queueSignal.Dispose();
         }
     }
 }
