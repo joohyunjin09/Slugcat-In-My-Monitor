@@ -31,8 +31,7 @@ $requiredFiles = @(
     (Join-Path $releaseRoot 'SlugcatInMyMonitor.exe.config'),
     (Join-Path $releaseRoot 'SlugcatInMyMonitor.DirectComposition.dll'),
     (Join-Path $repoRoot 'README.md'),
-    (Join-Path $repoRoot 'LICENSE'),
-    (Join-Path $repoRoot 'packaging\skins\README.txt')
+    (Join-Path $repoRoot 'LICENSE')
 )
 foreach ($file in $requiredFiles) {
     if (-not (Test-Path -LiteralPath $file)) { throw "Required package file is missing: $file" }
@@ -42,15 +41,13 @@ New-Item -ItemType Directory -Force -Path $packageRoot | Out-Null
 if (Test-Path -LiteralPath $stagingRoot) {
     Remove-Item -LiteralPath $stagingRoot -Recurse -Force
 }
-New-Item -ItemType Directory -Force -Path (Join-Path $stagingRoot 'skins') | Out-Null
+New-Item -ItemType Directory -Force -Path $stagingRoot | Out-Null
 
 Copy-Item -LiteralPath (Join-Path $releaseRoot 'SlugcatInMyMonitor.exe') -Destination $stagingRoot
 Copy-Item -LiteralPath (Join-Path $releaseRoot 'SlugcatInMyMonitor.exe.config') -Destination $stagingRoot
 Copy-Item -LiteralPath (Join-Path $releaseRoot 'SlugcatInMyMonitor.DirectComposition.dll') -Destination $stagingRoot
 Copy-Item -LiteralPath (Join-Path $repoRoot 'README.md') -Destination $stagingRoot
 Copy-Item -LiteralPath (Join-Path $repoRoot 'LICENSE') -Destination $stagingRoot
-Copy-Item -LiteralPath (Join-Path $repoRoot 'packaging\skins\README.txt') `
-    -Destination (Join-Path $stagingRoot 'skins\README.txt')
 
 Compress-Archive -Path (Join-Path $stagingRoot '*') -DestinationPath $archivePath -Force
 $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $archivePath).Hash.ToLowerInvariant()
