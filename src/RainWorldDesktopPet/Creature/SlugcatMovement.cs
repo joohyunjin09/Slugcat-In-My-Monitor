@@ -4,7 +4,7 @@ using RainWorldDesktopPet.Physics;
 
 namespace RainWorldDesktopPet.Creature
 {
-    public sealed class SlugcatMovement
+    public sealed partial class SlugcatMovement
     {
         private readonly Slugcat owner;
         private bool previousJump;
@@ -38,6 +38,13 @@ namespace RainWorldDesktopPet.Creature
 
         public void ApplyInput(VirtualInput input, DesktopCollisionWorld world)
         {
+            // The retail-state adapter lives in a separate partial file so this
+            // compatibility implementation remains available for diagnostics.
+            if (owner.SelectedSlugcat != null)
+            {
+                ApplyOriginalInput(input, world);
+                return;
+            }
             RecordInput(input);
             if (dropThroughTicks > 0) dropThroughTicks--;
             BodyChunk chest = owner.BodyChunks[0];
@@ -148,7 +155,7 @@ namespace RainWorldDesktopPet.Creature
             if (wallContact && input.Y < 0 && !wasGrounded)
             {
                 state.BodyMode = BodyModeIndex.WallClimb;
-                state.Animation = AnimationIndex.WallClimb;
+                state.Animation = AnimationIndex.None;
                 chest.Velocity.Y = MathUtil.MoveTowards(chest.Velocity.Y,
                     -2.1 * movement.PoleClimbSpeedFactor,
                     0.9 * movement.PoleClimbSpeedFactor);
@@ -322,6 +329,8 @@ namespace RainWorldDesktopPet.Creature
         // force is synthesized and recovery is not forced to Stand or Idle.
         public void ApplyDisabledInput(VirtualInput input)
         {
+            LaunchedThisTick = false;
+            StopOriginalMovementLoops();
             RecordInput(input);
             BodyChunk chest = owner.BodyChunks[0];
             BodyChunk hips = owner.BodyChunks[1];

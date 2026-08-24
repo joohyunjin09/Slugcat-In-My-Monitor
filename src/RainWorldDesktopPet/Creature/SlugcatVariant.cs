@@ -57,14 +57,16 @@ namespace RainWorldDesktopPet.Creature
         }
     }
 
-    // The only public character selector. Appearance, physics, abilities,
-    // audio and extra graphics are selected by this same value.
+    // The only public character selector. Keep this list in the same order as
+    // SlugcatProfiles.All and every character-selection UI.
     public enum SlugcatId
     {
-        Default,
+        White,
+        Yellow,
+        Red,
         Gourmand,
         Artificer,
-        Spearmaster,
+        SpearMaster,
         Rivulet,
         Saint
     }
@@ -166,9 +168,21 @@ namespace RainWorldDesktopPet.Creature
             "Slugcat_Terrain_Impact_Light", "Slugcat_Terrain_Impact_Medium",
             "Slugcat_Terrain_Impact_Hard");
 
-        public static readonly SlugcatProfile Default = Build(SlugcatId.Default,
-            "Default", SlugcatGraphicsProfiles.Default,
+        public static readonly SlugcatProfile White = Build(SlugcatId.White,
+            "White", SlugcatGraphicsProfiles.White,
             new SlugcatMovementProfile(1.0, 1.0, 1.0, 1.0, 1.0, 4.0, 3.0, 4.0, 2.5),
+            "None", delegate(Slugcat s) { return new DefaultAbilityController(s); });
+
+        public static readonly SlugcatProfile Yellow = Build(SlugcatId.Yellow,
+            "Yellow", SlugcatGraphicsProfiles.Yellow,
+            new SlugcatMovementProfile(1.0, 0.95, 0.0, 0.8, 1.0,
+                4.0, 3.0, 4.0, 2.5),
+            "None", delegate(Slugcat s) { return new DefaultAbilityController(s); });
+
+        public static readonly SlugcatProfile Red = Build(SlugcatId.Red,
+            "Red", SlugcatGraphicsProfiles.Red,
+            new SlugcatMovementProfile(1.2, 1.12, 2.0, 1.25, 1.2,
+                4.0, 3.0, 4.0, 2.5),
             "None", delegate(Slugcat s) { return new DefaultAbilityController(s); });
 
         public static readonly SlugcatProfile Gourmand = Build(SlugcatId.Gourmand,
@@ -181,8 +195,8 @@ namespace RainWorldDesktopPet.Creature
             new SlugcatMovementProfile(1.2, 1.12, 2.0, 1.25, 1.2, 4.0, 3.0, 4.0, 2.5),
             "Explosive jump", delegate(Slugcat s) { return new ArtificerAbilityController(s); });
 
-        public static readonly SlugcatProfile Spearmaster = Build(SlugcatId.Spearmaster,
-            "Spearmaster", SlugcatGraphicsProfiles.Spearmaster,
+        public static readonly SlugcatProfile SpearMaster = Build(SlugcatId.SpearMaster,
+            "SpearMaster", SlugcatGraphicsProfiles.SpearMaster,
             new SlugcatMovementProfile(1.2, 0.85, 2.0, 1.25, 1.2, 4.0, 3.0, 4.0, 2.5),
             "Needle spear", delegate(Slugcat s) { return new SpearmasterAbilityController(s); });
 
@@ -196,51 +210,63 @@ namespace RainWorldDesktopPet.Creature
             new SlugcatMovementProfile(1.0, 1.0, 0.0, 1.0, 1.0, 4.0, 3.0, 4.0, 2.5),
             "Tongue / rope", delegate(Slugcat s) { return new SaintAbilityController(s); });
 
-        internal static readonly SlugcatProfile LegacyMonk = Build(SlugcatId.Default,
-            "Monk", SlugcatGraphicsProfiles.LegacyMonk,
-            new SlugcatMovementProfile(1.0, 0.95, 0.0, 0.8, 1.0,
-                4.0, 3.0, 4.0, 2.5),
-            "None", delegate(Slugcat s) { return new DefaultAbilityController(s); });
-
-        internal static readonly SlugcatProfile LegacyHunter = Build(SlugcatId.Default,
-            "Hunter", SlugcatGraphicsProfiles.LegacyHunter,
-            new SlugcatMovementProfile(1.2, 1.12, 2.0, 1.25, 1.2,
-                4.0, 3.0, 4.0, 2.5),
-            "None", delegate(Slugcat s) { return new DefaultAbilityController(s); });
-
-        private static readonly SlugcatProfile[] all =
-        {
-            Default, Gourmand, Artificer, Spearmaster, Rivulet, Saint
-        };
+        private static readonly IList<SlugcatProfile> all = Array.AsReadOnly(
+            new SlugcatProfile[] {
+            White, Yellow, Red, Gourmand, Artificer, SpearMaster, Rivulet, Saint
+        });
 
         public static IList<SlugcatProfile> All { get { return all; } }
 
         public static SlugcatProfile Get(SlugcatId id)
         {
-            for (int i = 0; i < all.Length; i++) if (all[i].Id == id) return all[i];
-            return Default;
+            for (int i = 0; i < all.Count; i++) if (all[i].Id == id) return all[i];
+            return White;
         }
 
         internal static SlugcatProfile Get(SlugcatVariant variant)
         {
             switch (variant)
             {
-                case SlugcatVariant.Monk: return LegacyMonk;
-                case SlugcatVariant.Hunter: return LegacyHunter;
+                case SlugcatVariant.Monk: return Yellow;
+                case SlugcatVariant.Hunter: return Red;
                 case SlugcatVariant.Gourmand: return Gourmand;
-                default: return Default;
+                default: return White;
             }
         }
 
         public static bool TryParse(string value, out SlugcatId id)
         {
-            if (string.Equals(value, "survivor", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(value, "white", StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(value, "default", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(value, "survivor", StringComparison.OrdinalIgnoreCase))
             {
-                id = SlugcatId.Default;
+                id = SlugcatId.White;
                 return true;
             }
-            return Enum.TryParse(value, true, out id);
+            if (string.Equals(value, "monk", StringComparison.OrdinalIgnoreCase))
+            {
+                id = SlugcatId.Yellow;
+                return true;
+            }
+            if (string.Equals(value, "hunter", StringComparison.OrdinalIgnoreCase))
+            {
+                id = SlugcatId.Red;
+                return true;
+            }
+            return Enum.TryParse(value, true, out id) &&
+                Enum.IsDefined(typeof(SlugcatId), id);
+        }
+
+        public static string SelectionLabel(SlugcatId id)
+        {
+            switch (id)
+            {
+                case SlugcatId.Gourmand: return "Gourmand — 대식가";
+                case SlugcatId.Artificer: return "Artificer — 기술병";
+                case SlugcatId.SpearMaster: return "SpearMaster — 창술가";
+                case SlugcatId.Rivulet: return "Rivulet — 물살이";
+                case SlugcatId.Saint: return "Saint — 성자";
+                default: return Get(id).DisplayName;
+            }
         }
 
         private static SlugcatProfile Build(SlugcatId id, string name,

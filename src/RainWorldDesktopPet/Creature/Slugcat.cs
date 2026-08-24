@@ -17,10 +17,13 @@ namespace RainWorldDesktopPet.Creature
         private readonly List<SoundEvent> soundEvents = new List<SoundEvent>();
         private readonly List<AbilityEffect> effects = new List<AbilityEffect>();
         private readonly List<DesktopSpear> spears = new List<DesktopSpear>();
+        private readonly Dictionary<DesktopSpear, string> spearAirLoops =
+            new Dictionary<DesktopSpear, string>();
+        private readonly Random spearImpactRandom = new Random(0x5BEA7);
         private ISlugcatAbilityController abilityController;
 
         public Slugcat(Vec2 spawnPosition)
-            : this(spawnPosition, SlugcatId.Default)
+            : this(spawnPosition, SlugcatId.White)
         {
         }
 
@@ -41,7 +44,7 @@ namespace RainWorldDesktopPet.Creature
         }
 
         public Slugcat(Vec2 spawnPosition, SlugcatVariant variant)
-            : this(spawnPosition, SlugcatId.Default)
+            : this(spawnPosition, SlugcatId.White)
         {
             Appearance = SlugcatAppearance.For(variant);
             SetSelectedProfile(SlugcatProfiles.Get(variant));
@@ -180,8 +183,6 @@ namespace RainWorldDesktopPet.Creature
                 abilityController.UpdateAfterMovement(disabledAbilityInput, world);
             }
             State.Conscious = !State.Dead && State.StunCounter < 10;
-            State.Standing = !State.Dead && State.StunCounter < 1 &&
-                State.Grounded && State.BodyMode == BodyModeIndex.Stand;
             // A recovered episode is closed only after the full Player update.
             // A collision on the exact recovery tick therefore cannot reset a
             // fresh three-second horizon before the pet becomes conscious.
@@ -235,6 +236,7 @@ namespace RainWorldDesktopPet.Creature
                     }
                     EmitImpactSound(impact);
                 }
+                Movement.TerrainImpact(impact);
                 abilityController.TerrainImpact(impact);
                 impact.FinalStunCounter = State.StunCounter;
                 lastTerrainImpact.CopyFrom(impact);
@@ -388,11 +390,12 @@ namespace RainWorldDesktopPet.Creature
             State.Animation = AnimationIndex.None;
             State.BodyMode = BodyModeIndex.Default;
             State.Grounded = false;
-            State.Standing = false;
+            State.Standing = true;
             State.StunCounter = 0;
             State.InitialStunValue = 0;
             State.Conscious = true;
             if (abilityController != null) abilityController.Reset();
+            Movement.Reset();
             effects.Clear();
             spears.Clear();
         }
@@ -405,8 +408,21 @@ namespace RainWorldDesktopPet.Creature
         public void SetSelectedSlugcat(SlugcatId id)
         {
             SlugcatProfile profile = SlugcatProfiles.Get(id);
-            Appearance = SlugcatAppearance.For(id == SlugcatId.Gourmand
-                ? SlugcatVariant.Gourmand : SlugcatVariant.Survivor);
+            switch (id)
+            {
+                case SlugcatId.Yellow:
+                    Appearance = SlugcatAppearance.For(SlugcatVariant.Monk);
+                    break;
+                case SlugcatId.Red:
+                    Appearance = SlugcatAppearance.For(SlugcatVariant.Hunter);
+                    break;
+                case SlugcatId.Gourmand:
+                    Appearance = SlugcatAppearance.For(SlugcatVariant.Gourmand);
+                    break;
+                default:
+                    Appearance = SlugcatAppearance.For(SlugcatVariant.Survivor);
+                    break;
+            }
             SetSelectedProfile(profile);
         }
 
@@ -421,6 +437,8 @@ namespace RainWorldDesktopPet.Creature
             if (abilityController != null) abilityController.Reset();
             effects.Clear();
             spears.Clear();
+            spearAirLoops.Clear();
+            soundEvents.Clear();
             SelectedSlugcat = profile;
             BodyChunks[0].SetMass(SimulationConstants.MainChunkMass * profile.Movement.BodyWeightFactor);
             BodyChunks[1].SetMass(SimulationConstants.HipsChunkMass * profile.Movement.BodyWeightFactor);
@@ -431,6 +449,17 @@ namespace RainWorldDesktopPet.Creature
             int cooldownTicks)
         {
             soundEvents.Add(new SoundEvent(id, position, volume, pitch, cooldownTicks));
+        }
+
+        public void StartSoundLoop(string id, string loopKey, Vec2 position,
+            double volume, double pitch)
+        {
+            soundEvents.Add(SoundEvent.StartLoop(id, loopKey, position, volume, pitch));
+        }
+
+        public void StopSoundLoop(string id, string loopKey, Vec2 position)
+        {
+            soundEvents.Add(SoundEvent.EndLoop(id, loopKey, position));
         }
 
         public SoundEvent[] DrainSoundEvents()
@@ -454,17 +483,52 @@ namespace RainWorldDesktopPet.Creature
         {
             for (int i = effects.Count - 1; i >= 0; i--)
             {
-                effects[i].Step();
-                if (effects[i].Lifetime <= 0) effects.RemoveAt(i);
+                effects[i].Step(world);
+                if (!effects[i].IsAlive) effects.RemoveAt(i);
             }
             for (int i = 0; i < spears.Count; i++)
             {
+                string previousLoop;
+                spearAirLoops.TryGetValue(spears[i], out previousLoop);
                 if (spears[i].Step(world))
                 {
-                    string sound = spears[i].LastImpactSound ?? "Spear_Bounce_Off_Wall";
-                    EmitSound(sound, spears[i].Chunk.Position, 1.0, 1.0, 4);
+                    string sound = spears[i].LastImpactSound;
+                    if (!string.IsNullOrEmpty(sound))
+                        EmitSound(sound, spears[i].Chunk.Position, 1.0, 1.0, 0);
+                    for (int spark = 0; spark < spears[i].ImpactSparkCount; spark++)
+                    {
+                        Vec2 angle = RandomUnit(spearImpactRandom);
+                        Vec2 at = spears[i].Chunk.Position +
+                            spears[i].ThrowDirection * (spears[i].Chunk.Radius - 1.0);
+                        Vec2 velocity = angle * (spearImpactRandom.NextDouble() * 10.0) -
+                            spears[i].ThrowDirection * 10.0;
+                        AddEffect(AbilityEffect.CreateSpark(at, velocity, 2, 4,
+                            spearImpactRandom));
+                    }
+                }
+                string currentLoop = spears[i].AirLoopSound;
+                if (!string.Equals(previousLoop, currentLoop,
+                    StringComparison.Ordinal))
+                {
+                    if (!string.IsNullOrEmpty(previousLoop))
+                        soundEvents.Add(SoundEvent.EndLoop(previousLoop,
+                            spears[i].AudioLoopKey, spears[i].Chunk.Position));
+                    if (!string.IsNullOrEmpty(currentLoop))
+                        soundEvents.Add(SoundEvent.StartLoop(currentLoop,
+                            spears[i].AudioLoopKey, spears[i].Chunk.Position,
+                            1.0, 1.0));
+                    if (string.IsNullOrEmpty(currentLoop))
+                        spearAirLoops.Remove(spears[i]);
+                    else
+                        spearAirLoops[spears[i]] = currentLoop;
                 }
             }
+        }
+
+        private static Vec2 RandomUnit(Random random)
+        {
+            double angle = random.NextDouble() * Math.PI * 2.0;
+            return new Vec2(Math.Cos(angle), Math.Sin(angle));
         }
 
         private void EmitImpactSound(TerrainImpactData impact)

@@ -92,7 +92,7 @@ namespace RainWorldDesktopPet
         {
             SlugcatId result;
             return !string.IsNullOrWhiteSpace(value) && SlugcatProfiles.TryParse(value, out result)
-                ? result : SlugcatId.Default;
+                ? result : SlugcatId.White;
         }
 
         public static void LogException(Exception exception)

@@ -85,6 +85,9 @@ Windows ZIP을 내려받아 압축을 푼 뒤 `SlugcatInMyMonitor.exe`를 실행
 # Gourmand로 실행
 .\SlugcatInMyMonitor.exe --slugcat gourmand
 
+# 선택 가능: white, yellow, red, gourmand, artificer,
+#               spearmaster, rivulet, saint
+
 # Rain World 설치 경로 직접 지정
 .\SlugcatInMyMonitor.exe `
   --rain-world "C:\Program Files (x86)\Steam\steamapps\common\Rain World"

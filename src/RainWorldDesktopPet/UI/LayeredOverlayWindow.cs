@@ -24,11 +24,13 @@ namespace RainWorldDesktopPet.UI
         private readonly ToolStripMenuItem debugItem;
         private readonly ToolStripMenuItem retryRenderItem;
         private readonly ToolStripMenuItem pauseItem;
+        private readonly ToolStripMenuItem soundItem;
         private readonly ToolStripMenuItem activeSlugcatsMenu;
         private readonly ToolStripMenuItem spawnItem;
         private readonly ToolStripMenuItem removeItem;
         private readonly ToolStripMenuItem skinEditorItem;
         private readonly List<GameLoop> gameLoops = new List<GameLoop>();
+        private readonly AppSettings appSettings;
         private LayeredBackBuffer backBuffer;
         private GameLoop gameLoop;
         private GameLoop grabbedGameLoop;
@@ -47,6 +49,7 @@ namespace RainWorldDesktopPet.UI
         {
             this.installation = installation;
             this.startSlugcat = startSlugcat;
+            appSettings = AppSettings.Load();
             FormBorderStyle = FormBorderStyle.None;
             ShowInTaskbar = false;
             TopMost = true;
@@ -84,6 +87,20 @@ namespace RainWorldDesktopPet.UI
                     gameLoops[i].Paused = pauseItem.Checked;
                 RefreshSettingsWindow();
             };
+            soundItem = new ToolStripMenuItem("Sound (ON)");
+            soundItem.CheckOnClick = true;
+            soundItem.Checked = appSettings.SoundEnabled;
+            soundItem.Text = soundItem.Checked ? "Sound (ON)" : "Sound (OFF)";
+            soundItem.CheckedChanged += delegate
+            {
+                appSettings.SoundEnabled = soundItem.Checked;
+                soundItem.Text = soundItem.Checked ? "Sound (ON)" : "Sound (OFF)";
+                for (int i = 0; i < gameLoops.Count; i++)
+                    gameLoops[i].SoundEnabled = soundItem.Checked;
+                try { appSettings.Save(); }
+                catch (Exception exception) { Program.LogException(exception); }
+                RefreshSettingsWindow();
+            };
             retryRenderItem = new ToolStripMenuItem("Retry Rendering");
             retryRenderItem.Enabled = false;
             retryRenderItem.Click += RetryRendering;
@@ -92,12 +109,12 @@ namespace RainWorldDesktopPet.UI
             ToolStripMenuItem exitItem = new ToolStripMenuItem("Exit");
             exitItem.Click += delegate { Close(); };
             slugcatMenu = new ToolStripMenuItem("Character and Ability");
-            slugcatMenu.DropDownItems.Add(CreateSlugcatItem("Default", SlugcatId.Default, startSlugcat));
-            slugcatMenu.DropDownItems.Add(CreateSlugcatItem("Gourmand / 먹보", SlugcatId.Gourmand, startSlugcat));
-            slugcatMenu.DropDownItems.Add(CreateSlugcatItem("Artificer / 기술병", SlugcatId.Artificer, startSlugcat));
-            slugcatMenu.DropDownItems.Add(CreateSlugcatItem("Spearmaster / 창술가", SlugcatId.Spearmaster, startSlugcat));
-            slugcatMenu.DropDownItems.Add(CreateSlugcatItem("Rivulet / 물살이", SlugcatId.Rivulet, startSlugcat));
-            slugcatMenu.DropDownItems.Add(CreateSlugcatItem("Saint / 성자", SlugcatId.Saint, startSlugcat));
+            for (int i = 0; i < SlugcatProfiles.All.Count; i++)
+            {
+                SlugcatProfile profile = SlugcatProfiles.All[i];
+                slugcatMenu.DropDownItems.Add(CreateSlugcatItem(
+                    SlugcatProfiles.SelectionLabel(profile.Id), profile.Id, startSlugcat));
+            }
             activeSlugcatsMenu = new ToolStripMenuItem("Slugcats");
             spawnItem = new ToolStripMenuItem("Add Slugcat");
             spawnItem.Click += SpawnSlugcat;
@@ -115,6 +132,7 @@ namespace RainWorldDesktopPet.UI
             menu.Items.Add(slugcatMenu);
             menu.Items.Add(skinEditorItem);
             menu.Items.Add(debugItem);
+            menu.Items.Add(soundItem);
             menu.Items.Add(pauseItem);
             menu.Items.Add(retryRenderItem);
             menu.Items.Add(new ToolStripSeparator());
@@ -427,6 +445,7 @@ namespace RainWorldDesktopPet.UI
             GameLoop added = new GameLoop(Handle, installation, id, gameLoops.Count);
             added.DebugEnabled = debugItem.Checked;
             added.Paused = pauseItem.Checked;
+            added.SoundEnabled = soundItem.Checked;
             gameLoops.Add(added);
             SelectSlugcat(added);
         }
@@ -598,13 +617,6 @@ namespace RainWorldDesktopPet.UI
             if (skinEditor != null && !skinEditor.IsDisposed) skinEditor.RefreshFromGame();
         }
 
-        private void RefreshAppearanceMenus()
-        {
-            RefreshSlugcatSelectionMenu();
-            RefreshActiveSlugcatsMenu();
-            if (skinEditor != null && !skinEditor.IsDisposed) skinEditor.RefreshFromGame();
-        }
-
         internal string[] SettingsSlugcatNames
         {
             get
@@ -637,30 +649,13 @@ namespace RainWorldDesktopPet.UI
             get { return pauseItem.Checked; }
             set { pauseItem.Checked = value; }
         }
-        internal SlugcatVariant SettingsVariant
+        internal bool SettingsSoundEnabled
         {
-            get
-            {
-                if (gameLoop != null) return gameLoop.Appearance.Variant;
-                return startSlugcat == SlugcatId.Gourmand
-                    ? SlugcatVariant.Gourmand : SlugcatVariant.Survivor;
-            }
+            get { return soundItem.Checked; }
+            set { soundItem.Checked = value; }
         }
-        internal SlugcatSkin SettingsSkin
-        {
-            get
-            {
-                if (gameLoop != null) return gameLoop.Skin;
-                switch (startSlugcat)
-                {
-                    case SlugcatId.Artificer: return SlugcatSkin.Artificer;
-                    case SlugcatId.Spearmaster: return SlugcatSkin.Spearmaster;
-                    case SlugcatId.Rivulet: return SlugcatSkin.Rivulet;
-                    case SlugcatId.Saint: return SlugcatSkin.Saint;
-                    default: return SlugcatSkin.Default;
-                }
-            }
-        }
+        internal SlugcatId SettingsSlugcatId
+        { get { return gameLoop == null ? startSlugcat : gameLoop.SelectedSlugcat.Id; } }
 
         internal void SettingsSelectSlugcat(int index)
         {
@@ -670,34 +665,13 @@ namespace RainWorldDesktopPet.UI
         internal void SettingsAddSlugcat() { SpawnSlugcat(null, EventArgs.Empty); }
         internal void SettingsSelectNextSlugcat() { SelectNextSlugcat(null, EventArgs.Empty); }
         internal void SettingsRemoveSelectedSlugcat() { RemoveSelectedSlugcat(null, EventArgs.Empty); }
-        internal void SettingsSetVariant(SlugcatVariant variant)
+        internal void SettingsSetSlugcat(SlugcatId id)
         {
             if (gameLoop == null) return;
-            gameLoop.SetVariant(variant);
-            RefreshAppearanceMenus();
-        }
-
-        internal bool SettingsTrySetSkin(SlugcatSkin skin, out string reason)
-        {
-            reason = null;
-            if (gameLoop == null) return false;
-            if (!gameLoop.SetSkin(skin))
-            {
-                gameLoop.CanUseSkin(skin, out reason);
-                return false;
-            }
-            RefreshAppearanceMenus();
-            return true;
-        }
-
-        internal bool SettingsCanUseSkin(SlugcatSkin skin, out string reason)
-        {
-            if (gameLoop == null)
-            {
-                reason = "No Slugcat is selected.";
-                return false;
-            }
-            return gameLoop.CanUseSkin(skin, out reason);
+            gameLoop.SetSelectedSlugcat(id);
+            RefreshSlugcatSelectionMenu();
+            RefreshActiveSlugcatsMenu();
+            if (skinEditor != null && !skinEditor.IsDisposed) skinEditor.RefreshFromGame();
         }
 
         internal void SettingsOpenAppearanceEditor()

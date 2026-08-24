@@ -124,13 +124,21 @@ namespace RainWorldDesktopPet.Audio
                 Player = new SoundPlayer(Stream);
                 Player.Load();
             }
-            public void Dispose() { Player.Dispose(); Stream.Dispose(); }
+            public void Dispose()
+            {
+                try { Player.Stop(); }
+                catch { }
+                Player.Dispose();
+                Stream.Dispose();
+            }
         }
 
         private readonly string looseSoundDirectory;
         private readonly Dictionary<string, long> lastPlayed =
             new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
         private readonly List<ActiveVoice> activePlayers = new List<ActiveVoice>();
+        private readonly Dictionary<string, ActiveVoice> activeLoops =
+            new Dictionary<string, ActiveVoice>(StringComparer.Ordinal);
         private readonly Dictionary<string, UnityAudioClipInfo> clips =
             new Dictionary<string, UnityAudioClipInfo>(StringComparer.OrdinalIgnoreCase);
         private IDictionary<string, RainWorldSoundDefinition> soundDefinitions =
@@ -139,6 +147,7 @@ namespace RainWorldDesktopPet.Audio
         private UnityFsBundleReader soundBundle;
         private int variantCounter;
         private string lastEvent = "none";
+        private bool enabled = true;
 
         public RainWorldAudioEngine(RainWorldInstallation installation)
         {
@@ -182,11 +191,35 @@ namespace RainWorldDesktopPet.Audio
 
         public string Status { get; private set; }
         public string LastEvent { get { return lastEvent; } }
+        public bool Enabled { get { return enabled; } }
+
+        public void SetEnabled(bool value)
+        {
+            if (enabled == value) return;
+            enabled = value;
+            if (!enabled)
+            {
+                StopAllVoices();
+                lastEvent = "sound disabled";
+            }
+            else lastEvent = "sound enabled";
+        }
 
         public void Play(SoundEvent sound, Vec2 listener, long simulationTick,
             double audibleRange)
         {
             if (sound == null) return;
+            // Events are intentionally consumed while disabled. Re-enabling
+            // starts with the next event and never replays a stale effect.
+            if (!enabled) return;
+            if (sound.StopLoop)
+            {
+                StopLoopVoice(sound.LoopKey);
+                lastEvent = "stop loop " + sound.Id;
+                return;
+            }
+            if (sound.Loop && !string.IsNullOrEmpty(sound.LoopKey) &&
+                activeLoops.ContainsKey(sound.LoopKey)) return;
             long previous;
             if (lastPlayed.TryGetValue(sound.Id, out previous) &&
                 simulationTick - previous < sound.CooldownTicks) return;
@@ -200,21 +233,28 @@ namespace RainWorldDesktopPet.Audio
             soundDefinitions.TryGetValue(sound.Id ?? string.Empty, out definition);
             if (definition == null || definition.Clips.Length == 0 ||
                 string.IsNullOrEmpty(looseSoundDirectory)) return;
+            if (sound.Loop)
+            {
+                RainWorldSoundClipDefinition loopClip = definition.Clips[
+                    variantCounter++ % definition.Clips.Length];
+                PlayClip(loopClip, sound, pan, true);
+                return;
+            }
             if (definition.PlayAll)
             {
                 for (int i = 0; i < definition.Clips.Length; i++)
-                    PlayClip(definition.Clips[i], sound, pan);
+                    PlayClip(definition.Clips[i], sound, pan, false);
             }
             else
             {
                 RainWorldSoundClipDefinition clip = definition.Clips[
                     variantCounter++ % definition.Clips.Length];
-                PlayClip(clip, sound, pan);
+                PlayClip(clip, sound, pan, false);
             }
         }
 
         private void PlayClip(RainWorldSoundClipDefinition definition, SoundEvent sound,
-            double pan)
+            double pan, bool loop)
         {
             string clip = definition.Name;
             double clipVolume = MathUtil.Lerp(definition.MinimumVolume,
@@ -232,9 +272,7 @@ namespace RainWorldDesktopPet.Audio
                     try
                     {
                         ActiveVoice voice = new ActiveVoice(wave);
-                        activePlayers.Add(voice);
-                        voice.Player.Play();
-                        TrimVoices();
+                        StartVoice(voice, sound, loop);
                         return;
                     }
                     catch (Exception exception)
@@ -254,14 +292,51 @@ namespace RainWorldDesktopPet.Audio
             {
                 byte[] wave = File.ReadAllBytes(path);
                 ActiveVoice voice = new ActiveVoice(wave);
-                activePlayers.Add(voice);
-                voice.Player.Play();
-                TrimVoices();
+                StartVoice(voice, sound, loop);
             }
             catch (Exception exception)
             {
                 Status = "audio playback failed: " + exception.Message;
             }
+        }
+
+        private void StartVoice(ActiveVoice voice, SoundEvent sound, bool loop)
+        {
+            if (loop && !string.IsNullOrEmpty(sound.LoopKey))
+            {
+                StopLoopVoice(sound.LoopKey);
+                activeLoops[sound.LoopKey] = voice;
+                voice.Player.PlayLooping();
+                return;
+            }
+            activePlayers.Add(voice);
+            voice.Player.Play();
+            TrimVoices();
+        }
+
+        private void StopLoopVoice(string loopKey)
+        {
+            if (string.IsNullOrEmpty(loopKey)) return;
+            ActiveVoice voice;
+            if (!activeLoops.TryGetValue(loopKey, out voice)) return;
+            voice.Player.Stop();
+            voice.Dispose();
+            activeLoops.Remove(loopKey);
+        }
+
+        public void StopAllLoops()
+        {
+            string[] keys = new string[activeLoops.Count];
+            activeLoops.Keys.CopyTo(keys, 0);
+            for (int i = 0; i < keys.Length; i++) StopLoopVoice(keys[i]);
+        }
+
+        public void StopAllVoices()
+        {
+            StopAllLoops();
+            for (int i = 0; i < activePlayers.Count; i++)
+                activePlayers[i].Dispose();
+            activePlayers.Clear();
         }
 
         private bool TryDecodePcmWave(UnityAudioClipInfo clip, double volume,
@@ -368,8 +443,7 @@ namespace RainWorldDesktopPet.Audio
 
         public void Dispose()
         {
-            for (int i = 0; i < activePlayers.Count; i++) activePlayers[i].Dispose();
-            activePlayers.Clear();
+            StopAllVoices();
             if (soundBundle != null) soundBundle.Dispose();
         }
     }

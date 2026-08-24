@@ -73,6 +73,14 @@ namespace RainWorldDesktopPet.AI
         private bool originalAttentionInitialized;
         private AttentionKind originalAttentionKind;
         private Vec2 originalAttentionTarget;
+        private SpearmasterActionState spearmasterState;
+        private int spearmasterStateTicks;
+        private int spearmasterIdleDuration = 80;
+        private int spearmasterMoveDuration = 35;
+        private int spearmasterHoldDuration = 45;
+        private int spearmasterAimDuration = 30;
+        private int spearmasterRecoveryDuration = 110;
+        private Vec2 spearmasterTarget;
 
         public DesktopPetAI(int seed)
         {
@@ -89,6 +97,7 @@ namespace RainWorldDesktopPet.AI
         public Vec2 OriginalAttentionTarget { get { return originalAttentionTarget; } }
         public bool MouseAttentionActive { get; private set; }
         public PlatformTransitionPlan TransitionPlan { get; private set; }
+        public SpearmasterActionState SpearmasterState { get { return spearmasterState; } }
 
         public VirtualInput Step(Slugcat slugcat, DesktopCollisionWorld world, MouseTracker mouse)
         {
@@ -115,7 +124,8 @@ namespace RainWorldDesktopPet.AI
 
             VirtualInput input = ProduceInput(slugcat, mouse, context);
             VirtualInput abilityInput;
-            if (TryProduceAbilityInput(slugcat, context, out abilityInput)) input = abilityInput;
+            if (TryProduceAbilityInput(slugcat, mouse, mouseAttention, context,
+                out abilityInput)) input = abilityInput;
             UpdateAttention(slugcat, mouse, context, mouseAttention);
             Attention.Step();
             return input;
@@ -164,7 +174,8 @@ namespace RainWorldDesktopPet.AI
             return TransitionPlan;
         }
 
-        private bool TryProduceAbilityInput(Slugcat slugcat, UtilityContext context,
+        private bool TryProduceAbilityInput(Slugcat slugcat, MouseTracker mouse,
+            MouseAttentionState mouseAttention, UtilityContext context,
             out VirtualInput input)
         {
             input = VirtualInput.Neutral;
@@ -172,20 +183,10 @@ namespace RainWorldDesktopPet.AI
                 slugcat.AbilityController as SpearmasterAbilityController;
             if (spear != null)
             {
-                if (spear.HeldSpear == null && behaviorTicks % 300 < 150)
-                {
-                    Behavior = DesktopBehavior.MakeSpear;
-                    input = new VirtualInput(0, 0, false, true);
-                    return true;
-                }
-                if (spear.HeldSpear != null && behaviorTicks % 120 == 1)
-                {
-                    Behavior = DesktopBehavior.ThrowSpear;
-                    input = new VirtualInput(slugcat.State.Facing, 0, false, false,
-                        true, VirtualPosture.None, false);
-                    return true;
-                }
+                return ProduceSpearmasterInput(slugcat, spear, mouse,
+                    mouseAttention, out input);
             }
+            ResetSpearmasterState();
 
             GourmandAbilityController gourmand =
                 slugcat.AbilityController as GourmandAbilityController;
@@ -221,6 +222,144 @@ namespace RainWorldDesktopPet.AI
                 return true;
             }
             return false;
+        }
+
+        private bool ProduceSpearmasterInput(Slugcat slugcat,
+            SpearmasterAbilityController spear, MouseTracker mouse,
+            MouseAttentionState mouseAttention, out VirtualInput input)
+        {
+            input = VirtualInput.Neutral;
+            spearmasterStateTicks++;
+            bool hasTarget = mouseAttention != null && mouseAttention.IsActive;
+            if (hasTarget) spearmasterTarget = mouse.Position;
+            double targetDistance = hasTarget
+                ? Vec2.Distance(slugcat.Center, spearmasterTarget)
+                : double.MaxValue;
+
+            switch (spearmasterState)
+            {
+                case SpearmasterActionState.Idle:
+                    spear.SetActionState(spearmasterState, spearmasterTarget);
+                    Behavior = DesktopBehavior.Idle;
+                    if (spearmasterStateTicks >= spearmasterIdleDuration)
+                    {
+                        spearmasterMoveDuration = 25 + random.Next(0, 25);
+                        ChangeSpearmasterState(SpearmasterActionState.Moving);
+                    }
+                    return true;
+
+                case SpearmasterActionState.Moving:
+                    spear.SetActionState(spearmasterState, spearmasterTarget);
+                    Behavior = DesktopBehavior.Walk;
+                    input = new VirtualInput(desiredDirection, 0, false, false);
+                    if (spearmasterStateTicks >= spearmasterMoveDuration)
+                        ChangeSpearmasterState(SpearmasterActionState.PreparingSpear);
+                    return true;
+
+                case SpearmasterActionState.PreparingSpear:
+                    spear.SetActionState(spearmasterState, spearmasterTarget);
+                    Behavior = DesktopBehavior.MakeSpear;
+                    if (spearmasterStateTicks >= 14)
+                        ChangeSpearmasterState(SpearmasterActionState.PullingSpear);
+                    return true;
+
+                case SpearmasterActionState.PullingSpear:
+                    spear.SetActionState(spearmasterState, spearmasterTarget);
+                    Behavior = DesktopBehavior.MakeSpear;
+                    input = new VirtualInput(0, 0, false, true);
+                    if (spear.HeldSpear != null)
+                    {
+                        spearmasterHoldDuration = 35 + random.Next(0, 65);
+                        ChangeSpearmasterState(SpearmasterActionState.HoldingSpear);
+                    }
+                    return true;
+
+                case SpearmasterActionState.HoldingSpear:
+                    spear.SetActionState(spearmasterState, spearmasterTarget);
+                    Behavior = DesktopBehavior.MakeSpear;
+                    if (spear.HeldSpear == null)
+                    {
+                        spearmasterRecoveryDuration = 90 + random.Next(0, 80);
+                        ChangeSpearmasterState(SpearmasterActionState.Recovering);
+                        return true;
+                    }
+                    if (!hasTarget) return true;
+                    if (targetDistance < 80.0)
+                    {
+                        input = new VirtualInput(slugcat.Center.X < spearmasterTarget.X
+                            ? -1 : 1, 0, false, false);
+                        return true;
+                    }
+                    if (targetDistance > 450.0)
+                    {
+                        input = new VirtualInput(slugcat.Center.X < spearmasterTarget.X
+                            ? 1 : -1, 0, false, false);
+                        return true;
+                    }
+                    if (spearmasterStateTicks >= spearmasterHoldDuration)
+                    {
+                        spearmasterAimDuration = 24 + random.Next(0, 18);
+                        ChangeSpearmasterState(SpearmasterActionState.Aiming);
+                    }
+                    return true;
+
+                case SpearmasterActionState.Aiming:
+                    spear.SetActionState(spearmasterState, spearmasterTarget);
+                    Behavior = DesktopBehavior.ThrowSpear;
+                    if (!hasTarget || targetDistance < 80.0 || targetDistance > 450.0)
+                    {
+                        ChangeSpearmasterState(SpearmasterActionState.HoldingSpear);
+                        return true;
+                    }
+                    // The held-spear controller turns the arm/body toward the
+                    // target. Aiming itself does not walk into a valid target.
+                    input = VirtualInput.Neutral;
+                    if (spearmasterStateTicks >= spearmasterAimDuration)
+                        ChangeSpearmasterState(SpearmasterActionState.Throwing);
+                    return true;
+
+                case SpearmasterActionState.Throwing:
+                    spear.SetActionState(spearmasterState, spearmasterTarget);
+                    Behavior = DesktopBehavior.ThrowSpear;
+                    if (!hasTarget || targetDistance < 80.0 || targetDistance > 450.0)
+                    {
+                        ChangeSpearmasterState(SpearmasterActionState.HoldingSpear);
+                        return true;
+                    }
+                    int throwX = spearmasterTarget.X < slugcat.Center.X ? -1 : 1;
+                    input = new VirtualInput(throwX, 0, false, false, true,
+                        VirtualPosture.None, false);
+                    if (spearmasterStateTicks > 1 || spear.HeldSpear == null)
+                    {
+                        spearmasterRecoveryDuration = 90 + random.Next(0, 80);
+                        ChangeSpearmasterState(SpearmasterActionState.Recovering);
+                    }
+                    return true;
+
+                case SpearmasterActionState.Recovering:
+                    spear.SetActionState(spearmasterState, spearmasterTarget);
+                    Behavior = DesktopBehavior.Idle;
+                    if (spearmasterStateTicks >= spearmasterRecoveryDuration)
+                    {
+                        spearmasterIdleDuration = 55 + random.Next(0, 85);
+                        ChangeSpearmasterState(SpearmasterActionState.Idle);
+                    }
+                    return true;
+            }
+            return false;
+        }
+
+        private void ChangeSpearmasterState(SpearmasterActionState state)
+        {
+            spearmasterState = state;
+            spearmasterStateTicks = 0;
+        }
+
+        private void ResetSpearmasterState()
+        {
+            spearmasterState = SpearmasterActionState.Idle;
+            spearmasterStateTicks = 0;
+            spearmasterTarget = Vec2.Zero;
         }
 
         private UtilityContext BuildContext(Slugcat slugcat, DesktopCollisionWorld world, MouseTracker mouse)

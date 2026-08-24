@@ -103,6 +103,11 @@ namespace RainWorldDesktopPet.Core
         public SlugcatAppearance Appearance { get { return Slugcat.Appearance; } }
         public SlugcatSkin Skin { get { return Graphics.VisualProfile.Skin; } }
         public int OffscreenRecoveryCount { get; private set; }
+        public bool SoundEnabled
+        {
+            get { return Audio.Enabled; }
+            set { Audio.SetEnabled(value); }
+        }
 
         public bool TryGetAtlasSprite(string name, bool original, out AtlasSprite sprite)
         {
@@ -355,14 +360,14 @@ namespace RainWorldDesktopPet.Core
             // No frame can observe mixed physics/graphics: switch the model,
             // clear incompatible ability state, then rebuild graphics before
             // the next fixed update or render.
+            Audio.StopAllLoops();
             Slugcat.SetSelectedSlugcat(id);
             Graphics.SetGraphicsProfile(next.Graphics, atlas);
         }
 
         public void SetVariant(SlugcatVariant variant)
         {
-            Slugcat.SetVariant(variant);
-            Graphics.SetVisualProfile(SlugcatVisualProfiles.Default, atlas);
+            SetSelectedSlugcat(SlugcatProfiles.Get(variant).Id);
         }
 
         public bool CanUseSkin(SlugcatSkin skin, out string reason)
@@ -380,11 +385,17 @@ namespace RainWorldDesktopPet.Core
             switch (skin)
             {
                 case SlugcatSkin.Artificer: SetSelectedSlugcat(SlugcatId.Artificer); break;
-                case SlugcatSkin.Spearmaster: SetSelectedSlugcat(SlugcatId.Spearmaster); break;
+                case SlugcatSkin.Spearmaster: SetSelectedSlugcat(SlugcatId.SpearMaster); break;
                 case SlugcatSkin.Rivulet: SetSelectedSlugcat(SlugcatId.Rivulet); break;
                 case SlugcatSkin.Saint: SetSelectedSlugcat(SlugcatId.Saint); break;
                 default:
-                    Graphics.SetVisualProfile(SlugcatVisualProfiles.Default, atlas);
+                    switch (Slugcat.Appearance.Variant)
+                    {
+                        case SlugcatVariant.Monk: SetSelectedSlugcat(SlugcatId.Yellow); break;
+                        case SlugcatVariant.Hunter: SetSelectedSlugcat(SlugcatId.Red); break;
+                        case SlugcatVariant.Gourmand: SetSelectedSlugcat(SlugcatId.Gourmand); break;
+                        default: SetSelectedSlugcat(SlugcatId.White); break;
+                    }
                     break;
             }
             return true;

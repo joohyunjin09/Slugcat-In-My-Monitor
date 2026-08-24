@@ -1085,7 +1085,7 @@ namespace RainWorldDesktopPet.Graphics
             return pen;
         }
 
-        private static void DrawAbilityObjects(System.Drawing.Graphics graphics,
+        private void DrawAbilityObjects(System.Drawing.Graphics graphics,
             Slugcat slugcat, SlugcatPose pose, double interpolation)
         {
             SaintAbilityController saint = slugcat.AbilityController as SaintAbilityController;
@@ -1129,39 +1129,40 @@ namespace RainWorldDesktopPet.Graphics
                 }
             }
 
-            using (Pen spearPen = CreateRoundPen(Color.FromArgb(91, 53, 106), 2.5f))
-            using (Brush spearTip = new SolidBrush(Color.FromArgb(230, 220, 235)))
+            for (int i = 0; i < slugcat.Spears.Count; i++)
             {
-                for (int i = 0; i < slugcat.Spears.Count; i++)
+                DesktopSpear spear = slugcat.Spears[i];
+                Vec2 center = spear.Chunk.RenderPosition(interpolation);
+                Vec2 direction = spear.Rotation.LengthSquared > 0.001
+                    ? spear.Rotation.Normalized : Vec2.Right;
+                if (spear.HasUmbilical)
                 {
-                    DesktopSpear spear = slugcat.Spears[i];
-                    Vec2 center = spear.Chunk.RenderPosition(interpolation);
-                    Vec2 direction = spear.Rotation.LengthSquared > 0.001
-                        ? spear.Rotation.Normalized : Vec2.Right;
-                    Vec2 from = center - direction * 13.0;
-                    Vec2 to = center + direction * 13.0;
-                    graphics.DrawLine(spearPen, from.ToPointF(), to.ToPointF());
-                    Vec2 side = direction.Perpendicular * 3.0;
-                    graphics.FillPolygon(spearTip, new PointF[]
+                    Vec2[] current = spear.Umbilical;
+                    Vec2[] previousFrame = spear.LastUmbilical;
+                    Vec2 previous = Vec2.Lerp(previousFrame[0], current[0], interpolation);
+                    using (Pen umbilical = CreateRoundPen(
+                        LerpColor(pose.VisualBodyColor, Color.White, 0.35), 0.65f))
                     {
-                        (to + direction * 4.0).ToPointF(),
-                        (to - direction * 3.0 + side).ToPointF(),
-                        (to - direction * 3.0 - side).ToPointF()
-                    });
+                        for (int segment = 1; segment < current.Length; segment++)
+                        {
+                            Vec2 next = Vec2.Lerp(previousFrame[segment],
+                                current[segment], interpolation);
+                            graphics.DrawLine(umbilical, previous.ToPointF(), next.ToPointF());
+                            previous = next;
+                        }
+                    }
                 }
-                SpearmasterAbilityController creation =
-                    slugcat.AbilityController as SpearmasterAbilityController;
-                if (creation != null && creation.HeldSpear == null &&
-                    creation.SpearProgress > 0.0)
+
+                Color needleColor = spear.NeedleHasConnection
+                    ? Color.White
+                    : LerpColor(OutlineColor, Color.White, spear.NeedleFadeFraction);
+                if (atlas != null)
                 {
-                    Vec2 center = creation.SpearCreationPosition;
-                    Vec2 direction = new Vec2(slugcat.State.Facing, -0.15).Normalized;
-                    double halfLength = 13.0 * creation.SpearProgress;
-                    graphics.DrawLine(spearPen,
-                        (center - direction * halfLength).ToPointF(),
-                        (center + direction * halfLength).ToPointF());
-                    FillCircle(graphics, center, 1.5 + creation.SpearProgress * 2.0,
-                        Color.FromArgb(190, 225, 210, 235));
+                    double anchorY = spear.Mode == DesktopSpearMode.Thrown ||
+                        spear.Mode == DesktopSpearMode.StuckInCreature ? 0.85 : 0.5;
+                    DrawElement(graphics, "BioSpear" + (spear.NeedleType + 1), center,
+                        AimScreen(Vec2.Zero, direction), 1.0, 1.0, 0.5, anchorY,
+                        needleColor);
                 }
             }
 
@@ -1169,11 +1170,10 @@ namespace RainWorldDesktopPet.Graphics
             {
                 AbilityEffect effect = slugcat.AbilityEffects[i];
                 Vec2 position = Vec2.Lerp(effect.LastPosition, effect.Position, interpolation);
-                double life = effect.InitialLifetime <= 0 ? 0.0 :
-                    effect.Lifetime / (double)effect.InitialLifetime;
+                double life = MathUtil.Lerp(effect.LastLife, effect.Life, interpolation);
                 if (effect.Kind == AbilityEffectKind.ShockWave)
                 {
-                    double progress = MathUtil.Clamp01(1.0 - life);
+                    double progress = MathUtil.Clamp01(life);
                     double radius = Math.Sqrt(progress) * effect.Radius;
                     Color shockColor = Color.FromArgb(
                         MathUtil.Clamp((int)Math.Round(255.0 * progress), 0, 255),
@@ -1188,9 +1188,16 @@ namespace RainWorldDesktopPet.Graphics
                 else if (effect.Kind == AbilityEffectKind.ExplosionLight)
                 {
                     double radius = Math.Sqrt(Math.Max(0.0, life)) * effect.Radius;
+                    double rootLife = Math.Sqrt(Math.Max(0.0, life));
                     FillCircle(graphics, position, radius,
-                        Color.FromArgb(MathUtil.Clamp((int)(150 * Math.Sqrt(Math.Max(0.0, life))), 0, 255),
-                            255, 255, 255));
+                        Color.FromArgb(MathUtil.Clamp((int)(255 * life *
+                            effect.Intensity * 0.5), 0, 255), 255, 255, 255));
+                    FillCircle(graphics, position, radius * 0.68,
+                        Color.FromArgb(MathUtil.Clamp((int)(120 * rootLife *
+                            effect.Intensity), 0, 255), 255, 255, 255));
+                    FillCircle(graphics, position, radius * 0.32,
+                        Color.FromArgb(MathUtil.Clamp((int)(150 * rootLife *
+                            effect.Intensity), 0, 255), 255, 255, 255));
                 }
                 else if (effect.Kind == AbilityEffectKind.ExplosionSpikes)
                 {
@@ -1219,8 +1226,12 @@ namespace RainWorldDesktopPet.Graphics
                     Color trailColor = effect.Kind == AbilityEffectKind.Spark
                         ? Color.FromArgb(MathUtil.Clamp((int)(255 * life), 0, 255), 255, 255, 255)
                         : Color.FromArgb(MathUtil.Clamp((int)(210 * life), 0, 255), 220, 225, 235);
-                    Vec2 trail = position - effect.Velocity.Normalized *
-                        Math.Max(9.0, effect.Velocity.Length);
+                    Vec2 trail = Vec2.Lerp(effect.PreviousPreviousPosition,
+                        effect.PreviousPreviousPreviousPosition, interpolation);
+                    if (Vec2.Distance(position, trail) < 9.0)
+                        trail = position - effect.Velocity.Normalized * 9.0;
+                    trail = Vec2.Lerp(position, trail,
+                        MathUtil.InverseLerp(0.0, 0.1, life));
                     using (Pen trailPen = CreateRoundPen(trailColor,
                         effect.Kind == AbilityEffectKind.Spark ? 2.0f : 1.0f))
                         graphics.DrawLine(trailPen, position.ToPointF(), trail.ToPointF());
@@ -1231,10 +1242,21 @@ namespace RainWorldDesktopPet.Graphics
                     double scale = life > 0.5
                         ? MathUtil.Lerp(1.0, 0.5, MathUtil.InverseLerp(0.5, 1.0, life))
                         : Math.Sin(Math.Max(0.0, life) * Math.PI);
-                    Color smokeColor = effect.Kind == AbilityEffectKind.FlashingSmoke
-                        ? Color.FromArgb(MathUtil.Clamp((int)(170 * Math.Pow(Math.Max(0.0, life), 1.8)), 0, 255), 255, 255, 255)
-                        : Color.FromArgb(MathUtil.Clamp((int)(110 * Math.Pow(Math.Max(0.0, life), 1.8)), 0, 255), 70, 70, 75);
-                    FillCircle(graphics, position, Math.Max(0.5, effect.Radius * scale), smokeColor);
+                    double alpha = Math.Pow(Math.Max(0.0, life), 1.8);
+                    Color colorA = effect.Kind == AbilityEffectKind.FlashingSmoke
+                        ? Color.White : Color.FromArgb(58, 60, 66);
+                    Color colorB = effect.Kind == AbilityEffectKind.FlashingSmoke
+                        ? Color.FromArgb(185, 185, 190) : Color.FromArgb(28, 30, 35);
+                    Color back = LerpColor(colorB, colorA,
+                        0.2 + 0.8 * Math.Sqrt(Math.Max(0.0, life)));
+                    Color front = LerpColor(colorB, colorA, Math.Max(0.0, life));
+                    back = Color.FromArgb(MathUtil.Clamp((int)(255 * alpha * 0.8),
+                        0, 255), back.R, back.G, back.B);
+                    front = Color.FromArgb(MathUtil.Clamp((int)(255 * alpha * 0.6),
+                        0, 255), front.R, front.G, front.B);
+                    double baseRadius = 11.0 * effect.Radius * Math.Max(0.0, scale);
+                    FillCircle(graphics, position, baseRadius * 1.1, back);
+                    FillCircle(graphics, position, baseRadius * 0.9, front);
                 }
                 else
                 {

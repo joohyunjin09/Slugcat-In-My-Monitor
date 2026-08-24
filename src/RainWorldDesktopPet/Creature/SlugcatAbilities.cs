@@ -21,6 +21,9 @@ namespace RainWorldDesktopPet.Creature
 
     public sealed class AbilityEffect
     {
+        private readonly Random random;
+        private BodyChunk collisionChunk;
+
         public AbilityEffect(AbilityEffectKind kind, Vec2 position, Vec2 velocity,
             int lifetime, double radius)
         {
@@ -31,6 +34,14 @@ namespace RainWorldDesktopPet.Creature
             Lifetime = lifetime;
             InitialLifetime = lifetime;
             Radius = radius;
+            Life = 1.0;
+            LastLife = 1.0;
+            LifeTime = Math.Max(1, lifetime);
+            PreviousPreviousPosition = position;
+            PreviousPreviousPreviousPosition = position;
+            TargetPosition = position;
+            random = new Random(unchecked((int)(position.X * 31.0 + position.Y * 17.0) ^
+                lifetime ^ ((int)kind * 7919)));
         }
 
         public readonly AbilityEffectKind Kind;
@@ -42,16 +53,145 @@ namespace RainWorldDesktopPet.Creature
         public readonly double Radius;
         public double Gravity;
         public double Intensity = 1.0;
+        public double Life;
+        public double LastLife;
+        public double LifeTime;
+        public double Rotation;
+        public double LastRotation;
+        public double RotationVelocity;
+        public Vec2 TargetPosition;
+        public Vec2 PreviousPreviousPosition;
+        public Vec2 PreviousPreviousPreviousPosition;
+        public bool IsAlive { get { return Life > 0.0 && Lifetime > 0; } }
+
+        public static AbilityEffect CreateExplosionSmoke(Vec2 position, Vec2 velocity,
+            double size, Random source)
+        {
+            Vec2 target = position + new Vec2(
+                MathUtil.Lerp(-50.0, 50.0, source.NextDouble()),
+                MathUtil.Lerp(-400.0, 100.0, source.NextDouble()));
+            Vec2 initialPosition = position + velocity.Normalized *
+                (60.0 * source.NextDouble());
+            double radius = MathUtil.Lerp(0.6, 1.5, source.NextDouble()) * size;
+            double rotation = source.NextDouble() * 360.0;
+            double rotationVelocity = MathUtil.Lerp(-6.0, 6.0,
+                source.NextDouble());
+            double lifeTime = MathUtil.Lerp(170.0, 400.0,
+                source.NextDouble());
+            AbilityEffect effect = new AbilityEffect(AbilityEffectKind.Smoke,
+                initialPosition, velocity, (int)Math.Ceiling(lifeTime), radius);
+            effect.LifeTime = lifeTime;
+            effect.Lifetime = (int)Math.Ceiling(lifeTime);
+            effect.Rotation = rotation;
+            effect.LastRotation = effect.Rotation;
+            effect.RotationVelocity = rotationVelocity;
+            // ExplosionSmoke getToPos has y=-100..400 in Rain World's y-up
+            // coordinates. This project uses desktop y-down coordinates.
+            effect.TargetPosition = target;
+            effect.collisionChunk = new BodyChunk(0, effect.Position, 1.0, 0.01);
+            return effect;
+        }
+
+        public static AbilityEffect CreateExplosionLight(Vec2 position, double radius,
+            double alpha, int lifeTime)
+        {
+            AbilityEffect effect = new AbilityEffect(AbilityEffectKind.ExplosionLight,
+                position, Vec2.Zero, lifeTime, radius);
+            effect.Intensity = alpha;
+            return effect;
+        }
+
+        public static AbilityEffect CreateSpark(Vec2 position, Vec2 velocity,
+            int standardLifeTime, int exceptionalLifeTime, Random source)
+        {
+            Vec2 initialPosition = position + velocity.Normalized *
+                (30.0 * source.NextDouble());
+            double gravity = MathUtil.Lerp(0.4, 0.9, source.NextDouble());
+            int lifeTime = source.Next(0, Math.Max(1, standardLifeTime));
+            if (source.NextDouble() < 0.1)
+                lifeTime = source.Next(standardLifeTime,
+                    Math.Max(standardLifeTime + 1, exceptionalLifeTime));
+            lifeTime = Math.Max(1, lifeTime);
+            AbilityEffect effect = new AbilityEffect(AbilityEffectKind.Spark,
+                initialPosition, velocity, lifeTime, 2.0);
+            effect.Gravity = gravity;
+            effect.collisionChunk = new BodyChunk(0, effect.Position, 1.0, 0.01);
+            return effect;
+        }
+
+        public static AbilityEffect CreateShockWave(Vec2 position, double radius,
+            double intensity, int lifeTime)
+        {
+            AbilityEffect effect = new AbilityEffect(AbilityEffectKind.ShockWave,
+                position, Vec2.Zero, lifeTime, radius);
+            effect.Intensity = intensity;
+            effect.Life = 0.0;
+            effect.LastLife = 0.0;
+            return effect;
+        }
 
         public void Step()
         {
+            Step(null);
+        }
+
+        public void Step(DesktopCollisionWorld world)
+        {
+            LastLife = Life;
+            PreviousPreviousPreviousPosition = PreviousPreviousPosition;
+            PreviousPreviousPosition = LastPosition;
             LastPosition = Position;
-            if (Kind == AbilityEffectKind.Spark || Kind == AbilityEffectKind.WaterDrip)
-                Velocity.Y += Gravity;
+            LastRotation = Rotation;
             if (Kind == AbilityEffectKind.Smoke || Kind == AbilityEffectKind.FlashingSmoke)
+            {
                 Velocity *= 0.9;
-            Position += Velocity;
-            Lifetime--;
+                Vec2 towardTarget = (TargetPosition - Position).Normalized;
+                Velocity += towardTarget * (random.NextDouble() * 0.04);
+                Rotation += RotationVelocity * Velocity.Length;
+                IntegrateWithTerrain(world, 1.0);
+                Life -= 1.0 / Math.Max(1.0, LifeTime);
+            }
+            else if (Kind == AbilityEffectKind.Spark)
+            {
+                Velocity.Y += Gravity;
+                IntegrateWithTerrain(world, 0.5);
+                Life -= 1.0 / Math.Max(1.0, LifeTime);
+            }
+            else if (Kind == AbilityEffectKind.WaterDrip)
+            {
+                Velocity.Y += Gravity;
+                Position += Velocity;
+                Life -= 1.0 / Math.Max(1.0, LifeTime);
+            }
+            else if (Kind == AbilityEffectKind.ShockWave)
+            {
+                Life += 1.0 / Math.Max(1.0, LifeTime);
+                if (Life >= 1.0) Life = -1.0;
+            }
+            else
+            {
+                Position += Velocity;
+                Life -= 1.0 / Math.Max(1.0, LifeTime);
+            }
+            Lifetime = Math.Max(0, (int)Math.Ceiling(Math.Max(0.0, Life) * LifeTime));
+        }
+
+        private void IntegrateWithTerrain(DesktopCollisionWorld world, double bounce)
+        {
+            if (collisionChunk == null || world == null)
+            {
+                Position += Velocity;
+                return;
+            }
+            collisionChunk.Position = Position;
+            collisionChunk.LastPosition = LastPosition;
+            collisionChunk.Velocity = Velocity;
+            collisionChunk.BeginTick();
+            collisionChunk.LastPosition = LastPosition;
+            collisionChunk.Position = Position + Velocity;
+            world.Resolve(collisionChunk, world.CurrentSnapshot, 0, 1.0, bounce);
+            Position = collisionChunk.Position;
+            Velocity = collisionChunk.Velocity;
         }
     }
 
@@ -125,11 +265,12 @@ namespace RainWorldDesktopPet.Creature
 
             if (explosiveJumpCounter >= safeThreshold && random.NextDouble() < 0.25)
             {
-                Owner.AddEffect(CreateSmoke(Owner.Center,
-                    RandomUnit() * (2.0 * random.NextDouble()), 1.0));
+                Owner.AddEffect(AbilityEffect.CreateExplosionSmoke(Owner.Center,
+                    RandomUnit() * (2.0 * random.NextDouble()), 1.0, random));
             }
             if (explosiveJumpCounter >= safeThreshold && random.NextDouble() < 0.5)
-                Owner.AddEffect(CreateSpark(Owner.Center, RandomUnit(), 4, 8));
+                Owner.AddEffect(AbilityEffect.CreateSpark(Owner.Center, RandomUnit(),
+                    4, 8, random));
 
             if (Owner.State.Grounded || !Owner.State.Conscious ||
                 Owner.State.BodyMode == BodyModeIndex.CorridorClimb ||
@@ -138,7 +279,8 @@ namespace RainWorldDesktopPet.Creature
                 Owner.State.BodyMode == BodyModeIndex.ZeroG)
                 pyroJumped = false;
 
-            bool requested = wantToJump > 0 && input.Pickup;
+            bool requested = wantToJump > 0 && input.Pickup &&
+                !Owner.Movement.LaunchedThisTick;
             bool validMode = Owner.State.Conscious && !Owner.State.Grounded &&
                 Owner.State.BodyMode != BodyModeIndex.Crawl &&
                 Owner.State.BodyMode != BodyModeIndex.CorridorClimb &&
@@ -232,25 +374,24 @@ namespace RainWorldDesktopPet.Creature
             Owner.EmitSound("Fire_Spear_Explode", Owner.Center,
                 0.3 + random.NextDouble() * 0.3,
                 0.5 + random.NextDouble() * 2.0, 1);
-            Owner.AddEffect(new AbilityEffect(AbilityEffectKind.ExplosionLight,
-                Owner.Center, Vec2.Zero, 3, 160.0));
+            Owner.AddEffect(AbilityEffect.CreateExplosionLight(Owner.Center,
+                160.0, 1.0, 3));
             for (int i = 0; i < 8; i++)
             {
-                Owner.AddEffect(CreateSmoke(Owner.Center,
-                    RandomUnit() * (5.0 * random.NextDouble()), 1.0));
+                Owner.AddEffect(AbilityEffect.CreateExplosionSmoke(Owner.Center,
+                    RandomUnit() * (5.0 * random.NextDouble()), 1.0, random));
             }
             for (int i = 0; i < 10; i++)
             {
                 Vec2 at = Owner.Center + RandomUnit() * (40.0 * random.NextDouble());
-                Owner.AddEffect(CreateSpark(at,
-                    RandomUnit() * MathUtil.Lerp(4.0, 30.0, random.NextDouble()), 4, 18));
+                Owner.AddEffect(AbilityEffect.CreateSpark(at,
+                    RandomUnit() * MathUtil.Lerp(4.0, 30.0, random.NextDouble()),
+                    4, 18, random));
             }
             if (parry)
             {
-                AbilityEffect shock = new AbilityEffect(AbilityEffectKind.ShockWave,
-                    Owner.Center, Vec2.Zero, 6, 200.0);
-                shock.Intensity = 0.2;
-                Owner.AddEffect(shock);
+                Owner.AddEffect(AbilityEffect.CreateShockWave(Owner.Center,
+                    200.0, 0.2, 6));
             }
         }
 
@@ -276,10 +417,8 @@ namespace RainWorldDesktopPet.Creature
                 deathPosition, Vec2.Zero, 3, 230.0));
             Owner.AddEffect(new AbilityEffect(AbilityEffectKind.ExplosionSpikes,
                 deathPosition, Vec2.Zero, 7, 170.0));
-            AbilityEffect deathShock = new AbilityEffect(AbilityEffectKind.ShockWave,
-                deathPosition, Vec2.Zero, 5, 430.0);
-            deathShock.Intensity = 0.045;
-            Owner.AddEffect(deathShock);
+            Owner.AddEffect(AbilityEffect.CreateShockWave(deathPosition,
+                430.0, 0.045, 5));
             for (int i = 0; i < 25; i++)
             {
                 Vec2 direction = RandomUnit();
@@ -307,26 +446,14 @@ namespace RainWorldDesktopPet.Creature
 
         private AbilityEffect CreateSmoke(Vec2 at, Vec2 smokeVelocity, double size)
         {
-            int lifetime = (int)Math.Round(MathUtil.Lerp(170.0, 400.0,
-                random.NextDouble()) * size);
-            return new AbilityEffect(AbilityEffectKind.Smoke,
-                at + smokeVelocity.Normalized * (60.0 * random.NextDouble()),
-                smokeVelocity, Math.Max(1, lifetime),
-                MathUtil.Lerp(0.6, 1.5, random.NextDouble()) * size * 11.0);
+            return AbilityEffect.CreateExplosionSmoke(at, smokeVelocity, size, random);
         }
 
         private AbilityEffect CreateSpark(Vec2 at, Vec2 sparkVelocity,
             int standardLifetime, int exceptionalLifetime)
         {
-            int lifetime = random.Next(0, Math.Max(1, standardLifetime));
-            if (random.NextDouble() < 0.1)
-                lifetime = random.Next(standardLifetime,
-                    Math.Max(standardLifetime + 1, exceptionalLifetime));
-            AbilityEffect spark = new AbilityEffect(AbilityEffectKind.Spark,
-                at + sparkVelocity.Normalized * (30.0 * random.NextDouble()),
-                sparkVelocity, Math.Max(1, lifetime), 2.0);
-            spark.Gravity = MathUtil.Lerp(0.4, 0.9, random.NextDouble());
-            return spark;
+            return AbilityEffect.CreateSpark(at, sparkVelocity, standardLifetime,
+                exceptionalLifetime, random);
         }
 
         private Vec2 RandomUnit()
@@ -346,6 +473,18 @@ namespace RainWorldDesktopPet.Creature
         }
     }
 
+    public enum SpearmasterActionState
+    {
+        Idle,
+        Moving,
+        PreparingSpear,
+        PullingSpear,
+        HoldingSpear,
+        Aiming,
+        Throwing,
+        Recovering
+    }
+
     public sealed class SpearmasterAbilityController : DefaultAbilityController
     {
         private readonly Random random = new Random(0x5EA2);
@@ -356,6 +495,8 @@ namespace RainWorldDesktopPet.Creature
         private int spearLine;
         private int spearRow;
         private Vec2 graphicsHeadImpulse;
+        private SpearmasterActionState actionState;
+        private Vec2 aimTarget;
 
         public SpearmasterAbilityController(Slugcat owner) : base(owner) { }
 
@@ -365,6 +506,13 @@ namespace RainWorldDesktopPet.Creature
         public int SpearType { get { return spearType; } }
         public int SpearLine { get { return spearLine; } }
         public int SpearRow { get { return spearRow; } }
+        public SpearmasterActionState ActionState { get { return actionState; } }
+        public Vec2 AimTarget { get { return aimTarget; } }
+        public void SetActionState(SpearmasterActionState state, Vec2 target)
+        {
+            actionState = state;
+            aimTarget = target;
+        }
         public Vec2 ConsumeGraphicsHeadImpulse()
         {
             Vec2 result = graphicsHeadImpulse;
@@ -391,8 +539,10 @@ namespace RainWorldDesktopPet.Creature
         }
         public override string DebugState
         {
-            get { return heldSpear != null ? "spear:held" :
-                string.Format("spear:create {0:0}%", spearProgress * 100.0); }
+            get { return heldSpear != null
+                ? string.Format("spear:{0} type:{1}", actionState, heldSpear.NeedleType)
+                : string.Format("spear:{0} create {1:0}%", actionState,
+                    spearProgress * 100.0); }
         }
 
         public override void UpdateAfterMovement(VirtualInput input, DesktopCollisionWorld world)
@@ -406,14 +556,20 @@ namespace RainWorldDesktopPet.Creature
 
             if (heldSpear != null)
             {
-                Vec2 hand = Owner.BodyChunks[0].Position +
-                    new Vec2(Owner.State.Facing * 12.0, 2.0);
-                heldSpear.HoldAt(hand, new Vec2(Owner.State.Facing, -0.15));
+                Vec2 direction = ResolveAimDirection(input);
+                bool activelyAiming = actionState == SpearmasterActionState.Aiming ||
+                    actionState == SpearmasterActionState.Throwing || input.ThrowPressed;
+                if (activelyAiming && Math.Abs(direction.X) > 0.001)
+                    Owner.State.Facing = direction.X < 0.0 ? -1 : 1;
+                Vec2 hand = Owner.BodyChunks[0].Position + direction *
+                    (activelyAiming ? 18.0 : 12.0) + new Vec2(0.0, 2.0);
+                heldSpear.SetConnectionAnchor(TailConnectionAnchor());
+                heldSpear.HoldAt(hand, direction);
                 if (input.ThrowPressed)
                 {
                     bool vertical = Owner.State.Animation == AnimationIndex.Flip &&
                         input.X == 0 && input.Y != 0;
-                    Vec2 direction = vertical
+                    direction = vertical
                         ? new Vec2(0.0, input.Y)
                         : new Vec2(Owner.State.Facing, 0.0);
                     Vec2 playerVelocity = Owner.BodyChunks[0].Velocity;
@@ -425,9 +581,11 @@ namespace RainWorldDesktopPet.Creature
                     Vec2 throwPosition = Owner.BodyChunks[0].Position +
                         direction * 10.0 + new Vec2(0.0, -4.0);
                     heldSpear.HoldAt(throwPosition, direction);
-                    heldSpear.Throw(velocity);
-                    Owner.BodyChunks[0].Velocity += direction * 8.0;
-                    Owner.BodyChunks[1].Velocity -= direction * 4.0;
+                    heldSpear.SetConnectionAnchor(TailConnectionAnchor());
+                    heldSpear.Throw(velocity, direction);
+                    Owner.EmitSound("Slugcat_Throw_Spear", throwPosition,
+                        1.0, 1.0, 0);
+                    actionState = SpearmasterActionState.Recovering;
                     heldSpear = null;
                 }
                 return;
@@ -440,6 +598,9 @@ namespace RainWorldDesktopPet.Creature
                 RetractSpearProgress();
                 return;
             }
+
+            if (actionState != SpearmasterActionState.PreparingSpear)
+                actionState = SpearmasterActionState.PullingSpear;
 
             if (spearProgress == 0.0)
             {
@@ -483,6 +644,7 @@ namespace RainWorldDesktopPet.Creature
                 (creationDirection * 2.0 + RandomUnit() * random.NextDouble()) / 0.07, 6.0);
             heldSpear = new DesktopSpear(creationPosition, spearType);
             heldSpear.SetCreationVelocity(initialVelocity);
+            heldSpear.SetConnectionAnchor(TailConnectionAnchor());
             Owner.AddSpear(heldSpear);
             Owner.EmitSound("SM_Spear_Grab", Owner.Center, 1.0,
                 0.5 + random.NextDouble() * 1.5, 1);
@@ -504,16 +666,36 @@ namespace RainWorldDesktopPet.Creature
                 Vec2 sparkDirection = RandomUnit();
                 Vec2 sparkVelocity = sparkDirection *
                     MathUtil.Lerp(4.0, 30.0, random.NextDouble());
-                int lifetime = random.Next(0, 4);
-                if (random.NextDouble() < 0.1) lifetime = random.Next(4, 18);
-                AbilityEffect spark = new AbilityEffect(AbilityEffectKind.Spark,
+                Owner.AddEffect(AbilityEffect.CreateSpark(
                     tailEffectPosition + sparkDirection * (random.NextDouble() * 40.0),
-                    sparkVelocity, Math.Max(1, lifetime), 2.0);
-                spark.Position += sparkVelocity.Normalized * (30.0 * random.NextDouble());
-                spark.LastPosition = spark.Position;
-                spark.Gravity = MathUtil.Lerp(0.4, 0.9, random.NextDouble());
-                Owner.AddEffect(spark);
+                    sparkVelocity, 4, 18, random));
             }
+            actionState = SpearmasterActionState.HoldingSpear;
+        }
+
+        private Vec2 ResolveAimDirection(VirtualInput input)
+        {
+            if (Owner.State.Animation == AnimationIndex.Flip &&
+                input.X == 0 && input.Y != 0)
+                return new Vec2(0.0, input.Y);
+            if ((actionState == SpearmasterActionState.Aiming ||
+                actionState == SpearmasterActionState.Throwing) &&
+                (aimTarget - Owner.Center).LengthSquared > 1.0)
+            {
+                Vec2 toward = (aimTarget - Owner.Center).Normalized;
+                if (Math.Abs(toward.Y) > Math.Abs(toward.X) * 1.5 &&
+                    Owner.State.Animation == AnimationIndex.Flip)
+                    return new Vec2(0.0, toward.Y < 0.0 ? -1.0 : 1.0);
+                return new Vec2(toward.X < 0.0 ? -1.0 : 1.0, 0.0);
+            }
+            return new Vec2(Owner.State.Facing, -0.15).Normalized;
+        }
+
+        private Vec2 TailConnectionAnchor()
+        {
+            Vec2 hips = Owner.BodyChunks[1].Position;
+            Vec2 awayFromChest = (hips - Owner.BodyChunks[0].Position).Normalized;
+            return hips + awayFromChest * 8.0;
         }
 
         private void RetractSpearProgress()
@@ -538,6 +720,8 @@ namespace RainWorldDesktopPet.Creature
             spearLine = 0;
             spearRow = 0;
             graphicsHeadImpulse = Vec2.Zero;
+            actionState = SpearmasterActionState.Idle;
+            aimTarget = Vec2.Zero;
         }
     }
 
@@ -546,6 +730,7 @@ namespace RainWorldDesktopPet.Creature
         Retracted,
         ShootingOut,
         AttachedToTerrain,
+        AttachedToObject,
         Retracting
     }
 
@@ -619,14 +804,16 @@ namespace RainWorldDesktopPet.Creature
                 }
                 if (input.Y < 0) idealLength = Math.Max(50.0, idealLength - 3.0);
                 if (input.Y > 0) idealLength = Math.Min(170.0, idealLength + 3.0);
-                if (input.JumpPressed && attachedTicks >= 2)
+                if (input.JumpPressed && attachedTicks >= 2 &&
+                    !Owner.Movement.LaunchedThisTick)
                 {
                     Release();
-                    Owner.BodyChunks[0].Velocity.Y = -8.0;
-                    Owner.BodyChunks[1].Velocity.Y = -7.0;
+                    double jumpFactor = MathUtil.Lerp(1.0, 1.15,
+                        MathUtil.Clamp01(Owner.State.Adrenaline));
+                    Owner.BodyChunks[0].Velocity.Y = -8.0 * jumpFactor;
+                    Owner.BodyChunks[1].Velocity.Y = -7.0 * jumpFactor;
                     Owner.Movement.SetJumpBoost(8.0);
                     Owner.EmitSound("Slugcat_Normal_Jump", mouth, 1.0, 1.0, 3);
-                    FinishRetraction(mouth);
                     return;
                 }
                 position = anchor;
@@ -650,8 +837,8 @@ namespace RainWorldDesktopPet.Creature
                 lastPosition = position;
                 position += velocity;
                 requestedLength = Math.Max(0.0, requestedLength - 4.0);
-                if (Vec2.Distance(mouth, position) > 60.0)
-                    velocity.Y += 0.9 * MathUtil.InverseLerp(0.8, 0.0, elastic);
+                velocity.Y += 0.9 - 0.8 *
+                    MathUtil.InverseLerp(0.0, 1.0, elastic);
                 DesktopSurface hit;
                 Vec2 hitPoint;
                 if (FindFirstSurfaceHit(world, lastPosition, position, out hit, out hitPoint))
@@ -688,13 +875,18 @@ namespace RainWorldDesktopPet.Creature
             position = lastPosition = mouth;
             FillRope(mouth, mouth, world);
             bool valid = Owner.State.Conscious && !Owner.State.Grounded &&
+                Owner.State.CanJump <= 0 && !Owner.Movement.LaunchedThisTick &&
                 Owner.State.BodyMode != BodyModeIndex.Crawl &&
                 Owner.State.BodyMode != BodyModeIndex.CorridorClimb &&
+                Owner.State.BodyMode != BodyModeIndex.ClimbIntoShortCut &&
                 Owner.State.BodyMode != BodyModeIndex.WallClimb &&
                 Owner.State.BodyMode != BodyModeIndex.Swimming &&
                 Owner.State.BodyMode != BodyModeIndex.ZeroG &&
                 Owner.State.Animation != AnimationIndex.ClimbOnBeam &&
-                Owner.State.Animation != AnimationIndex.HangFromBeam;
+                Owner.State.Animation != AnimationIndex.HangFromBeam &&
+                Owner.State.Animation != AnimationIndex.AntlerClimb &&
+                Owner.State.Animation != AnimationIndex.VineGrab &&
+                Owner.State.Animation != AnimationIndex.ZeroGPoleGrab;
             if (!input.JumpPressed || input.Pickup || !valid) return;
             Vec2 direction;
             if (input.Y < 0)
@@ -868,10 +1060,8 @@ namespace RainWorldDesktopPet.Creature
             double terrainMassShare = mode == SaintTongueMode.AttachedToTerrain ? 1.0 : 0.0;
             Vec2 baseDirection = (desktopRope.AConnect -
                 Owner.BodyChunks[0].Position).Normalized;
-            double multiplier = mode == SaintTongueMode.AttachedToTerrain
-                ? 1.1 : 0.7;
-            double targetLength = Math.Min(requestedLength, 200.0) *
-                MathUtil.Lerp(multiplier, 1.0, elastic);
+            double requestRope = Math.Min(requestedLength, desktopRope.TotalLength);
+            double targetLength = requestRope * MathUtil.Lerp(0.7, 1.0, elastic);
             double strength = MathUtil.Lerp(0.85, 0.25, elastic);
             double excess = desktopRope.TotalLength - targetLength;
             if (excess <= 0.0) return;
@@ -975,13 +1165,11 @@ namespace RainWorldDesktopPet.Creature
 
         public readonly GourmandCraftingFramework Crafting;
         public bool Exhausted { get { return exhausted; } }
-        public bool Rolling { get { return rollDirection != 0 &&
-            Owner.State.Animation == AnimationIndex.Roll; } }
-        public bool Sliding { get { return rollDirection != 0 &&
-            Owner.State.Animation == AnimationIndex.BellySlide; } }
-        public int RollCounter { get { return rollCounter; } }
-        public int AllowRoll { get { return allowRoll; } }
-        public int ConsistentDownDiagonal { get { return consistentDownDiagonal; } }
+        public bool Rolling { get { return Owner.Movement.Rolling; } }
+        public bool Sliding { get { return Owner.Movement.Sliding; } }
+        public int RollCounter { get { return Owner.State.RollCounter; } }
+        public int AllowRoll { get { return Owner.State.AllowRoll; } }
+        public int ConsistentDownDiagonal { get { return Owner.State.ConsistentDownDiagonal; } }
         public override string Name { get { return "Roll / exhaustion / crafting"; } }
         public override string DebugState
         {
@@ -1000,6 +1188,10 @@ namespace RainWorldDesktopPet.Creature
                 Owner.State.SlowMovementStun = Math.Max(
                     Owner.State.SlowMovementStun, slow);
             }
+
+            // Roll, BellySlide and their transitions belong to Player's common
+            // movement state. Retain the legacy code below only as a fallback.
+            if (Owner.Movement != null) return;
 
             if (allowRoll > 0) allowRoll--;
             if (!Owner.BodyChunks[1].ContactFloor) allowRoll = 15;
@@ -1091,6 +1283,9 @@ namespace RainWorldDesktopPet.Creature
 
         public override void TerrainImpact(TerrainImpactData impact)
         {
+            // SlugcatMovement.TerrainImpact handles the base-game Roll for all
+            // characters before this character-specific callback.
+            if (Owner.Movement != null) return;
             int downDiagonal = Owner.LastInput.X != 0 && Owner.LastInput.Y > 0
                 ? Owner.LastInput.X : 0;
             if (downDiagonal == 0 || Owner.State.Animation == AnimationIndex.Roll ||

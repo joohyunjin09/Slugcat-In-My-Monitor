@@ -58,7 +58,7 @@ namespace RainWorldDesktopPet.Graphics
             arms[0] = new Limb(LimbKind.Arm, -1, chest + new Vec2(-4.0, 8.0), 20.0);
             arms[1] = new Limb(LimbKind.Arm, 1, chest + new Vec2(4.0, 8.0), 20.0);
             renderPose = new SlugcatPose();
-            SetGraphicsProfile(profile ?? SlugcatGraphicsProfiles.Default, atlas);
+            SetGraphicsProfile(profile ?? SlugcatGraphicsProfiles.White, atlas);
         }
 
         public ProceduralTail Tail { get { return tail; } }
