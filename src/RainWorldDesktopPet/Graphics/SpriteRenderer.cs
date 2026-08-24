@@ -207,18 +207,27 @@ namespace RainWorldDesktopPet.Graphics
                 DrawSpears(graphics, slugcat, pose, pose.TimeStacker, false);
                 if (profileAtlasAvailable)
                 {
-                    // PlayerGraphics.AddToContainer keeps sprites 0..6 in this
-                    // exact Futile order, then FaceA (9) above both arms.
-                    DrawAtlasTorso(graphics, pose); // 0 Body, 1 Hips
+                    // Dress My Slugcat reorders PlayerGraphics' Futile nodes
+                    // after AddToContainer: tail(2) behind legs(4) behind
+                    // hips(1), then one arm behind the body and the other
+                    // behind the head according to flipDirection.  Applying
+                    // an individual DMS part must preserve that exact order.
+                    if (pose.Facing >= 0) DrawAtlasArm(graphics, pose, 1, pose.VisualArmColor); // 6
+                    else DrawAtlasArm(graphics, pose, 0, pose.VisualArmColor); // 5
+                    DrawAtlasBody(graphics, pose); // 0
                     DrawTail(graphics, pose, pose.VisualTailColor); // 2
-                    DrawExtraGraphics(graphics, pose, ExtraGraphicsLayer.AfterTailBeforeHead);
-                    DrawAtlasHeadPart(graphics, pose, pose.VisualHeadColor, false); // 3
                     DrawAtlasLegs(graphics, pose); // 4
-                    DrawAtlasArm(graphics, pose, 0, pose.VisualArmColor); // 5
-                    DrawAtlasArm(graphics, pose, 1, pose.VisualArmColor); // 6
+                    DrawAtlasHips(graphics, pose); // 1
+                    // Spearmaster's TailSpeckles are inserted at original
+                    // sprite index 3, before the front arm and head.
+                    DrawExtraGraphics(graphics, pose, ExtraGraphicsLayer.AfterTailBeforeHead);
+                    if (pose.Facing >= 0) DrawAtlasArm(graphics, pose, 0, pose.VisualArmColor); // 5
+                    else DrawAtlasArm(graphics, pose, 1, pose.VisualArmColor); // 6
+                    DrawAtlasHeadPart(graphics, pose, pose.VisualHeadColor, false); // 3
                     DrawExtraGraphics(graphics, pose, ExtraGraphicsLayer.BehindFace);
-                    DrawAtlasHeadPart(graphics, pose, pose.VisualHeadColor, true); // 9
+                    // The DMS hook moves Rivulet's gills directly behind FaceA.
                     DrawExtraGraphics(graphics, pose, ExtraGraphicsLayer.InFront);
+                    DrawAtlasHeadPart(graphics, pose, pose.VisualHeadColor, true); // 9
                 }
                 else
                 {
@@ -692,16 +701,20 @@ namespace RainWorldDesktopPet.Graphics
             FillCircle(graphics, pose.Hips, 7.1 * pose.VisualHipsScale, Shade(pose.VisualHipsColor));
         }
 
-        private void DrawAtlasTorso(System.Drawing.Graphics graphics, SlugcatPose pose)
+        private void DrawAtlasBody(System.Drawing.Graphics graphics, SlugcatPose pose)
         {
             double bodyAngle = AimScreen(pose.Hips, pose.Chest);
             double verticality = MathUtil.InverseLerp(0.3, 0.5, Math.Abs(pose.BodyUp.Y));
             double bodyWidth = pose.VisualBodyScale + MathUtil.Lerp(-0.05, 0.05, pose.Breath) * verticality;
-            double hipsWidth = pose.VisualHipsScale + 0.05 * pose.Breath;
 
             Vec2 bodyPosition = pose.Chest + new Vec2(0.0, -0.5 * pose.Breath * (1.0 - verticality));
             DrawElement(graphics, pose.BodyElement, bodyPosition, bodyAngle, bodyWidth, 1.0,
                 0.5, 0.7894737, pose.VisualBodyColor, SelectTorsoSide(pose));
+        }
+
+        private void DrawAtlasHips(System.Drawing.Graphics graphics, SlugcatPose pose)
+        {
+            double hipsWidth = pose.VisualHipsScale + 0.05 * pose.Breath;
             Vec2 hipsPosition = (pose.Hips * 2.0 + pose.Chest) / 3.0;
             Vec2 tailTarget = pose.Tail.Length > 0 ? pose.Tail[0] : pose.Hips + (pose.Hips - pose.Chest);
             double hipsAngle = AimScreen(pose.Chest, tailTarget);
@@ -1569,26 +1582,27 @@ namespace RainWorldDesktopPet.Graphics
             Bitmap mask, Vec2 center, double rotation, double size, Color tint)
         {
             if (mask == null || size <= 0.0001 || tint.A <= 0) return;
-            GraphicsState state = graphics.Save();
-            try
-            {
-                graphics.TranslateTransform((float)center.X, (float)center.Y);
-                graphics.RotateTransform((float)rotation);
-                float half = (float)(size * 0.5);
-                effectDestinationPoints[0] = new PointF(-half, -half);
-                effectDestinationPoints[1] = new PointF(half, -half);
-                effectDestinationPoints[2] = new PointF(-half, half);
-                int quantizedAlpha = MathUtil.Clamp((int)Math.Round(tint.A / 8.0) * 8,
-                    0, 255);
-                Color quantized = Color.FromArgb(quantizedAlpha, tint.R, tint.G, tint.B);
-                graphics.DrawImage(mask, effectDestinationPoints,
-                    new RectangleF(0, 0, mask.Width, mask.Height), GraphicsUnit.Pixel,
-                    GetTintAttributes(quantized), null, 0);
-            }
-            finally
-            {
-                graphics.Restore(state);
-            }
+            // DrawImage accepts a parallelogram. Supplying the already-rotated
+            // world-space points avoids Save/Translate/Rotate/Restore for each
+            // smoke mask and light sprite, which was the hot path during rapid
+            // Artificer jumps without changing its three original sprites.
+            double radians = rotation * Math.PI / 180.0;
+            double cosine = Math.Cos(radians);
+            double sine = Math.Sin(radians);
+            double half = size * 0.5;
+            Vec2 topLeft = center + new Vec2(-half * cosine + half * sine,
+                -half * sine - half * cosine);
+            effectDestinationPoints[0] = topLeft.ToPointF();
+            effectDestinationPoints[1] = (topLeft + new Vec2(size * cosine,
+                size * sine)).ToPointF();
+            effectDestinationPoints[2] = (topLeft + new Vec2(-size * sine,
+                size * cosine)).ToPointF();
+            int quantizedAlpha = MathUtil.Clamp((int)Math.Round(tint.A / 8.0) * 8,
+                0, 255);
+            Color quantized = Color.FromArgb(quantizedAlpha, tint.R, tint.G, tint.B);
+            graphics.DrawImage(mask, effectDestinationPoints,
+                new RectangleF(0, 0, mask.Width, mask.Height), GraphicsUnit.Pixel,
+                GetTintAttributes(quantized), null, 0);
         }
 
         private static Color LerpColor(Color from, Color to, double amount)

@@ -157,12 +157,8 @@ namespace RainWorldDesktopPet.Creature
             {
                 state.BodyMode = BodyModeIndex.WallClimb;
                 state.Animation = AnimationIndex.None;
-                chest.Velocity.Y = MathUtil.MoveTowards(chest.Velocity.Y,
-                    -2.1 * movement.PoleClimbSpeedFactor,
-                    0.9 * movement.PoleClimbSpeedFactor);
-                hips.Velocity.Y = MathUtil.MoveTowards(hips.Velocity.Y,
-                    -1.8 * movement.PoleClimbSpeedFactor,
-                    0.8 * movement.PoleClimbSpeedFactor);
+                // Compatibility path: match Player's gravity-driven wall
+                // slide. There is no continuous upward movement in WallClimb.
                 chest.Velocity.X *= 0.5;
                 hips.Velocity.X *= 0.5;
             }

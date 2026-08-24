@@ -73,7 +73,7 @@ namespace RainWorldDesktopPet.Tests
             Run("Rain World locator validates an explicit installation", LocatorValidatesExplicitPath);
             Run("Required autonomous behavior states are present", RequiredBehaviorsExist);
             Run("Jump and DropDown utility states are reachable", UtilityActionsAreReachable);
-            Run("Wall contact reaches ClimbWindow through VirtualInput", WallContactReachesClimbMovement);
+            Run("Wall contact reaches gravity-driven WallClimb through VirtualInput", WallContactReachesClimbMovement);
             Run("WallClimb hands use alternating wall targets", WallClimbHandsTargetTheWall);
             Run("Sleep curl pulls both hands to the original target", SleepCurlHandsShareOriginalTarget);
             Run("Moving window walls carry a climbing Slugcat", MovingWindowWallCarriesClimber);
@@ -1108,8 +1108,8 @@ namespace RainWorldDesktopPet.Tests
             slugcat.Movement.ApplyInput(input, world);
             True(slugcat.State.BodyMode == BodyModeIndex.WallClimb,
                 "movement must interpret climb VirtualInput without direct AI movement");
-            True(slugcat.BodyChunks[0].Velocity.Y < 0.0 && slugcat.BodyChunks[1].Velocity.Y < 0.0,
-                "wall climb should produce upward screen-space velocity");
+            True(slugcat.BodyChunks[0].Velocity.Y >= 0.0 && slugcat.BodyChunks[1].Velocity.Y >= 0.0,
+                "wall slide must not inject upward screen-space velocity");
         }
 
         private static void OriginalFaceFrameSelection()

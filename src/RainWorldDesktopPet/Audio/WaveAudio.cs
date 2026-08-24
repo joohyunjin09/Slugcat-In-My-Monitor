@@ -66,6 +66,7 @@ namespace RainWorldDesktopPet.Audio
         {
             public MeowSoundVariation Variation;
             public bool Stop;
+            public int FadeOutMilliseconds;
         }
 
         private static int aliasCounter;
@@ -76,6 +77,7 @@ namespace RainWorldDesktopPet.Audio
         private readonly Thread worker;
         private SoundPlayer player;
         private string mciAlias;
+        private int mciVolume;
         private volatile string lastEvent = "none";
         private volatile bool stopping;
         private bool disposed;
@@ -120,6 +122,7 @@ namespace RainWorldDesktopPet.Audio
                     continue;
                 }
                 if (command.Stop) StopCore();
+                else if (command.FadeOutMilliseconds > 0) FadeOutCore(command.FadeOutMilliseconds);
                 else PlayCore(command.Variation);
             }
             StopCore();
@@ -141,6 +144,7 @@ namespace RainWorldDesktopPet.Audio
                 {
                     int volume = (int)Math.Round(Math.Max(0f, Math.Min(1f,
                         variation.PlaybackVolume)) * 1000f);
+                    mciVolume = volume;
                     MciSendString("setaudio " + mciAlias + " volume to " + volume,
                         null, 0, IntPtr.Zero);
                     int speed = (int)Math.Round(Math.Max(0.5f, Math.Min(2f,
@@ -193,6 +197,41 @@ namespace RainWorldDesktopPet.Audio
             commandSignal.Set();
         }
 
+        public void FadeOut(int milliseconds)
+        {
+            if (stopping || milliseconds <= 0) return;
+            lock (commandSync)
+            {
+                commands.Enqueue(new PlaybackCommand
+                {
+                    FadeOutMilliseconds = Math.Max(1, Math.Min(milliseconds, 250))
+                });
+            }
+            commandSignal.Set();
+        }
+
+        private void FadeOutCore(int milliseconds)
+        {
+            if (string.IsNullOrEmpty(mciAlias))
+            {
+                // SoundPlayer has no volume API; its only safe release is a
+                // stop. MCI is the normal path for the workshop WAV assets.
+                StopCore();
+                return;
+            }
+            const int steps = 6;
+            int delay = Math.Max(1, milliseconds / steps);
+            int startingVolume = mciVolume;
+            for (int step = 1; step <= steps && !stopping; step++)
+            {
+                int volume = startingVolume * (steps - step) / steps;
+                MciSendString("setaudio " + mciAlias + " volume to " + volume,
+                    null, 0, IntPtr.Zero);
+                Thread.Sleep(delay);
+            }
+            StopCore();
+        }
+
         private void StopCore()
         {
             if (!string.IsNullOrEmpty(mciAlias))
@@ -204,6 +243,7 @@ namespace RainWorldDesktopPet.Audio
                 }
                 catch (Exception) { }
                 mciAlias = null;
+                mciVolume = 0;
             }
             if (player == null) return;
             try { player.Stop(); }
