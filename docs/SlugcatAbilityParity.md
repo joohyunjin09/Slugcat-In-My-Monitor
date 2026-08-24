@@ -121,11 +121,11 @@ DesktopPetAI
 
 **Input Sequence:** `Jump + Pickup + Down`. 특수 버튼을 합성할 필요가 없는 현재 AI 경로는 원작 버튼 조합을 사용한다.
 
-**Counters:** counter가 safe 이하이면 +2, 아니면 +1. parry cooldown 40, jump cooldown 150. danger stun/death는 explosive jump와 동일하다.
+**Counters:** counter가 safe 이하이면 +2, 아니면 +1. parry cooldown 40, jump cooldown 150. 데스크톱에서는 counter를 capacity-1에서 고정하고 danger stun만 적용한다.
 
 **Physics Changes:** 공중이면 chest/hips Y-up 8/6 -> desktop -8/-6, `jumpBoost=6`, `pyroJumpped=true`.
 
-**Graphics:** jump VFX에 `ShockWave(size=200,intensity=0.2,life=6)` 추가.
+**Graphics:** 원작 parry에는 `ShockWave(size=200,intensity=0.2,life=6)`가 추가되지만, 데스크톱 빌드에서는 원형 충격파를 생성하거나 렌더하지 않는다.
 
 **SoundID:** `Fire_Spear_Explode`, jump와 같은 volume/pitch 호출식.
 
@@ -133,31 +133,31 @@ DesktopPetAI
 
 **Known Difference:** 데스크톱 런타임에는 주변 Rain World `Creature`와 thrown `Weapon` object graph가 없으므로 200/300 범위 stun·반사 목록은 비어 있다. 자기 BodyChunk, counter, cooldown, VFX, SoundID는 원본 분기 그대로 실행한다.
 
-### PyroDeath
+### Over-capacity desktop policy
 
 **Slugcat:** Artificer
 
-**Ability:** over-capacity death
+**Ability:** over-capacity safety cap
 
 **Original Classes:** `Player`, `Explosion`, `SootMark`, `ExplosionLight`, `ExplosionSpikes`, `ShockWave`, `Spark`, `Explosion.FlashingSmoke`
 
 **Original Methods:** `Player.PyroDeath`
 
-**Activation Condition:** `pyroJumpCounter >= capacity`.
+**Activation Condition:** repeated explosive-jump input.
 
 **Input Sequence:** 직접 입력 없음. 앞선 원작 explosive branch의 결과다.
 
-**Counters:** counter를 capacity에 고정하고 `Die()`.
+**Counters:** counter는 `capacity - 1`을 넘지 않는다. `Die()`와 PyroDeath는 호출하지 않는다.
 
-**Physics Changes:** 폭발 중심은 `Lerp(firstChunk.pos, firstChunk.lastPos, 0.35)`.
+**Physics Changes:** danger 구간에서는 기존 stun만 적용한다.
 
-**Graphics:** SootMark 80; Explosion life 7/radius 350; lights 280/7 및 230/3; 14 spikes/radius 170; shockwave 430/0.045/5; 25개 방향마다 Spark 3개(`11,28`, position 30-60, velocity 7-38 + RNV*0-20)와 FlashingSmoke를 생성한다.
+**Graphics:** over-capacity death VFX와 원형 충격파는 생성하지 않는다.
 
-**SoundID:** `Bomb_Explode`, volume 1, pitch 1.
+**SoundID:** death explosion sound is not emitted.
 
-**Desktop Implementation:** `ArtificerAbilityController.PyroDeath`.
+**Desktop Implementation:** `ArtificerAbilityController.ApplyOverheat`.
 
-**Known Difference:** Unity shader, screen shake, room noise와 피해 object graph는 GDI 데스크톱 렌더러에 없다. 객체 수·생성 tick·반경·수명·초기 속도와 SoundID는 유지한다.
+**Known Difference:** This is an intentional desktop-pet safety policy: repeated explosive jumps cannot kill the slugcat.
 
 **조사한 다른 Artificer 분기:** spear 폭발 crafting과 `MaulingUpdate`는 각각 Rain World food/grasp/abstract-object 및 creature graph가 필요하다. 가짜 아이템이나 가짜 생물을 만들지 않고 비활성으로 남긴다. Garbage Wastes story flag는 능력이 아니므로 제외한다.
 

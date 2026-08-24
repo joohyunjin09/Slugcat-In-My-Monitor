@@ -130,7 +130,7 @@ gain/pan/pitch 처리, WAV 작성과 `SoundPlayer.Load/Play`는 전용 worker가
 cache는 64개로 제한하고 loop stop/cancel을 동기화한다. 실패는 Debug/Trace에 SoundID,
 clip 및 이유를 명시한다. 실제 설치본 회귀 테스트는 `jump2` family를 bundle에서
 디코드하고 메인 호출이 100 ms 안에 반환한 뒤 playback-start 상태가 되는지 확인한다.
-스턴 ID는 실제 등록된 `UI_Slugcat_Stunned_Init`로 수정했다. jump 외에도 step,
+스턴 시작 UI SoundID는 데스크톱 런타임에서 호출하지 않는다. jump 외에도 step,
 terrain impact, floor-impact landing, Artificer explosion SoundID의 실제
 playback-start를 설치 bundle로 검증한다. 원작 코드가 호출하는
 `Slugcat_Regain_Footing`은 v1.11.8 `sounds.txt`에서 주석 처리되어 있어 임의 clip으로

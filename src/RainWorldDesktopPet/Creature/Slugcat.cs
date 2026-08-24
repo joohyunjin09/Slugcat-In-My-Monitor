@@ -227,7 +227,7 @@ namespace RainWorldDesktopPet.Creature
                         impact.CalculatedStun = originalCalculatedStun;
                         impact.WasOriginallyLethal = originallyLethal;
                         impact.AppliedStun = ApplyNonLethalTerrainImpactStun(
-                            originalCalculatedStun, originallyLethal);
+                            originalCalculatedStun);
                         impact.SafetyOverrideApplied = originallyLethal ||
                             impact.AppliedStun < originalCalculatedStun;
                         impact.DesktopResult = impact.AppliedStun >=
@@ -249,8 +249,7 @@ namespace RainWorldDesktopPet.Creature
             }
         }
 
-        private int ApplyNonLethalTerrainImpactStun(int originalCalculatedStun,
-            bool suppressLethalImpactStunSound)
+        private int ApplyNonLethalTerrainImpactStun(int originalCalculatedStun)
         {
             if (!impactStunEpisodeActive)
             {
@@ -265,18 +264,12 @@ namespace RainWorldDesktopPet.Creature
                 : (int)remainingLong;
             int applied = Math.Min(originalCalculatedStun,
                 Math.Min(SimulationConstants.MaxImpactStunTicks, remaining));
-            if (applied > 0) Stun(applied, suppressLethalImpactStunSound);
+            if (applied > 0) Stun(applied);
             return applied;
         }
 
         public void Stun(int ticks)
         {
-            Stun(ticks, false);
-        }
-
-        private void Stun(int ticks, bool suppressInitialSound)
-        {
-            bool beginsStun = ticks > 10 && State.StunCounter <= 10;
             if (ticks > State.StunCounter)
             {
                 State.StunCounter = ticks;
@@ -291,10 +284,6 @@ namespace RainWorldDesktopPet.Creature
                 State.Standing = false;
             }
             State.Conscious = !State.Dead && State.StunCounter < 10;
-            if (beginsStun && !suppressInitialSound)
-            {
-                EmitSound("UI_Slugcat_Stunned_Init", Center, 1.0, 1.0, 10);
-            }
         }
 
         public void Die()

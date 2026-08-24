@@ -2878,8 +2878,6 @@ namespace RainWorldDesktopPet.Tests
             for (int index = 0; index < highSounds.Length; index++)
             {
                 emittedHardImpact |= highSounds[index].Id == "Slugcat_Terrain_Impact_Hard";
-                True(highSounds[index].Id != "UI_Slugcat_Stunned_Init",
-                    "lethal-speed safety impact does not queue the death-like stun-init audio");
             }
             True(emittedHardImpact,
                 "lethal-speed safety impact retains the normal hard collision audio");

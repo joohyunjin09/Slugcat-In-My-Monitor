@@ -8,11 +8,7 @@ namespace RainWorldDesktopPet.Creature
 {
     public enum AbilityEffectKind
     {
-        Explosion,
         ExplosionLight,
-        ExplosionSpikes,
-        SootMark,
-        ShockWave,
         Smoke,
         FlashingSmoke,
         Spark,
@@ -71,12 +67,11 @@ namespace RainWorldDesktopPet.Creature
             get
             {
                 // Match each original CosmeticSprite's destruction check.
-                // Smoke checks lastLife <= 0, ExplosionLight checks lastLife < 0,
-                // and ShockWave checks lastLife > 1 after advancing.
+                // Smoke checks lastLife <= 0 and ExplosionLight checks
+                // lastLife < 0 in the original cosmetic-sprite lifecycle.
                 if (Kind == AbilityEffectKind.Smoke ||
                     Kind == AbilityEffectKind.FlashingSmoke) return LastLife > 0.0;
                 if (Kind == AbilityEffectKind.ExplosionLight) return LastLife >= 0.0;
-                if (Kind == AbilityEffectKind.ShockWave) return LastLife <= 1.0;
                 return Life > 0.0 && Lifetime > 0;
             }
         }
@@ -145,17 +140,6 @@ namespace RainWorldDesktopPet.Creature
             return effect;
         }
 
-        public static AbilityEffect CreateShockWave(Vec2 position, double radius,
-            double intensity, int lifeTime)
-        {
-            AbilityEffect effect = new AbilityEffect(AbilityEffectKind.ShockWave,
-                position, Vec2.Zero, lifeTime, radius);
-            effect.Intensity = intensity;
-            effect.Life = 0.0;
-            effect.LastLife = 0.0;
-            return effect;
-        }
-
         public void Step()
         {
             Step(null);
@@ -188,10 +172,6 @@ namespace RainWorldDesktopPet.Creature
                 Velocity.Y += Gravity;
                 Position += Velocity;
                 Life -= 1.0 / Math.Max(1.0, LifeTime);
-            }
-            else if (Kind == AbilityEffectKind.ShockWave)
-            {
-                Life += 1.0 / Math.Max(1.0, LifeTime);
             }
             else
             {
@@ -361,9 +341,10 @@ namespace RainWorldDesktopPet.Creature
             Owner.State.FlipFromSlide = false;
             Owner.State.BodyMode = BodyModeIndex.Default;
             Owner.State.Grounded = false;
-            explosiveJumpCounter++;
+            explosiveJumpCounter = Math.Min(MaximumOverheatCounter,
+                explosiveJumpCounter + 1);
             cooldown = 150;
-            EmitJumpEffects(false);
+            EmitJumpEffects();
             ApplyOverheat(dangerThreshold);
         }
 
@@ -380,14 +361,20 @@ namespace RainWorldDesktopPet.Creature
             }
             int safeThreshold = Math.Max(1, Capacity - 5);
             int dangerThreshold = Math.Max(1, Capacity - 3);
-            explosiveJumpCounter += explosiveJumpCounter <= safeThreshold ? 2 : 1;
+            explosiveJumpCounter = Math.Min(MaximumOverheatCounter,
+                explosiveJumpCounter + (explosiveJumpCounter <= safeThreshold ? 2 : 1));
             parryCooldown = 40;
             cooldown = 150;
-            EmitJumpEffects(true);
+            EmitJumpEffects();
             ApplyOverheat(dangerThreshold);
         }
 
-        private void EmitJumpEffects(bool parry)
+        private int MaximumOverheatCounter
+        {
+            get { return Math.Max(0, Capacity - 1); }
+        }
+
+        private void EmitJumpEffects()
         {
             Vec2 effectPosition = Owner.BodyChunks[0].Position;
             for (int i = 0; i < 8; i++)
@@ -404,11 +391,6 @@ namespace RainWorldDesktopPet.Creature
                     RandomUnit() * MathUtil.Lerp(4.0, 30.0, random.NextDouble()),
                     4, 18, random));
             }
-            if (parry)
-            {
-                Owner.AddEffect(AbilityEffect.CreateShockWave(effectPosition,
-                    200.0, 0.2, 6));
-            }
             Owner.EmitSound("Fire_Spear_Explode", effectPosition,
                 0.3 + random.NextDouble() * 0.3,
                 0.5 + random.NextDouble() * 2.0, 1);
@@ -418,61 +400,6 @@ namespace RainWorldDesktopPet.Creature
         {
             if (explosiveJumpCounter >= dangerThreshold)
                 Owner.Stun(60 * (explosiveJumpCounter - (dangerThreshold - 1)));
-            if (explosiveJumpCounter >= Capacity) PyroDeath();
-        }
-
-        private void PyroDeath()
-        {
-            explosiveJumpCounter = Capacity;
-            Vec2 deathPosition = Vec2.Lerp(Owner.BodyChunks[0].Position,
-                Owner.BodyChunks[0].LastPosition, 0.35);
-            Owner.AddEffect(new AbilityEffect(AbilityEffectKind.SootMark,
-                deathPosition, Vec2.Zero, 400, 80.0));
-            Owner.AddEffect(new AbilityEffect(AbilityEffectKind.Explosion,
-                deathPosition, Vec2.Zero, 7, 350.0));
-            Owner.AddEffect(AbilityEffect.CreateExplosionLight(deathPosition,
-                280.0, 1.0, 7));
-            Owner.AddEffect(AbilityEffect.CreateExplosionLight(deathPosition,
-                230.0, 1.0, 3));
-            Owner.AddEffect(new AbilityEffect(AbilityEffectKind.ExplosionSpikes,
-                deathPosition, Vec2.Zero, 7, 170.0));
-            Owner.AddEffect(AbilityEffect.CreateShockWave(deathPosition,
-                430.0, 0.045, 5));
-            for (int i = 0; i < 25; i++)
-            {
-                Vec2 direction = RandomUnit();
-                for (int j = 0; j < 3; j++)
-                {
-                    Vec2 at = deathPosition + direction *
-                        MathUtil.Lerp(30.0, 60.0, random.NextDouble());
-                    Vec2 sparkVelocity = direction *
-                        MathUtil.Lerp(7.0, 38.0, random.NextDouble()) +
-                        RandomUnit() * (20.0 * random.NextDouble());
-                    Owner.AddEffect(CreateSpark(at, sparkVelocity, 11, 28));
-                }
-                Vec2 smokePosition = deathPosition + direction *
-                    (40.0 * random.NextDouble());
-                Vec2 smokeVelocity = direction * MathUtil.Lerp(4.0, 20.0,
-                    Math.Pow(random.NextDouble(), 2.0));
-                AbilityEffect smoke = CreateSmoke(smokePosition, smokeVelocity,
-                    1.0 + 0.05 * random.NextDouble());
-                Owner.AddEffect(new AbilityEffect(AbilityEffectKind.FlashingSmoke,
-                    smoke.Position, smoke.Velocity, smoke.Lifetime, smoke.Radius));
-            }
-            Owner.EmitSound("Bomb_Explode", deathPosition, 1.0, 1.0, 1);
-            Owner.Die();
-        }
-
-        private AbilityEffect CreateSmoke(Vec2 at, Vec2 smokeVelocity, double size)
-        {
-            return AbilityEffect.CreateExplosionSmoke(at, smokeVelocity, size, random);
-        }
-
-        private AbilityEffect CreateSpark(Vec2 at, Vec2 sparkVelocity,
-            int standardLifetime, int exceptionalLifetime)
-        {
-            return AbilityEffect.CreateSpark(at, sparkVelocity, standardLifetime,
-                exceptionalLifetime, random);
         }
 
         private Vec2 RandomUnit()

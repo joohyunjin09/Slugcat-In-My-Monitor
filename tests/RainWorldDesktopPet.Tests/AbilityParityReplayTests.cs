@@ -70,6 +70,8 @@ namespace RainWorldDesktopPet.Tests
                 ArtificerExplosiveJumpReplay);
             run("Artificer down input follows the original parry counter branch",
                 ArtificerParryReplay);
+            run("Artificer repeated explosive jumps cap overheat without death",
+                ArtificerOverheatSafetyReplay);
             run("Artificer effects retain original smoke and light lifecycles",
                 ArtificerEffectLifecycleReplay);
             run("Spearmaster extraction creates the needle on original progress tick",
@@ -246,10 +248,36 @@ namespace RainWorldDesktopPet.Tests
                 (ArtificerAbilityController)slugcat.AbilityController;
             Equal(2, ability.ExplosiveJumpCounter, "safe parry adds two");
             Equal(40, ability.ParryCooldown, "parry cooldown");
-            True(HasEffect(slugcat, AbilityEffectKind.ShockWave),
-                "parry shockwave exists");
+            Equal(19, slugcat.AbilityEffects.Count,
+                "parry omits the circular shockwave effect");
             True(ContainsSound(replay[0].Sounds, "Fire_Spear_Explode"),
                 "parry sound event");
+        }
+
+        private static void ArtificerOverheatSafetyReplay()
+        {
+            DesktopCollisionWorld world = CreateAirWorld();
+            Slugcat slugcat = CreateAirSlugcat(SlugcatId.Artificer);
+            ArtificerAbilityController ability =
+                (ArtificerAbilityController)slugcat.AbilityController;
+            for (int jump = 0; jump < 20; jump++)
+            {
+                // A grounded update clears the original pyroJumpped gate.  The
+                // following airborne update invokes the same explosive-jump
+                // branch without waiting for a terrain simulation.
+                slugcat.State.Grounded = true;
+                ability.UpdateAfterMovement(VirtualInput.Neutral, world);
+                slugcat.State.Grounded = false;
+                slugcat.State.StunCounter = 0;
+                slugcat.State.Conscious = true;
+                VirtualInput explosiveJump = new VirtualInput(0, -1, true, true);
+                explosiveJump.ResolveEdges(VirtualInput.Neutral);
+                ability.UpdateAfterMovement(explosiveJump, world);
+            }
+            Equal(9, ability.ExplosiveJumpCounter,
+                "overheat counter remains below the original death capacity");
+            True(!slugcat.State.Dead,
+                "repeated explosive jumps cannot kill Artificer");
         }
 
         private static void ArtificerEffectLifecycleReplay()
@@ -288,8 +316,6 @@ namespace RainWorldDesktopPet.Tests
                     Near(0.0, effect.LastLife, 0.000001,
                         "ExplosionLight initializes lastLife at zero");
                 }
-                True(effect.Kind != AbilityEffectKind.ShockWave,
-                    "explosive jump does not create the parry-only ShockWave");
             }
             Equal(8, smokeCount, "ExplosionSmoke count");
             Equal(10, sparkCount, "Spark count");
@@ -328,14 +354,6 @@ namespace RainWorldDesktopPet.Tests
             True(!light.IsAlive,
                 "ExplosionLight expires on the original fifth update check");
 
-            AbilityEffect wave = AbilityEffect.CreateShockWave(Vec2.Zero,
-                200.0, 0.2, 6);
-            for (int tick = 0; tick < 7; tick++) wave.Step();
-            True(wave.IsAlive && wave.Life > 1.0,
-                "ShockWave keeps its final clamped draw while lastLife is one");
-            wave.Step();
-            True(!wave.IsAlive,
-                "ShockWave expires only after lastLife exceeds one");
         }
 
         private static void SpearmasterExtractionReplay()
@@ -852,8 +870,8 @@ namespace RainWorldDesktopPet.Tests
                 "tongue shot retains all original variants");
             Equal(2, catalog["SM_Spear_Pull"].Clips.Length,
                 "Spearmaster pull retains both variants");
-            True(catalog.ContainsKey("UI_Slugcat_Stunned_Init"),
-                "stun uses the active UI_Slugcat_Stunned_Init SoundID");
+            True(catalog.Count > 0,
+                "sound catalog remains available after disabled stun-init audio");
         }
 
         private static void LocalUnityFsAudioPlayback()

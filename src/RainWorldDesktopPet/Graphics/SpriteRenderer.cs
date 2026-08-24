@@ -71,7 +71,6 @@ namespace RainWorldDesktopPet.Graphics
         private long lastFireSmokePruneTick = long.MinValue;
         private readonly Bitmap flatLightShaderMask;
         private readonly Bitmap lightSourceShaderMask;
-        private readonly Bitmap shockWaveShaderMask;
         private const int TailRasterSize = 128;
         private const int FireSmokeShaderRasterSize = 128;
         private Vec2 effectWorldOrigin;
@@ -131,7 +130,6 @@ namespace RainWorldDesktopPet.Graphics
             }
             flatLightShaderMask = CreateEffectShaderMask(EffectShaderMask.FlatLight);
             lightSourceShaderMask = CreateEffectShaderMask(EffectShaderMask.LightSource);
-            shockWaveShaderMask = CreateEffectShaderMask(EffectShaderMask.ShockWave);
         }
 
         public string FireSmokeGpuStatus { get { return fireSmokeGpuStatus; } }
@@ -1419,20 +1417,7 @@ namespace RainWorldDesktopPet.Graphics
                 AbilityEffect effect = slugcat.AbilityEffects[i];
                 Vec2 position = Vec2.Lerp(effect.LastPosition, effect.Position, interpolation);
                 double life = MathUtil.Lerp(effect.LastLife, effect.Life, interpolation);
-                if (effect.Kind == AbilityEffectKind.ShockWave)
-                {
-                    double progress = MathUtil.Clamp01(life);
-                    double shaderScale = Math.Sqrt(progress) * effect.Radius / 8.0;
-                    Color shaderColor = Color.FromArgb(255,
-                        MathUtil.Clamp((int)Math.Round(255.0 *
-                            Math.Pow(progress, 0.1)), 0, 255),
-                        MathUtil.Clamp((int)Math.Round(255.0 *
-                            effect.Intensity), 0, 255),
-                        MathUtil.Clamp((int)Math.Round(255.0 * progress), 0, 255));
-                    DrawEffectShaderSprite(graphics, shockWaveShaderMask, position,
-                        0.0, shaderScale * 16.0, shaderColor);
-                }
-                else if (effect.Kind == AbilityEffectKind.ExplosionLight)
+                if (effect.Kind == AbilityEffectKind.ExplosionLight)
                 {
                     double rootLife = Math.Sqrt(Math.Max(0.0, life));
                     double shaderScale = rootLife * effect.Radius / 8.0;
@@ -1446,27 +1431,6 @@ namespace RainWorldDesktopPet.Graphics
                         0.0, size, Color.FromArgb(lightAlpha, 255, 255, 255));
                     DrawEffectShaderSprite(graphics, lightSourceShaderMask, position,
                         0.0, size, Color.FromArgb(lightAlpha, 255, 255, 255));
-                }
-                else if (effect.Kind == AbilityEffectKind.ExplosionSpikes)
-                {
-                    double progress = MathUtil.Clamp01(1.0 - life);
-                    double radius = effect.Radius * Math.Sin(progress * Math.PI * 0.5);
-                    using (Pen spikes = CreateRoundPen(Color.FromArgb(
-                        MathUtil.Clamp((int)(190 * life), 0, 255), 255, 255, 255), 1.4f))
-                    {
-                        for (int spike = 0; spike < 14; spike++)
-                        {
-                            Vec2 direction = new Vec2(Math.Cos(spike * Math.PI * 2.0 / 14.0),
-                                Math.Sin(spike * Math.PI * 2.0 / 14.0));
-                            graphics.DrawLine(spikes, (position + direction * 30.0).ToPointF(),
-                                (position + direction * radius).ToPointF());
-                        }
-                    }
-                }
-                else if (effect.Kind == AbilityEffectKind.SootMark)
-                {
-                    FillCircle(graphics, position, effect.Radius,
-                        Color.FromArgb(MathUtil.Clamp((int)(105 * life), 0, 105), 18, 18, 18));
                 }
                 else if (effect.Kind == AbilityEffectKind.Spark ||
                     effect.Kind == AbilityEffectKind.WaterDrip)
@@ -1585,8 +1549,7 @@ namespace RainWorldDesktopPet.Graphics
         private enum EffectShaderMask
         {
             FlatLight,
-            LightSource,
-            ShockWave
+            LightSource
         }
 
         private static Bitmap CreateEffectShaderMask(EffectShaderMask kind)
@@ -1605,8 +1568,6 @@ namespace RainWorldDesktopPet.Graphics
                         alpha = Math.Pow(Math.Max(0.0, 1.0 - radius), 2.0);
                     else if (kind == EffectShaderMask.FlatLight)
                         alpha = Math.Pow(Math.Max(0.0, 1.0 - radius), 0.65);
-                    else if (kind == EffectShaderMask.ShockWave)
-                        alpha = Math.Exp(-Math.Pow((radius - 0.76) / 0.055, 2.0));
                     else alpha = 0.0;
                     int a = MathUtil.Clamp((int)Math.Round(alpha * 255.0), 0, 255);
                     mask.SetPixel(x, y, Color.FromArgb(a, 255, 255, 255));
@@ -1962,7 +1923,6 @@ namespace RainWorldDesktopPet.Graphics
             if (fireSmokeAssets != null) fireSmokeAssets.Dispose();
             flatLightShaderMask.Dispose();
             lightSourceShaderMask.Dispose();
-            shockWaveShaderMask.Dispose();
             debugFont.Dispose();
             foreach (KeyValuePair<int, ImageAttributes> item in tintAttributes)
             {
