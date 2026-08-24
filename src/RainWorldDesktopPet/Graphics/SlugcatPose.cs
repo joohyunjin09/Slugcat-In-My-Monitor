@@ -122,9 +122,12 @@ namespace RainWorldDesktopPet.Graphics
         public double LandingCompression;
         public Vec2 CharacterOrigin;
         public double CharacterRenderScale = SimulationConstants.CharacterRenderScale;
+        public SlugcatId SelectedSlugcat;
         public SlugcatSkin CurrentSkin;
         public string OriginalSlugcatId = "White";
         public string VisualProfileName = "Default";
+        public string MovementProfileDebug = string.Empty;
+        public string AbilityDebug = string.Empty;
         public int BaseSpriteCount = 12;
         public int ExtraSpriteCount;
         public string GraphicsExtensions = "none";

@@ -16,7 +16,7 @@ namespace RainWorldDesktopPet.Graphics
         private readonly BodyPart head;
         private readonly BodyPart legs;
         private ProceduralTail tail;
-        private SlugcatVisualProfile visualProfile;
+        private SlugcatGraphicsProfile graphicsProfile;
         private ISlugcatGraphicsExtension[] extensions;
         private RainWorldAtlasSet atlas;
         private readonly SlugcatPose renderPose;
@@ -35,15 +35,18 @@ namespace RainWorldDesktopPet.Graphics
         private double lastBreath;
         private int blink;
         private double airborneCounter;
+        private double spearDirection;
+        private bool leftFoot;
+        private int previousAnimationFrame;
         private readonly Dictionary<string, Color> partColors =
             new Dictionary<string, Color>(StringComparer.OrdinalIgnoreCase);
 
         public SlugcatGraphics(Slugcat slugcat)
-            : this(slugcat, SlugcatVisualProfiles.Default, null)
+            : this(slugcat, slugcat.SelectedSlugcat.Graphics, null)
         {
         }
 
-        public SlugcatGraphics(Slugcat slugcat, SlugcatVisualProfile profile,
+        public SlugcatGraphics(Slugcat slugcat, SlugcatGraphicsProfile profile,
             RainWorldAtlasSet atlas)
         {
             this.slugcat = slugcat;
@@ -58,24 +61,31 @@ namespace RainWorldDesktopPet.Graphics
             arms[0] = new Limb(LimbKind.Arm, -1, chest + new Vec2(-4.0, 8.0), 20.0);
             arms[1] = new Limb(LimbKind.Arm, 1, chest + new Vec2(4.0, 8.0), 20.0);
             renderPose = new SlugcatPose();
-            SetVisualProfile(profile ?? SlugcatVisualProfiles.Default, atlas);
+            SetGraphicsProfile(profile ?? SlugcatGraphicsProfiles.White, atlas);
         }
 
         public ProceduralTail Tail { get { return tail; } }
         public Limb[] Arms { get { return arms; } }
         public BodyPart Legs { get { return legs; } }
         public BodyPart Head { get { return head; } }
-        public SlugcatVisualProfile VisualProfile { get { return visualProfile; } }
+        public SlugcatGraphicsProfile GraphicsProfile { get { return graphicsProfile; } }
+        public SlugcatVisualProfile VisualProfile
+        {
+            get { return SlugcatVisualProfiles.FromGraphics(graphicsProfile); }
+        }
         public ISlugcatGraphicsExtension[] Extensions { get { return extensions; } }
 
         public Color GetPartColor(string part)
         {
             Color color;
             if (partColors.TryGetValue(part, out color)) return color;
-            Color body = visualProfile.ResolveBodyColor(slugcat.Appearance);
+            SlugcatVisualProfile compatibility =
+                SlugcatVisualProfiles.FromGraphics(graphicsProfile);
+            Color body = compatibility != null
+                ? compatibility.ResolveBodyColor(slugcat.Appearance)
+                : graphicsProfile.BodyColor;
             return string.Equals(part, "Face", StringComparison.OrdinalIgnoreCase)
-                ? visualProfile.EyeColor
-                : body;
+                ? graphicsProfile.EyeColor : body;
         }
 
         public void SetPartColor(string part, Color color)
@@ -89,11 +99,11 @@ namespace RainWorldDesktopPet.Graphics
             partColors.Clear();
         }
 
-        public void SetVisualProfile(SlugcatVisualProfile profile, RainWorldAtlasSet sourceAtlas)
+        public void SetGraphicsProfile(SlugcatGraphicsProfile profile, RainWorldAtlasSet sourceAtlas)
         {
             if (profile == null) throw new ArgumentNullException("profile");
             ProceduralTail previous = tail;
-            visualProfile = profile;
+            graphicsProfile = profile;
             atlas = sourceAtlas;
             tail = new ProceduralTail(slugcat.BodyChunks[1].Position, profile.Tail);
             if (previous != null && previous.Segments.Length == tail.Segments.Length)
@@ -116,6 +126,11 @@ namespace RainWorldDesktopPet.Graphics
             for (int i = 0; i < extensions.Length; i++) extraCount += extensions[i].SpriteCount;
             renderPose.ExtraParts = new ExtraGraphicsPartPose[extraCount];
             for (int i = 0; i < extraCount; i++) renderPose.ExtraParts[i] = new ExtraGraphicsPartPose();
+        }
+
+        public void SetVisualProfile(SlugcatVisualProfile profile, RainWorldAtlasSet sourceAtlas)
+        {
+            SetGraphicsProfile(profile, sourceAtlas);
         }
 
         // Called after Player/PhysicalObject update, matching GraphicsModule.Update.
@@ -156,6 +171,17 @@ namespace RainWorldDesktopPet.Graphics
             blink = Math.Max(blink, slugcat.State.ImpactBlinkTicks);
             lastLegsDirection = legsDirection;
 
+            if (slugcat.State.BodyMode == BodyModeIndex.Stand && slugcat.LastInput.X != 0)
+                spearDirection = MathUtil.Clamp(
+                    spearDirection + slugcat.LastInput.X * 0.1, -1.0, 1.0);
+            else
+                spearDirection = MathUtil.MoveTowards(spearDirection, 0.0, 0.05);
+            if (slugcat.State.BodyMode == BodyModeIndex.Stand &&
+                slugcat.LastInput.X != 0 && slugcat.State.AnimationFrame == 0 &&
+                previousAnimationFrame > 0)
+                leftFoot = !leftFoot;
+            previousAnimationFrame = slugcat.State.AnimationFrame;
+
             for (int i = 0; i < 2; i++)
             {
                 drawPositions[i, 1] = drawPositions[i, 0];
@@ -192,6 +218,23 @@ namespace RainWorldDesktopPet.Graphics
             tail.Step(upper, lower, slugcat.BodyChunks[1].Velocity,
                 slugcat.State.Facing, slugcat.State.BodyMode, world);
 
+            SpearmasterAbilityController extraction =
+                slugcat.AbilityController as SpearmasterAbilityController;
+            if (extraction != null)
+            {
+                if (tail.Segments.Length > 2)
+                {
+                    extraction.SetTailNeedlePosition(tail.Segments[2].Position);
+                    for (int i = 0; i < slugcat.Spears.Count; i++)
+                    {
+                        if (slugcat.Spears[i].NeedleHasConnection)
+                            slugcat.Spears[i].SetConnectionAnchor(
+                                tail.Segments[2].Position);
+                    }
+                }
+                head.Velocity += extraction.ConsumeGraphicsHeadImpulse();
+                if (extraction.SpearProgress > 0.1) blink = Math.Max(blink, 5);
+            }
             head.Update();
             world.PushOutOfTerrain(head, slugcat.BodyChunks[0].Position);
             Vec2 neckDirection = bodyUp * 3.0;
@@ -229,6 +272,69 @@ namespace RainWorldDesktopPet.Graphics
                     slugcat.BodyChunks[1].Position, slugcat.BodyChunks[0].Velocity,
                     world, i == 0 ? null : arms[0], airborneCounter);
             }
+            SpearmasterAbilityController spearAbility = extraction;
+            if (spearAbility != null && spearAbility.HeldSpear != null)
+            {
+                int hand = spearAbility.HeldHand;
+                if (!arms[hand].MovementEngagedThisTick &&
+                    slugcat.State.Animation != AnimationIndex.Sleep)
+                {
+                    Vec2 relative = new Vec2(-20.0 + 40.0 * hand, 12.0);
+                    if (spearDirection != 0.0 &&
+                        slugcat.State.BodyMode == BodyModeIndex.Stand)
+                    {
+                        Vec2 standingTarget = DegreesToScreenDirection(
+                            180.0 + (hand == 0 ? -1.0 : 1.0) * 8.0 +
+                            slugcat.LastInput.X * 4.0) * 12.0;
+                        double frameCycle = slugcat.State.AnimationFrame / 6.0 *
+                            Math.PI * 2.0;
+                        standingTarget.Y -= Math.Sin(frameCycle) * 2.0;
+                        standingTarget.X -= Math.Cos(
+                            (slugcat.State.AnimationFrame + (!leftFoot ? 6 : 0)) /
+                            12.0 * Math.PI * 2.0) * 4.0 * slugcat.LastInput.X;
+                        standingTarget.X += slugcat.LastInput.X * 2.0;
+                        relative = Vec2.Lerp(relative, standingTarget,
+                            Math.Abs(spearDirection));
+                    }
+                    arms[hand].Mode = LimbMode.HuntRelativePosition;
+                    arms[hand].RelativeHuntPosition = relative;
+                    arms[hand].GripSurfaceId = 0;
+                    arms[hand].RetractCounter = Math.Max(0,
+                        arms[hand].RetractCounter - 10);
+                }
+
+                Vec2 heldDirection = GetHeldSpearDirection(
+                    spearAbility.HeldSpear, hand);
+                if (slugcat.State.BodyMode == BodyModeIndex.Stand)
+                {
+                    spearAbility.HeldSpear.SetOverlap(
+                        (spearDirection > -0.4 && hand == 0) ||
+                        (spearDirection < 0.4 && hand == 1));
+                }
+                spearAbility.HeldSpear.HoldAt(arms[hand].End.Position,
+                    heldDirection, arms[hand].End.Velocity);
+                spearAbility.HeldSpear.SetConnectionAnchor(
+                    tail.Segments.Length > 2 ? tail.Segments[2].Position :
+                    slugcat.BodyChunks[1].Position);
+            }
+            else if (spearAbility != null && spearAbility.ThrowFollowTicks > 0 &&
+                spearAbility.ThrownSpear != null && slugcat.State.Conscious)
+            {
+                int hand = spearAbility.HeldHand;
+                DesktopSpear thrown = spearAbility.ThrownSpear;
+                arms[hand].Mode = LimbMode.HuntAbsolutePosition;
+                arms[hand].AbsoluteHuntPosition = thrown.Chunk.Position;
+                arms[hand].GripSurfaceId = 0;
+                Vec2 direction = MathUtil.Direction(
+                    arms[hand].End.Position, thrown.Chunk.Position);
+                if (Vec2.Distance(arms[hand].End.Position,
+                    thrown.Chunk.Position) < 40.0)
+                    arms[hand].End.Position = thrown.Chunk.Position;
+                else
+                    arms[hand].End.Velocity += direction * 6.0;
+                arms[1 - hand].End.Velocity -= direction * 3.0;
+                spearAbility.AdvanceThrowFollowThrough();
+            }
             if (slugcat.State.Animation == AnimationIndex.Sleep)
             {
                 Vec2 center = (upper + lower) * 0.5;
@@ -238,6 +344,45 @@ namespace RainWorldDesktopPet.Graphics
             }
             for (int i = 0; i < extensions.Length; i++)
                 extensions[i].Step(slugcat, lookDirection);
+        }
+
+        private Vec2 GetHeldSpearDirection(DesktopSpear spear, int hand)
+        {
+            Vec2 direction = MathUtil.Direction(
+                slugcat.BodyChunks[0].Position, spear.Chunk.Position) *
+                (hand == 0 ? -1.0 : 1.0);
+            if (slugcat.State.Animation != AnimationIndex.HangFromBeam)
+                direction = -direction.Perpendicular;
+            if (slugcat.State.BodyMode == BodyModeIndex.Crawl)
+            {
+                direction = MathUtil.Direction(slugcat.BodyChunks[1].Position,
+                    Vec2.Lerp(spear.Chunk.Position,
+                        slugcat.BodyChunks[0].Position, 0.8));
+            }
+            else if (slugcat.State.Animation == AnimationIndex.ClimbOnBeam)
+            {
+                direction.Y = -Math.Abs(direction.Y);
+                direction = MathUtil.SlerpDirection(direction,
+                    MathUtil.Direction(slugcat.BodyChunks[1].Position,
+                        slugcat.BodyChunks[0].Position), 0.75);
+            }
+            else
+            {
+                double phase = (slugcat.State.AnimationFrame + (leftFoot ? 9 : 3)) /
+                    12.0 * Math.PI * 2.0;
+                double degrees = (80.0 + Math.Cos(phase) * 4.0 * spearDirection) *
+                    spearDirection;
+                direction = MathUtil.SlerpDirection(direction,
+                    DegreesToScreenDirection(degrees), Math.Abs(spearDirection));
+            }
+            return direction.LengthSquared > 0.000001
+                ? direction.Normalized : new Vec2(slugcat.State.Facing, 0.0);
+        }
+
+        private static Vec2 DegreesToScreenDirection(double degrees)
+        {
+            double radians = degrees * Math.PI / 180.0;
+            return new Vec2(Math.Sin(radians), -Math.Cos(radians));
         }
 
         private void ApplyOriginalBodyModeOffsets()
@@ -289,20 +434,31 @@ namespace RainWorldDesktopPet.Graphics
 
         public SlugcatPose BuildPose(double interpolation, AttentionSystem attention, long simulationTick)
         {
+            return BuildPose(interpolation, attention, simulationTick, true);
+        }
+
+        public SlugcatPose BuildPose(double interpolation, AttentionSystem attention,
+            long simulationTick, bool includeDebugText)
+        {
             double timeStacker = MathUtil.Clamp01(interpolation);
             SlugcatPose pose = renderPose;
             pose.SimulationTick = simulationTick;
             pose.TimeStacker = timeStacker;
-            pose.CurrentSkin = visualProfile.Skin;
-            pose.OriginalSlugcatId = visualProfile.ResolveOriginalSlugcatId(slugcat.Appearance);
-            pose.VisualProfileName = visualProfile.DisplayName;
-            pose.BaseSpriteCount = visualProfile.BaseSpriteCount;
-            pose.ExtraSpriteCount = visualProfile.ExtraSpriteCount;
-            pose.GraphicsExtensions = visualProfile.ExtensionNames.Length == 0
-                ? "none"
-                : string.Join(", ", visualProfile.ExtensionNames);
-            pose.TailProfileName = visualProfile.Tail.Name;
-            pose.TailRootRadius = visualProfile.Tail.RootRadius;
+            pose.SelectedSlugcat = slugcat.SelectedSlugcat.Id;
+            SlugcatVisualProfile compatibilityProfile =
+                SlugcatVisualProfiles.FromGraphics(graphicsProfile);
+            pose.CurrentSkin = compatibilityProfile.Skin;
+            pose.OriginalSlugcatId = compatibilityProfile.ResolveOriginalSlugcatId(
+                slugcat.Appearance);
+            pose.VisualProfileName = graphicsProfile.DisplayName;
+            pose.BaseSpriteCount = graphicsProfile.BaseSpriteCount;
+            pose.ExtraSpriteCount = graphicsProfile.ExtraSpriteCount;
+            pose.GraphicsExtensions = includeDebugText
+                ? (graphicsProfile.ExtensionNames.Length == 0
+                    ? "none" : string.Join(", ", graphicsProfile.ExtensionNames))
+                : string.Empty;
+            pose.TailProfileName = graphicsProfile.Tail.Name;
+            pose.TailRootRadius = graphicsProfile.Tail.RootRadius;
             pose.VisualBodyColor = GetPartColor("Body");
             pose.VisualEyeColor = GetPartColor("Face");
             pose.VisualHeadColor = GetPartColor("Head");
@@ -310,12 +466,26 @@ namespace RainWorldDesktopPet.Graphics
             pose.VisualHipsColor = GetPartColor("Hips");
             pose.VisualLegsColor = GetPartColor("Legs");
             pose.VisualTailColor = GetPartColor("Tail");
-            pose.BodyElement = visualProfile.BodyElement;
-            pose.HipsElement = visualProfile.HipsElement;
-            pose.VisualBodyScale = visualProfile.ResolveBodyScale(slugcat.Appearance);
-            pose.VisualHipsScale = visualProfile.ResolveHipsScale(slugcat.Appearance);
-            pose.VisualHeadScale = visualProfile.HeadScale;
-            pose.ArmShoulderScale = visualProfile.ArmShoulderScale;
+            pose.BodyElement = graphicsProfile.BodyElement;
+            pose.HipsElement = graphicsProfile.HipsElement;
+            pose.VisualBodyScale = compatibilityProfile.ResolveBodyScale(slugcat.Appearance);
+            pose.VisualHipsScale = compatibilityProfile.ResolveHipsScale(slugcat.Appearance);
+            pose.VisualHeadScale = graphicsProfile.HeadScale;
+            pose.ArmShoulderScale = graphicsProfile.ArmShoulderScale;
+            if (includeDebugText)
+            {
+                pose.MovementProfileDebug = string.Format("run:{0:0.##} weight:{1:0.##} throw:{2:0.##} pole:{3:0.##} corridor:{4:0.##}",
+                    slugcat.SelectedSlugcat.Movement.RunSpeedFactor,
+                    slugcat.SelectedSlugcat.Movement.BodyWeightFactor,
+                    slugcat.SelectedSlugcat.Movement.ThrowingSkill,
+                    slugcat.SelectedSlugcat.Movement.PoleClimbSpeedFactor,
+                    slugcat.SelectedSlugcat.Movement.CorridorClimbSpeedFactor);
+                pose.AbilityDebug = slugcat.AbilityController.DebugState;
+            }
+            else
+            {
+                pose.MovementProfileDebug = pose.AbilityDebug = string.Empty;
+            }
             for (int i = 0; i < 2; i++)
             {
                 pose.ChunkLast[i] = slugcat.BodyChunks[i].LastPosition;
@@ -348,7 +518,7 @@ namespace RainWorldDesktopPet.Graphics
             pose.BodyMode = slugcat.State.BodyMode;
             pose.AnimationFrame = slugcat.State.AnimationFrame;
             pose.InputX = slugcat.LastInput.X;
-            VirtualInput[] inputHistory = slugcat.Movement.InputHistory;
+            VirtualInput[] inputHistory = slugcat.Movement.InputHistoryForRead;
             pose.PreviousInputX = inputHistory[1].X;
             pose.InputY = slugcat.LastInput.Y;
             pose.InputJump = slugcat.LastInput.Jump;

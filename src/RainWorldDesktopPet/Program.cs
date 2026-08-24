@@ -6,7 +6,6 @@ using RainWorldDesktopPet.Desktop;
 using RainWorldDesktopPet.RainWorld;
 using RainWorldDesktopPet.UI;
 using RainWorldDesktopPet.Creature;
-using RainWorldDesktopPet.Graphics;
 
 namespace RainWorldDesktopPet
 {
@@ -45,9 +44,10 @@ namespace RainWorldDesktopPet
                 }
 
                 bool debug = HasFlag(args, "--debug");
-                SlugcatVariant variant = ReadVariant(ReadOption(args, "--slugcat"));
-                SlugcatSkin skin = ReadSkin(ReadOption(args, "--skin"));
-                Application.Run(new LayeredOverlayWindow(installation, debug, variant, skin));
+                SlugcatId selectedSlugcat = ReadSlugcat(ReadOption(args, "--slugcat"));
+                string dmsSkin = ReadOption(args, "--dms-skin");
+                Application.Run(new LayeredOverlayWindow(installation, debug,
+                    selectedSlugcat, dmsSkin));
             }
         }
 
@@ -55,7 +55,7 @@ namespace RainWorldDesktopPet
         {
             MessageBox.Show(
                 "Rain World 설치 경로를 자동으로 찾지 못했습니다. 다음 창에서 RainWorld.exe가 있는 폴더를 선택해 주세요.",
-                "SlugcatInMyMonitor", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                "Slugcat in My Monitor", MessageBoxButtons.OK, MessageBoxIcon.Information);
             using (FolderBrowserDialog dialog = new FolderBrowserDialog())
             {
                 dialog.Description = "Rain World installation folder";
@@ -90,23 +90,11 @@ namespace RainWorldDesktopPet
             return false;
         }
 
-        private static SlugcatVariant ReadVariant(string value)
+        private static SlugcatId ReadSlugcat(string value)
         {
-            if (string.IsNullOrWhiteSpace(value)) return SlugcatVariant.Survivor;
-            if (value.Equals("yellow", StringComparison.OrdinalIgnoreCase) || value.Equals("monk", StringComparison.OrdinalIgnoreCase))
-                return SlugcatVariant.Monk;
-            if (value.Equals("red", StringComparison.OrdinalIgnoreCase) || value.Equals("hunter", StringComparison.OrdinalIgnoreCase))
-                return SlugcatVariant.Hunter;
-            if (value.Equals("gourmand", StringComparison.OrdinalIgnoreCase))
-                return SlugcatVariant.Gourmand;
-            return SlugcatVariant.Survivor;
-        }
-
-        private static SlugcatSkin ReadSkin(string value)
-        {
-            if (string.IsNullOrWhiteSpace(value)) return SlugcatSkin.Default;
-            SlugcatSkin result;
-            return Enum.TryParse(value, true, out result) ? result : SlugcatSkin.Default;
+            SlugcatId result;
+            return !string.IsNullOrWhiteSpace(value) && SlugcatProfiles.TryParse(value, out result)
+                ? result : SlugcatId.White;
         }
 
         public static void LogException(Exception exception)

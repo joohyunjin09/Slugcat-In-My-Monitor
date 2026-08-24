@@ -1,75 +1,94 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Drawing;
-using System.Drawing.Imaging;
-using System.Runtime.InteropServices;
 using System.Windows.Forms;
 using RainWorldDesktopPet.Core;
 using RainWorldDesktopPet.Desktop;
 using RainWorldDesktopPet.Graphics;
+using RainWorldDesktopPet.Physics;
 using RainWorldDesktopPet.RainWorld;
 using RainWorldDesktopPet.Creature;
+using RainWorldDesktopPet.Workshop;
 
 namespace RainWorldDesktopPet.UI
 {
     public sealed class LayeredOverlayWindow : Form
     {
         private const int MaximumSlugcats = 8;
+        private const int DefaultRenderFramesPerSecond = 60;
+        private const int DefaultRenderIntervalMilliseconds =
+            (1000 + DefaultRenderFramesPerSecond - 1) / DefaultRenderFramesPerSecond;
+        private const int MinimumOverlaySize = 384;
+        private const int OverlaySizeQuantum = 128;
+        private const int OverlayPadding = 24;
         private readonly RainWorldInstallation installation;
-        private readonly SlugcatVariant startVariant;
-        private readonly SlugcatSkin startSkin;
+        private readonly SlugcatId startSlugcat;
         private readonly Timer renderTimer;
         private readonly NotifyIcon trayIcon;
         private readonly Icon applicationIcon;
-        private readonly ToolStripMenuItem variantMenu;
-        private readonly ToolStripMenuItem visualSkinMenu;
+        private readonly ToolStripMenuItem slugcatMenu;
+        private readonly ToolStripMenuItem refreshWorkshopItem;
         private readonly ToolStripMenuItem debugItem;
         private readonly ToolStripMenuItem retryRenderItem;
-        private readonly ToolStripMenuItem skinEditorItem;
         private readonly ToolStripMenuItem pauseItem;
-        private readonly ToolStripMenuItem slugcatsMenu;
+        private readonly ToolStripMenuItem activeSlugcatsMenu;
         private readonly ToolStripMenuItem spawnItem;
         private readonly ToolStripMenuItem removeItem;
+        private readonly ToolStripMenuItem skinEditorItem;
         private readonly List<GameLoop> gameLoops = new List<GameLoop>();
-        private LayeredBackBuffer backBuffer;
+        private readonly SlugcatPose[] poseBuffer = new SlugcatPose[MaximumSlugcats];
+        private readonly DirectCompositionHost.GpuSmokeEffect[] smokeEffectBuffer =
+            new DirectCompositionHost.GpuSmokeEffect[256];
+        private readonly List<Rectangle> surfaceBoundsBuffer =
+            new List<Rectangle>(MaximumSlugcats);
+        private readonly CompositionBatchPlanner compositionBatchPlanner =
+            new CompositionBatchPlanner();
+        private readonly Dictionary<string, double> displayRefreshRates =
+            new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
+        private readonly DesktopCollisionWorld collisionWorld =
+            new DesktopCollisionWorld(new WindowEnumerator());
+        private readonly Stopwatch surfaceRefreshClock = Stopwatch.StartNew();
+        private DirectCompositionHost compositionHost;
+        private readonly string startDmsSkinId;
         private GameLoop gameLoop;
         private GameLoop grabbedGameLoop;
         private SettingsWindow settingsWindow;
         private SkinEditorWindow skinEditor;
-        private Rectangle overlayBounds;
-        private RenderSpace renderSpace;
+        private Rectangle virtualDesktopBounds;
         private bool mouseCaptured;
+        private bool leftButtonDown;
         private int renderErrorCount;
         private bool renderingEnabled;
         private bool renderingFrame;
         private double displayRefreshRate;
 
-        public LayeredOverlayWindow(RainWorldInstallation installation, bool startDebug, SlugcatVariant startVariant)
-            : this(installation, startDebug, startVariant, SlugcatSkin.Default)
+        public LayeredOverlayWindow(RainWorldInstallation installation, bool startDebug,
+            SlugcatId startSlugcat)
+            : this(installation, startDebug, startSlugcat, null)
         {
         }
 
         public LayeredOverlayWindow(RainWorldInstallation installation, bool startDebug,
-            SlugcatVariant startVariant, SlugcatSkin startSkin)
+            SlugcatId startSlugcat, string startDmsSkinId)
         {
             this.installation = installation;
-            this.startVariant = startVariant;
-            this.startSkin = startSkin;
+            this.startSlugcat = startSlugcat;
+            this.startDmsSkinId = startDmsSkinId;
             FormBorderStyle = FormBorderStyle.None;
             ShowInTaskbar = false;
             TopMost = true;
             StartPosition = FormStartPosition.Manual;
-            overlayBounds = MonitorManager.GetVirtualBounds();
-            Bounds = overlayBounds;
-            renderSpace = new RenderSpace(overlayBounds);
+            virtualDesktopBounds = MonitorManager.GetVirtualBounds();
+            Bounds = virtualDesktopBounds;
             Text = "SlugcatInMyMonitor";
             applicationIcon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
             if (applicationIcon != null) Icon = applicationIcon;
 
             renderTimer = new Timer();
-            // This timer is only an error-retry/fallback wakeup. Normal frames
-            // are paced by DWM composition from Application.Idle.
-            renderTimer.Interval = 250;
+            // Start conservatively, then follow the refresh rate of the
+            // monitor(s) occupied by active Slugcats after the first frame.
+            renderTimer.Interval = DefaultRenderIntervalMilliseconds;
             renderTimer.Tick += RenderTimerTick;
 
             ContextMenuStrip menu = new ContextMenuStrip();
@@ -82,6 +101,7 @@ namespace RainWorldDesktopPet.UI
             {
                 for (int i = 0; i < gameLoops.Count; i++)
                     gameLoops[i].DebugEnabled = debugItem.Checked;
+                if (compositionHost != null) compositionHost.ResetSurfaces();
                 RefreshSettingsWindow();
             };
             pauseItem = new ToolStripMenuItem("Pause All Slugcats");
@@ -99,36 +119,34 @@ namespace RainWorldDesktopPet.UI
             skinEditorItem.Click += ToggleSkinEditor;
             ToolStripMenuItem exitItem = new ToolStripMenuItem("Exit");
             exitItem.Click += delegate { Close(); };
-            variantMenu = new ToolStripMenuItem("Character and Base Color");
-            variantMenu.DropDownItems.Add(CreateVariantItem("Survivor (White)", SlugcatVariant.Survivor, startVariant));
-            variantMenu.DropDownItems.Add(CreateVariantItem("Monk (Yellow)", SlugcatVariant.Monk, startVariant));
-            variantMenu.DropDownItems.Add(CreateVariantItem("Hunter (Red)", SlugcatVariant.Hunter, startVariant));
-            variantMenu.DropDownItems.Add(CreateVariantItem("Gourmand", SlugcatVariant.Gourmand, startVariant));
-            visualSkinMenu = new ToolStripMenuItem("Visual Skin (Experimental)");
-            visualSkinMenu.DropDownItems.Add(CreateSkinItem("Default", SlugcatSkin.Default, startSkin));
-            visualSkinMenu.DropDownItems.Add(CreateSkinItem("Artificer", SlugcatSkin.Artificer, startSkin));
-            visualSkinMenu.DropDownItems.Add(CreateSkinItem("Spearmaster", SlugcatSkin.Spearmaster, startSkin));
-            visualSkinMenu.DropDownItems.Add(CreateSkinItem("Rivulet", SlugcatSkin.Rivulet, startSkin));
-            visualSkinMenu.DropDownItems.Add(CreateSkinItem("Saint", SlugcatSkin.Saint, startSkin));
-            slugcatsMenu = new ToolStripMenuItem("Slugcats");
+            slugcatMenu = new ToolStripMenuItem("Character and Ability");
+            for (int i = 0; i < SlugcatProfiles.All.Count; i++)
+            {
+                SlugcatProfile profile = SlugcatProfiles.All[i];
+                slugcatMenu.DropDownItems.Add(CreateSlugcatItem(
+                    SlugcatProfiles.SelectionLabel(profile.Id), profile.Id, startSlugcat));
+            }
+            refreshWorkshopItem = new ToolStripMenuItem("Refresh Workshop mods");
+            refreshWorkshopItem.Click += RefreshWorkshopItemClick;
+            activeSlugcatsMenu = new ToolStripMenuItem("Slugcats");
             spawnItem = new ToolStripMenuItem("Add Slugcat");
             spawnItem.Click += SpawnSlugcat;
             ToolStripMenuItem nextItem = new ToolStripMenuItem("Select Next Slugcat");
             nextItem.Click += SelectNextSlugcat;
             removeItem = new ToolStripMenuItem("Remove Selected Slugcat");
             removeItem.Click += RemoveSelectedSlugcat;
-            slugcatsMenu.DropDownItems.Add(spawnItem);
-            slugcatsMenu.DropDownItems.Add(nextItem);
-            slugcatsMenu.DropDownItems.Add(removeItem);
-            slugcatsMenu.DropDownItems.Add(new ToolStripSeparator());
+            activeSlugcatsMenu.DropDownItems.Add(spawnItem);
+            activeSlugcatsMenu.DropDownItems.Add(nextItem);
+            activeSlugcatsMenu.DropDownItems.Add(removeItem);
+            activeSlugcatsMenu.DropDownItems.Add(new ToolStripSeparator());
             menu.Items.Add(settingsItem);
             menu.Items.Add(new ToolStripSeparator());
-            menu.Items.Add(slugcatsMenu);
-            menu.Items.Add(variantMenu);
-            menu.Items.Add(visualSkinMenu);
+            menu.Items.Add(activeSlugcatsMenu);
+            menu.Items.Add(slugcatMenu);
             menu.Items.Add(skinEditorItem);
             menu.Items.Add(debugItem);
             menu.Items.Add(pauseItem);
+            menu.Items.Add(refreshWorkshopItem);
             menu.Items.Add(retryRenderItem);
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add(exitItem);
@@ -147,8 +165,9 @@ namespace RainWorldDesktopPet.UI
             {
                 gameLoop.DebugEnabled = startDebug;
                 displayRefreshRate = NativeMethods.GetPrimaryDisplayRefreshRate();
+                ApplyRenderCadence(displayRefreshRate);
                 renderingEnabled = true;
-                Application.Idle += ApplicationIdle;
+                renderTimer.Start();
             };
         }
 
@@ -159,8 +178,10 @@ namespace RainWorldDesktopPet.UI
             get
             {
                 CreateParams parameters = base.CreateParams;
-                parameters.ExStyle |= NativeMethods.WS_EX_LAYERED | NativeMethods.WS_EX_TOOLWINDOW |
-                                      NativeMethods.WS_EX_TOPMOST | NativeMethods.WS_EX_NOACTIVATE;
+                parameters.ExStyle |= NativeMethods.WS_EX_NOREDIRECTIONBITMAP |
+                                      NativeMethods.WS_EX_LAYERED | NativeMethods.WS_EX_TRANSPARENT |
+                                      NativeMethods.WS_EX_TOOLWINDOW | NativeMethods.WS_EX_TOPMOST |
+                                      NativeMethods.WS_EX_NOACTIVATE;
                 return parameters;
             }
         }
@@ -168,22 +189,29 @@ namespace RainWorldDesktopPet.UI
         protected override void OnHandleCreated(EventArgs e)
         {
             base.OnHandleCreated(e);
-            ConfigureVirtualDesktopOverlay(false);
-            AddSlugcat(startVariant, startSkin);
-            RefreshSkinAvailability();
+            ConfigureVirtualDesktop();
+            compositionHost = new DirectCompositionHost(Handle, virtualDesktopBounds);
+            collisionWorld.Refresh(Handle);
+            surfaceRefreshClock.Restart();
+            AddSlugcat(startSlugcat);
+            if (!string.IsNullOrWhiteSpace(startDmsSkinId))
+            {
+                string reason;
+                if (!gameLoop.SetDmsSkin(startDmsSkinId, out reason))
+                    trayIcon.ShowBalloonTip(5000, "DMS skin unavailable", reason, ToolTipIcon.Warning);
+            }
         }
 
         protected override void OnHandleDestroyed(EventArgs e)
         {
             renderingEnabled = false;
-            Application.Idle -= ApplicationIdle;
             renderTimer.Stop();
             if (settingsWindow != null && !settingsWindow.IsDisposed) settingsWindow.Close();
             if (skinEditor != null && !skinEditor.IsDisposed) skinEditor.Close();
             for (int i = 0; i < gameLoops.Count; i++) gameLoops[i].Dispose();
             gameLoops.Clear();
             gameLoop = null;
-            if (backBuffer != null) backBuffer.Dispose();
+            if (compositionHost != null) compositionHost.Dispose();
             trayIcon.Visible = false;
             trayIcon.Dispose();
             if (applicationIcon != null) applicationIcon.Dispose();
@@ -192,27 +220,10 @@ namespace RainWorldDesktopPet.UI
 
         private void RenderTimerTick(object sender, EventArgs e)
         {
-            renderTimer.Stop();
-            renderingEnabled = true;
+            // A disabled renderer with an active timer is waiting for an
+            // automatic presentation retry.
+            if (!renderingEnabled) renderingEnabled = true;
             RenderFrame();
-        }
-
-        private void ApplicationIdle(object sender, EventArgs e)
-        {
-            while (renderingEnabled && NativeMethods.IsMessageQueueIdle())
-            {
-                RenderFrame();
-                if (!renderingEnabled) break;
-                // DwmFlush waits for the next compositor frame, allowing the
-                // draw loop to follow 60/120/144/165/240 Hz displays without
-                // advancing the fixed 40 Hz simulation at that rate.
-                if (NativeMethods.DwmFlush() != 0)
-                {
-                    renderTimer.Interval = 1;
-                    renderTimer.Start();
-                    break;
-                }
-            }
         }
 
         private void RenderFrame()
@@ -221,20 +232,75 @@ namespace RainWorldDesktopPet.UI
             renderingFrame = true;
             try
             {
-                System.Drawing.Graphics graphics = backBuffer.Graphics;
-                graphics.CompositingMode = System.Drawing.Drawing2D.CompositingMode.SourceCopy;
-                graphics.Clear(Color.Transparent);
-                graphics.CompositingMode = System.Drawing.Drawing2D.CompositingMode.SourceOver;
+                PollDragInput();
+                RefreshCollisionWorld();
                 for (int i = 0; i < gameLoops.Count; i++)
                 {
-                    GameLoop loop = gameLoops[i];
-                    loop.Advance(Handle);
-                    SlugcatPose pose = loop.BuildPose();
-                    loop.Renderer.Render(graphics, pose, renderSpace,
-                        loop.DebugEnabled && ReferenceEquals(loop, gameLoop),
-                        loop.World, loop.Slugcat, loop.AI, loop.AssetStatus, loop.Appearance);
+                    gameLoops[i].Advance(Handle);
+                    poseBuffer[i] = gameLoops[i].BuildPose();
                 }
-                backBuffer.Present(Handle, renderSpace.WorldOrigin);
+                UpdateRenderCadence(poseBuffer, gameLoops.Count);
+                surfaceBoundsBuffer.Clear();
+                for (int i = 0; i < gameLoops.Count; i++)
+                {
+                    bool debug = gameLoops[i].DebugEnabled &&
+                        ReferenceEquals(gameLoops[i], gameLoop);
+                    surfaceBoundsBuffer.Add(CalculateRenderBounds(poseBuffer[i], debug));
+                }
+                IList<CompositionBatch> batches = compositionBatchPlanner.Plan(
+                    surfaceBoundsBuffer, OverlaySizeQuantum);
+                compositionHost.BeginEffectFrame();
+                for (int batchIndex = 0; batchIndex < batches.Count; batchIndex++)
+                {
+                    CompositionBatch batch = batches[batchIndex];
+                    DirectCompositionHost.CompositionSurface surface =
+                        compositionHost.PrepareSurface(batchIndex, batch.Bounds);
+                    System.Drawing.Graphics graphics = surface.Graphics;
+                    graphics.CompositingMode = System.Drawing.Drawing2D.CompositingMode.SourceCopy;
+                    graphics.Clear(Color.Transparent);
+                    graphics.CompositingMode = System.Drawing.Drawing2D.CompositingMode.SourceOver;
+                    RenderSpace renderSpace = new RenderSpace(surface.Bounds);
+                    for (int member = 0; member < batch.SurfaceIndices.Count; member++)
+                    {
+                        int loopIndex = batch.SurfaceIndices[member];
+                        GameLoop loop = gameLoops[loopIndex];
+                        bool debug = loop.DebugEnabled && ReferenceEquals(loop, gameLoop);
+                        loop.Renderer.Render(graphics, poseBuffer[loopIndex], renderSpace, debug,
+                            loop.World, loop.Slugcat, loop.AI, loop.AssetStatus,
+                            loop.SelectedSlugcat);
+                    }
+                    compositionHost.Present(batchIndex);
+
+                    RectangleF effectContentBounds = RectangleF.Empty;
+                    for (int member = 0; member < batch.SurfaceIndices.Count; member++)
+                    {
+                        int loopIndex = batch.SurfaceIndices[member];
+                        GameLoop loop = gameLoops[loopIndex];
+                        RectangleF memberBounds = loop.Renderer.CalculateGpuEffectBounds(
+                            loop.Slugcat, poseBuffer[loopIndex]);
+                        if (memberBounds.IsEmpty) continue;
+                        effectContentBounds = effectContentBounds.IsEmpty ? memberBounds :
+                            RectangleF.Union(effectContentBounds, memberBounds);
+                    }
+                    if (!effectContentBounds.IsEmpty)
+                    {
+                        Rectangle effectBounds = compositionHost.PrepareEffectBounds(
+                            batchIndex, effectContentBounds);
+                        RenderSpace effectRenderSpace = new RenderSpace(effectBounds);
+                        int smokeEffectCount = 0;
+                        for (int member = 0; member < batch.SurfaceIndices.Count; member++)
+                        {
+                            int loopIndex = batch.SurfaceIndices[member];
+                            GameLoop loop = gameLoops[loopIndex];
+                            loop.Renderer.CollectGpuSmokeEffects(loop.Slugcat,
+                                poseBuffer[loopIndex], effectRenderSpace,
+                                smokeEffectBuffer, ref smokeEffectCount);
+                        }
+                        compositionHost.PresentEffects(batchIndex, smokeEffectBuffer,
+                            smokeEffectCount, effectBounds);
+                    }
+                }
+                compositionHost.Commit(batches.Count);
                 for (int i = 0; i < gameLoops.Count; i++)
                     gameLoops[i].RecordRenderFrame(displayRefreshRate);
                 if (renderErrorCount != 0)
@@ -246,13 +312,6 @@ namespace RainWorldDesktopPet.UI
             }
             catch (Exception exception)
             {
-                LayeredPresentationException presentationException = exception as LayeredPresentationException;
-                if (presentationException != null)
-                {
-                    HandlePresentationFailure(presentationException);
-                    return;
-                }
-
                 // Simulation/atlas/GDI drawing failures are not assumed to be
                 // transient. Keep the tray alive and let the user explicitly
                 // retry, while recording this failure only once.
@@ -270,61 +329,17 @@ namespace RainWorldDesktopPet.UI
             }
         }
 
-        private void HandlePresentationFailure(LayeredPresentationException exception)
-        {
-            renderingEnabled = false;
-            renderErrorCount++;
-            if (renderErrorCount == 1)
-            {
-                Program.LogException(exception);
-                trayIcon.ShowBalloonTip(5000, "Slugcat rendering retry",
-                    exception.Message, ToolTipIcon.Warning);
-            }
-
-            if (renderErrorCount == 3)
-            {
-                try
-                {
-                    ReplaceBackBuffer();
-                }
-                catch (Exception replacementException)
-                {
-                    Program.LogException(replacementException);
-                    renderTimer.Stop();
-                    retryRenderItem.Enabled = true;
-                    RefreshSettingsWindow();
-                    trayIcon.ShowBalloonTip(5000, "Slugcat rendering paused",
-                        replacementException.Message + " Use Retry rendering from the tray menu.", ToolTipIcon.Error);
-                    return;
-                }
-            }
-
-            if (renderErrorCount >= 6)
-            {
-                Program.LogException(new InvalidOperationException(
-                    "Layered presentation failed six consecutive times; automatic retries stopped.", exception));
-                renderTimer.Stop();
-                retryRenderItem.Enabled = true;
-                RefreshSettingsWindow();
-                trayIcon.ShowBalloonTip(5000, "Slugcat rendering paused",
-                    "Display presentation kept failing. Use Retry rendering from the tray menu.", ToolTipIcon.Error);
-                return;
-            }
-
-            int delay = 250 << Math.Min(renderErrorCount - 1, 4);
-            renderTimer.Interval = Math.Min(delay, 4000);
-            renderTimer.Start();
-        }
-
         private void RetryRendering(object sender, EventArgs e)
         {
             try
             {
-                ReplaceBackBuffer();
+                RecreateCompositionHost();
                 renderErrorCount = 0;
                 retryRenderItem.Enabled = false;
                 displayRefreshRate = NativeMethods.GetPrimaryDisplayRefreshRate();
                 renderingEnabled = true;
+                ApplyRenderCadence(displayRefreshRate);
+                renderTimer.Start();
                 RefreshSettingsWindow();
                 RenderFrame();
             }
@@ -337,60 +352,89 @@ namespace RainWorldDesktopPet.UI
             }
         }
 
-        private void ReplaceBackBuffer()
+        private void RecreateCompositionHost()
         {
-            LayeredBackBuffer replacement = new LayeredBackBuffer(overlayBounds.Width, overlayBounds.Height);
-            LayeredBackBuffer previous = backBuffer;
-            backBuffer = replacement;
-            if (previous != null) previous.Dispose();
+            if (compositionHost != null) compositionHost.Dispose();
+            compositionHost = null;
+            compositionHost = new DirectCompositionHost(Handle, virtualDesktopBounds);
         }
 
-        private void ConfigureVirtualDesktopOverlay(bool replaceExistingBuffer)
+        private void RefreshCollisionWorld()
+        {
+            if (collisionWorld.TryApplyPendingRefresh())
+            {
+                for (int i = 0; i < gameLoops.Count; i++)
+                    gameLoops[i].ApplyMovingSurfaceDelta();
+            }
+            if (surfaceRefreshClock.Elapsed.TotalSeconds <
+                SimulationConstants.WindowRefreshSeconds) return;
+
+            collisionWorld.RequestRefresh(Handle);
+            surfaceRefreshClock.Restart();
+        }
+
+        private void UpdateRenderCadence(SlugcatPose[] poses, int poseCount)
+        {
+            double targetRefreshRate = 0.0;
+            for (int i = 0; i < poseCount; i++)
+            {
+                string deviceName = poses[i].CurrentMonitorName;
+                double refreshRate;
+                if (!displayRefreshRates.TryGetValue(deviceName, out refreshRate))
+                {
+                    refreshRate = NativeMethods.GetDisplayRefreshRate(deviceName);
+                    displayRefreshRates[deviceName] = refreshRate;
+                }
+                if (refreshRate > targetRefreshRate) targetRefreshRate = refreshRate;
+            }
+
+            if (targetRefreshRate <= 1.0)
+                targetRefreshRate = NativeMethods.GetPrimaryDisplayRefreshRate();
+            ApplyRenderCadence(targetRefreshRate);
+        }
+
+        private void ApplyRenderCadence(double refreshRate)
+        {
+            if (refreshRate <= 1.0) refreshRate = DefaultRenderFramesPerSecond;
+            displayRefreshRate = refreshRate;
+            int interval = Math.Max(1, (int)Math.Round(1000.0 / refreshRate));
+            if (renderTimer.Interval != interval) renderTimer.Interval = interval;
+        }
+
+        private void ConfigureVirtualDesktop()
         {
             Rectangle virtualBounds = MonitorManager.GetVirtualBounds();
             if (virtualBounds.Width <= 0 || virtualBounds.Height <= 0)
                 throw new InvalidOperationException("Windows reported an empty virtual desktop.");
 
-            bool changed = virtualBounds != overlayBounds;
-            overlayBounds = virtualBounds;
-            renderSpace = new RenderSpace(overlayBounds);
-            Bounds = overlayBounds;
-            if (backBuffer == null)
-            {
-                backBuffer = new LayeredBackBuffer(overlayBounds.Width, overlayBounds.Height);
-            }
-            else if (replaceExistingBuffer || changed)
-            {
-                ReplaceBackBuffer();
-            }
+            virtualDesktopBounds = virtualBounds;
+            Bounds = virtualDesktopBounds;
+            if (compositionHost != null) compositionHost.SetDesktopBounds(virtualDesktopBounds);
         }
 
-        protected override void WndProc(ref Message message)
+        private Rectangle CalculateRenderBounds(SlugcatPose pose, bool debug)
         {
-            if (message.Msg == NativeMethods.WM_NCHITTEST && gameLoop != null)
-            {
-                Vec2 point = ScreenPointFromLParam(message.LParam);
-                message.Result = new IntPtr(mouseCaptured || FindSlugcatAt(point) != null
-                    ? NativeMethods.HTCLIENT : NativeMethods.HTTRANSPARENT);
-                return;
-            }
-            if (message.Msg == NativeMethods.WM_DISPLAYCHANGE || message.Msg == NativeMethods.WM_DPICHANGED)
-            {
-                try
-                {
-                    ConfigureVirtualDesktopOverlay(true);
-                    displayRefreshRate = NativeMethods.GetPrimaryDisplayRefreshRate();
-                }
-                catch (Exception exception)
-                {
-                    Program.LogException(exception);
-                    renderingEnabled = false;
-                    renderTimer.Stop();
-                    retryRenderItem.Enabled = true;
-                }
-                return;
-            }
-            if (message.Msg == NativeMethods.WM_LBUTTONDOWN && gameLoop != null)
+            if (debug) return virtualDesktopBounds;
+            RectangleF content = pose.GraphicsBounds;
+
+            int contentWidth = (int)Math.Ceiling(content.Width) + OverlayPadding * 2;
+            int contentHeight = (int)Math.Ceiling(content.Height) + OverlayPadding * 2;
+            int width = RoundOverlaySize(Math.Max(MinimumOverlaySize, contentWidth));
+            int height = RoundOverlaySize(Math.Max(MinimumOverlaySize, contentHeight));
+            int centerX = (int)Math.Round(content.Left + content.Width * 0.5f);
+            int centerY = (int)Math.Round(content.Top + content.Height * 0.5f);
+            return new Rectangle(centerX - width / 2, centerY - height / 2, width, height);
+        }
+
+        private static int RoundOverlaySize(int value)
+        {
+            return ((value + OverlaySizeQuantum - 1) / OverlaySizeQuantum) * OverlaySizeQuantum;
+        }
+
+        private void PollDragInput()
+        {
+            bool currentlyDown = (NativeMethods.GetAsyncKeyState(NativeMethods.VK_LBUTTON) & 0x8000) != 0;
+            if (currentlyDown && !leftButtonDown && gameLoop != null)
             {
                 Vec2 point = CurrentCursorPoint();
                 GameLoop hit = FindSlugcatAt(point);
@@ -401,28 +445,36 @@ namespace RainWorldDesktopPet.UI
                     {
                         grabbedGameLoop = hit;
                         mouseCaptured = true;
-                        NativeMethods.SetCapture(Handle);
                     }
                 }
-                return;
             }
-            if (message.Msg == NativeMethods.WM_LBUTTONUP && gameLoop != null)
-            {
-                if (mouseCaptured)
-                {
-                    mouseCaptured = false;
-                    if (grabbedGameLoop != null) grabbedGameLoop.EndGrab();
-                    grabbedGameLoop = null;
-                    NativeMethods.ReleaseCapture();
-                }
-                return;
-            }
-            if ((message.Msg == NativeMethods.WM_CAPTURECHANGED || message.Msg == NativeMethods.WM_CANCELMODE) &&
-                gameLoop != null && mouseCaptured)
+            else if (!currentlyDown && leftButtonDown && mouseCaptured)
             {
                 mouseCaptured = false;
                 if (grabbedGameLoop != null) grabbedGameLoop.EndGrab();
                 grabbedGameLoop = null;
+            }
+            leftButtonDown = currentlyDown;
+        }
+
+        protected override void WndProc(ref Message message)
+        {
+            if (message.Msg == NativeMethods.WM_DISPLAYCHANGE || message.Msg == NativeMethods.WM_DPICHANGED)
+            {
+                try
+                {
+                    ConfigureVirtualDesktop();
+                    if (compositionHost != null) compositionHost.ResetSurfaces();
+                    displayRefreshRates.Clear();
+                    ApplyRenderCadence(NativeMethods.GetPrimaryDisplayRefreshRate());
+                }
+                catch (Exception exception)
+                {
+                    Program.LogException(exception);
+                    renderingEnabled = false;
+                    renderTimer.Stop();
+                    retryRenderItem.Enabled = true;
+                }
                 return;
             }
             base.WndProc(ref message);
@@ -435,10 +487,11 @@ namespace RainWorldDesktopPet.UI
             return null;
         }
 
-        private void AddSlugcat(SlugcatVariant variant, SlugcatSkin skin)
+        private void AddSlugcat(SlugcatId id)
         {
             if (gameLoops.Count >= MaximumSlugcats) return;
-            GameLoop added = new GameLoop(Handle, installation, variant, skin, gameLoops.Count);
+            GameLoop added = new GameLoop(Handle, installation, id,
+                gameLoops.Count, collisionWorld);
             added.DebugEnabled = debugItem.Checked;
             added.Paused = pauseItem.Checked;
             gameLoops.Add(added);
@@ -453,9 +506,10 @@ namespace RainWorldDesktopPet.UI
                     "Up to " + MaximumSlugcats + " slugcats can be active.", ToolTipIcon.Info);
                 return;
             }
-            SlugcatVariant variant = gameLoop == null ? startVariant : gameLoop.Appearance.Variant;
-            SlugcatSkin skin = gameLoop == null ? startSkin : gameLoop.Skin;
-            try { AddSlugcat(variant, skin); }
+            try
+            {
+                AddSlugcat(gameLoop == null ? startSlugcat : gameLoop.SelectedSlugcat.Id);
+            }
             catch (Exception exception)
             {
                 Program.LogException(exception);
@@ -480,47 +534,52 @@ namespace RainWorldDesktopPet.UI
                 grabbedGameLoop.EndGrab();
                 grabbedGameLoop = null;
                 mouseCaptured = false;
-                NativeMethods.ReleaseCapture();
             }
             gameLoops.RemoveAt(index);
             removed.Dispose();
+            if (compositionHost != null) compositionHost.ResetSurfaces();
             SelectSlugcat(gameLoops[Math.Min(index, gameLoops.Count - 1)]);
         }
 
         private void SelectSlugcat(GameLoop selected)
         {
-            if (selected == null || ReferenceEquals(gameLoop, selected))
-            {
-                RefreshSlugcatMenu();
-                return;
-            }
-            if (skinEditor != null && !skinEditor.IsDisposed) skinEditor.Close();
+            if (selected == null) return;
+            if (!ReferenceEquals(gameLoop, selected) && skinEditor != null && !skinEditor.IsDisposed)
+                skinEditor.Close();
             gameLoop = selected;
-            RefreshAppearanceMenus();
-            RefreshSlugcatMenu();
+            RefreshSlugcatSelectionMenu();
+            RefreshActiveSlugcatsMenu();
         }
 
-        private void RefreshSlugcatMenu()
+        private void RefreshSlugcatSelectionMenu()
         {
-            while (slugcatsMenu.DropDownItems.Count > 4)
-                slugcatsMenu.DropDownItems.RemoveAt(4);
+            if (gameLoop == null) return;
+            for (int i = 0; i < slugcatMenu.DropDownItems.Count; i++)
+            {
+                ToolStripMenuItem item = slugcatMenu.DropDownItems[i] as ToolStripMenuItem;
+                if (item != null) item.Checked = (SlugcatId)item.Tag == gameLoop.SelectedSlugcat.Id;
+            }
+        }
+
+        private void RefreshActiveSlugcatsMenu()
+        {
+            while (activeSlugcatsMenu.DropDownItems.Count > 4)
+                activeSlugcatsMenu.DropDownItems.RemoveAt(4);
             for (int i = 0; i < gameLoops.Count; i++)
             {
                 GameLoop loop = gameLoops[i];
-                ToolStripMenuItem item = new ToolStripMenuItem("Slugcat " + (i + 1) + " · " +
-                    (loop.Skin == SlugcatSkin.Default
-                        ? loop.Appearance.Variant.ToString()
-                        : loop.Skin.ToString()));
+                ToolStripMenuItem item = new ToolStripMenuItem(
+                    "Slugcat " + (i + 1) + " · " + loop.SelectedSlugcat.DisplayName);
                 item.Tag = loop;
                 item.Checked = ReferenceEquals(loop, gameLoop);
-                item.Click += delegate(object sender, EventArgs args)
+                item.Click += delegate(object itemSender, EventArgs args)
                 {
-                    ToolStripMenuItem clicked = sender as ToolStripMenuItem;
+                    ToolStripMenuItem clicked = itemSender as ToolStripMenuItem;
                     if (clicked != null) SelectSlugcat(clicked.Tag as GameLoop);
                 };
-                slugcatsMenu.DropDownItems.Add(item);
+                activeSlugcatsMenu.DropDownItems.Add(item);
             }
-            slugcatsMenu.Text = "Slugcats (" + gameLoops.Count + ")";
+            activeSlugcatsMenu.Text = "Slugcats (" + gameLoops.Count + ")";
             spawnItem.Enabled = gameLoops.Count < MaximumSlugcats;
             removeItem.Enabled = gameLoops.Count > 1;
             trayIcon.Text = "SlugcatInMyMonitor · Active Slugcats: " + gameLoops.Count;
@@ -556,15 +615,15 @@ namespace RainWorldDesktopPet.UI
                 skinEditor.Close();
                 return;
             }
-
             try
             {
-                skinEditor = new SkinEditorWindow(gameLoop, RefreshAppearanceMenus);
-                if (applicationIcon != null) skinEditor.Icon = applicationIcon;
-                skinEditor.FormClosed += delegate
+                skinEditor = new SkinEditorWindow(gameLoop, delegate
                 {
-                    skinEditor = null;
-                };
+                    RefreshSlugcatSelectionMenu();
+                    RefreshActiveSlugcatsMenu();
+                });
+                if (applicationIcon != null) skinEditor.Icon = applicationIcon;
+                skinEditor.FormClosed += delegate { skinEditor = null; };
                 skinEditor.Show();
                 skinEditor.Activate();
             }
@@ -583,87 +642,27 @@ namespace RainWorldDesktopPet.UI
             return NativeMethods.GetCursorPos(out point) ? new Vec2(point.X, point.Y) : Vec2.Zero;
         }
 
-        private ToolStripMenuItem CreateVariantItem(string label, SlugcatVariant variant, SlugcatVariant selected)
+        private ToolStripMenuItem CreateSlugcatItem(string label, SlugcatId id, SlugcatId selected)
         {
             ToolStripMenuItem item = new ToolStripMenuItem(label);
-            item.Tag = variant;
-            item.Checked = variant == selected;
-            item.Click += VariantItemClick;
+            item.Tag = id;
+            item.Checked = id == selected;
+            item.Click += SlugcatItemClick;
             return item;
         }
 
-        private void VariantItemClick(object sender, EventArgs e)
+        private void SlugcatItemClick(object sender, EventArgs e)
         {
             ToolStripMenuItem selected = sender as ToolStripMenuItem;
             if (selected == null) return;
-            for (int i = 0; i < variantMenu.DropDownItems.Count; i++)
+            for (int i = 0; i < slugcatMenu.DropDownItems.Count; i++)
             {
-                ToolStripMenuItem item = variantMenu.DropDownItems[i] as ToolStripMenuItem;
+                ToolStripMenuItem item = slugcatMenu.DropDownItems[i] as ToolStripMenuItem;
                 if (item != null) item.Checked = ReferenceEquals(item, selected);
             }
-            if (gameLoop != null) gameLoop.SetVariant((SlugcatVariant)selected.Tag);
-            RefreshSlugcatMenu();
+            if (gameLoop != null) gameLoop.SetSelectedSlugcat((SlugcatId)selected.Tag);
+            RefreshActiveSlugcatsMenu();
             if (skinEditor != null && !skinEditor.IsDisposed) skinEditor.RefreshFromGame();
-        }
-
-        private ToolStripMenuItem CreateSkinItem(string label, SlugcatSkin skin,
-            SlugcatSkin selected)
-        {
-            ToolStripMenuItem item = new ToolStripMenuItem(label);
-            item.Tag = skin;
-            item.Checked = skin == selected;
-            item.Click += SkinItemClick;
-            return item;
-        }
-
-        private void SkinItemClick(object sender, EventArgs e)
-        {
-            ToolStripMenuItem selected = sender as ToolStripMenuItem;
-            if (selected == null || gameLoop == null) return;
-            SlugcatSkin skin = (SlugcatSkin)selected.Tag;
-            if (!gameLoop.SetSkin(skin))
-            {
-                string reason;
-                gameLoop.CanUseSkin(skin, out reason);
-                trayIcon.ShowBalloonTip(4000, "Downpour skin unavailable",
-                    reason, ToolTipIcon.Warning);
-                return;
-            }
-            for (int i = 0; i < visualSkinMenu.DropDownItems.Count; i++)
-            {
-                ToolStripMenuItem item = visualSkinMenu.DropDownItems[i] as ToolStripMenuItem;
-                if (item != null) item.Checked = ReferenceEquals(item, selected);
-            }
-            RefreshSlugcatMenu();
-            if (skinEditor != null && !skinEditor.IsDisposed) skinEditor.RefreshFromGame();
-        }
-
-        private void RefreshAppearanceMenus()
-        {
-            if (gameLoop == null) return;
-            for (int i = 0; i < variantMenu.DropDownItems.Count; i++)
-            {
-                ToolStripMenuItem item = variantMenu.DropDownItems[i] as ToolStripMenuItem;
-                if (item != null) item.Checked = (SlugcatVariant)item.Tag == gameLoop.Appearance.Variant;
-            }
-            RefreshSkinAvailability();
-            RefreshSlugcatMenu();
-            if (skinEditor != null && !skinEditor.IsDisposed) skinEditor.RefreshFromGame();
-        }
-
-        private void RefreshSkinAvailability()
-        {
-            if (gameLoop == null) return;
-            for (int i = 0; i < visualSkinMenu.DropDownItems.Count; i++)
-            {
-                ToolStripMenuItem item = visualSkinMenu.DropDownItems[i] as ToolStripMenuItem;
-                if (item == null) continue;
-                string reason;
-                SlugcatSkin skin = (SlugcatSkin)item.Tag;
-                item.Enabled = gameLoop.CanUseSkin(skin, out reason);
-                item.ToolTipText = reason ?? "Local Rain World PlayerGraphics assets available";
-                item.Checked = skin == gameLoop.Skin;
-            }
         }
 
         internal string[] SettingsSlugcatNames
@@ -675,9 +674,7 @@ namespace RainWorldDesktopPet.UI
                 {
                     GameLoop loop = gameLoops[i];
                     names[i] = "Slugcat " + (i + 1) + " · " +
-                        (loop.Skin == SlugcatSkin.Default
-                            ? loop.Appearance.Variant.ToString()
-                            : loop.Skin.ToString());
+                        loop.SelectedSlugcat.DisplayName;
                 }
                 return names;
             }
@@ -700,11 +697,8 @@ namespace RainWorldDesktopPet.UI
             get { return pauseItem.Checked; }
             set { pauseItem.Checked = value; }
         }
-        internal SlugcatVariant SettingsVariant
-        { get { return gameLoop == null ? startVariant : gameLoop.Appearance.Variant; } }
-        internal SlugcatSkin SettingsSkin
-        { get { return gameLoop == null ? startSkin : gameLoop.Skin; } }
-
+        internal SlugcatId SettingsSlugcatId
+        { get { return gameLoop == null ? startSlugcat : gameLoop.SelectedSlugcat.Id; } }
         internal void SettingsSelectSlugcat(int index)
         {
             if (index >= 0 && index < gameLoops.Count) SelectSlugcat(gameLoops[index]);
@@ -713,34 +707,21 @@ namespace RainWorldDesktopPet.UI
         internal void SettingsAddSlugcat() { SpawnSlugcat(null, EventArgs.Empty); }
         internal void SettingsSelectNextSlugcat() { SelectNextSlugcat(null, EventArgs.Empty); }
         internal void SettingsRemoveSelectedSlugcat() { RemoveSelectedSlugcat(null, EventArgs.Empty); }
-        internal void SettingsSetVariant(SlugcatVariant variant)
+        internal void SettingsSetSlugcat(SlugcatId id)
         {
             if (gameLoop == null) return;
-            gameLoop.SetVariant(variant);
-            RefreshAppearanceMenus();
+            gameLoop.SetSelectedSlugcat(id);
+            RefreshSlugcatSelectionMenu();
+            RefreshActiveSlugcatsMenu();
+            if (skinEditor != null && !skinEditor.IsDisposed) skinEditor.RefreshFromGame();
         }
 
-        internal bool SettingsTrySetSkin(SlugcatSkin skin, out string reason)
+        internal string SettingsRefreshWorkshop()
         {
-            reason = null;
-            if (gameLoop == null) return false;
-            if (!gameLoop.SetSkin(skin))
-            {
-                gameLoop.CanUseSkin(skin, out reason);
-                return false;
-            }
-            RefreshAppearanceMenus();
-            return true;
-        }
-
-        internal bool SettingsCanUseSkin(SlugcatSkin skin, out string reason)
-        {
-            if (gameLoop == null)
-            {
-                reason = "No Slugcat is selected.";
-                return false;
-            }
-            return gameLoop.CanUseSkin(skin, out reason);
+            RefreshAllWorkshopIntegrations();
+            return gameLoop == null
+                ? "No Slugcat is selected."
+                : gameLoop.DmsSkins.Count + " Dress My Slugcat spritesheets found.";
         }
 
         internal void SettingsOpenAppearanceEditor()
@@ -756,112 +737,36 @@ namespace RainWorldDesktopPet.UI
         internal void SettingsRetryRendering() { RetryRendering(null, EventArgs.Empty); }
         internal void SettingsExitApplication() { Close(); }
 
+        private void RefreshWorkshopItemClick(object sender, EventArgs e)
+        {
+            if (gameLoop == null) return;
+            try
+            {
+                string status = SettingsRefreshWorkshop();
+                trayIcon.ShowBalloonTip(2500, "Workshop refreshed",
+                    status, ToolTipIcon.Info);
+            }
+            catch (Exception exception)
+            {
+                Program.LogException(exception);
+                trayIcon.ShowBalloonTip(5000, "Workshop refresh failed", exception.Message,
+                    ToolTipIcon.Warning);
+            }
+        }
+
+        private void RefreshAllWorkshopIntegrations()
+        {
+            for (int index = 0; index < gameLoops.Count; index++)
+                gameLoops[index].RefreshWorkshopIntegration();
+            RefreshSettingsWindow();
+        }
+
         private static Vec2 ScreenPointFromLParam(IntPtr value)
         {
             long packed = value.ToInt64();
             int x = (short)(packed & 0xffff);
             int y = (short)((packed >> 16) & 0xffff);
             return new Vec2(x, y);
-        }
-
-        private sealed class LayeredPresentationException : InvalidOperationException
-        {
-            public LayeredPresentationException(string message)
-                : base(message)
-            {
-            }
-        }
-
-        private sealed class LayeredBackBuffer : IDisposable
-        {
-            private readonly int width;
-            private readonly int height;
-            private readonly IntPtr screenDeviceContext;
-            private readonly IntPtr memoryDeviceContext;
-            private readonly IntPtr bitmapHandle;
-            private readonly IntPtr previousObject;
-            private readonly Bitmap bitmap;
-            private readonly System.Drawing.Graphics graphics;
-
-            public LayeredBackBuffer(int width, int height)
-            {
-                this.width = width;
-                this.height = height;
-                IntPtr acquiredScreen = IntPtr.Zero;
-                IntPtr acquiredMemory = IntPtr.Zero;
-                IntPtr acquiredBitmap = IntPtr.Zero;
-                IntPtr acquiredPrevious = IntPtr.Zero;
-                Bitmap acquiredManagedBitmap = null;
-                System.Drawing.Graphics acquiredGraphics = null;
-                try
-                {
-                    acquiredScreen = NativeMethods.GetDC(IntPtr.Zero);
-                    if (acquiredScreen == IntPtr.Zero) throw new InvalidOperationException("Could not acquire the screen device context.");
-                    acquiredMemory = NativeMethods.CreateCompatibleDC(acquiredScreen);
-                    if (acquiredMemory == IntPtr.Zero) throw new InvalidOperationException("Could not create the layered window device context.");
-                    NativeMethods.BitmapInfo info = new NativeMethods.BitmapInfo();
-                    info.Header.Size = (uint)Marshal.SizeOf(typeof(NativeMethods.BitmapInfoHeader));
-                    info.Header.Width = width;
-                    info.Header.Height = -height; // top-down DIB
-                    info.Header.Planes = 1;
-                    info.Header.BitCount = 32;
-                    info.Header.Compression = 0;
-                    IntPtr bits;
-                    acquiredBitmap = NativeMethods.CreateDIBSection(acquiredScreen, ref info, 0, out bits, IntPtr.Zero, 0);
-                    if (acquiredBitmap == IntPtr.Zero || bits == IntPtr.Zero)
-                        throw new InvalidOperationException("Could not allocate the layered window back buffer.");
-                    acquiredPrevious = NativeMethods.SelectObject(acquiredMemory, acquiredBitmap);
-                    acquiredManagedBitmap = new Bitmap(width, height, width * 4, PixelFormat.Format32bppPArgb, bits);
-                    acquiredGraphics = System.Drawing.Graphics.FromImage(acquiredManagedBitmap);
-                }
-                catch
-                {
-                    if (acquiredGraphics != null) acquiredGraphics.Dispose();
-                    if (acquiredManagedBitmap != null) acquiredManagedBitmap.Dispose();
-                    if (acquiredMemory != IntPtr.Zero && acquiredPrevious != IntPtr.Zero)
-                        NativeMethods.SelectObject(acquiredMemory, acquiredPrevious);
-                    if (acquiredBitmap != IntPtr.Zero) NativeMethods.DeleteObject(acquiredBitmap);
-                    if (acquiredMemory != IntPtr.Zero) NativeMethods.DeleteDC(acquiredMemory);
-                    if (acquiredScreen != IntPtr.Zero) NativeMethods.ReleaseDC(IntPtr.Zero, acquiredScreen);
-                    throw;
-                }
-
-                screenDeviceContext = acquiredScreen;
-                memoryDeviceContext = acquiredMemory;
-                bitmapHandle = acquiredBitmap;
-                previousObject = acquiredPrevious;
-                bitmap = acquiredManagedBitmap;
-                graphics = acquiredGraphics;
-            }
-
-            public System.Drawing.Graphics Graphics { get { return graphics; } }
-
-            public void Present(IntPtr windowHandle, Vec2 origin)
-            {
-                NativeMethods.Point destination = new NativeMethods.Point((int)origin.X, (int)origin.Y);
-                NativeMethods.Size size = new NativeMethods.Size(width, height);
-                NativeMethods.Point source = new NativeMethods.Point(0, 0);
-                NativeMethods.BlendFunction blend = new NativeMethods.BlendFunction();
-                blend.BlendOp = NativeMethods.AC_SRC_OVER;
-                blend.SourceConstantAlpha = 255;
-                blend.AlphaFormat = NativeMethods.AC_SRC_ALPHA;
-                if (!NativeMethods.UpdateLayeredWindow(windowHandle, screenDeviceContext, ref destination, ref size,
-                    memoryDeviceContext, ref source, 0, ref blend, NativeMethods.ULW_ALPHA))
-                {
-                    throw new LayeredPresentationException(
-                        "UpdateLayeredWindow failed: " + Marshal.GetLastWin32Error());
-                }
-            }
-
-            public void Dispose()
-            {
-                graphics.Dispose();
-                bitmap.Dispose();
-                NativeMethods.SelectObject(memoryDeviceContext, previousObject);
-                NativeMethods.DeleteObject(bitmapHandle);
-                NativeMethods.DeleteDC(memoryDeviceContext);
-                NativeMethods.ReleaseDC(IntPtr.Zero, screenDeviceContext);
-            }
         }
     }
 }

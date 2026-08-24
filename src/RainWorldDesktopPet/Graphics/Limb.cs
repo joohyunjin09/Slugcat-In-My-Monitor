@@ -64,6 +64,7 @@ namespace RainWorldDesktopPet.Graphics
         public DesktopSurfaceKind GripSurfaceKind = DesktopSurfaceKind.ScreenEdge;
         public bool IsPlanted { get { return ReachedSnapPosition && Mode == LimbMode.HuntAbsolutePosition; } }
         public int LimbNumber { get { return limbNumber; } }
+        public bool MovementEngagedThisTick { get; private set; }
 
         // SlugcatHand.Update ordering: update using the previous tick's target,
         // constrain to the upper BodyChunk, then select the target for next tick.
@@ -95,6 +96,7 @@ namespace RainWorldDesktopPet.Graphics
                 connectionVelocity, 0.0, 0.0);
 
             bool retractWhenUnused = EngageInMovement(player, world, leadLimb, airborneCounter);
+            MovementEngagedThisTick = !retractWhenUnused;
             if (player.State.Animation == AnimationIndex.Sleep)
             {
                 Vec2 center = (player.BodyChunks[0].Position + player.BodyChunks[1].Position) * 0.5;

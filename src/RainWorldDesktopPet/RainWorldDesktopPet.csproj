@@ -25,6 +25,7 @@
     <ErrorReport>prompt</ErrorReport>
     <WarningLevel>4</WarningLevel>
     <Prefer32Bit>false</Prefer32Bit>
+    <PlatformTarget>x64</PlatformTarget>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
     <DebugType>pdbonly</DebugType>
@@ -34,6 +35,7 @@
     <ErrorReport>prompt</ErrorReport>
     <WarningLevel>4</WarningLevel>
     <Prefer32Bit>false</Prefer32Bit>
+    <PlatformTarget>x64</PlatformTarget>
   </PropertyGroup>
   <ItemGroup>
     <Reference Include="mscorlib">
@@ -59,7 +61,9 @@
     <Compile Include="Core\SimulationConstants.cs" />
     <Compile Include="Core\Vec2.cs" />
     <Compile Include="Creature\Slugcat.cs" />
+    <Compile Include="Creature\SlugcatAbilities.cs" />
     <Compile Include="Creature\SlugcatMovement.cs" />
+    <Compile Include="Creature\OriginalSlugcatMovement.cs" />
     <Compile Include="Creature\SlugcatState.cs" />
     <Compile Include="Creature\SlugcatVariant.cs" />
     <Compile Include="Creature\VirtualInput.cs" />
@@ -70,6 +74,8 @@
     <Compile Include="Desktop\NativeMethods.cs" />
     <Compile Include="Desktop\WindowEnumerator.cs" />
     <Compile Include="Graphics\BodyPart.cs" />
+    <Compile Include="Graphics\CompositionBatchPlanner.cs" />
+    <Compile Include="Graphics\DirectCompositionHost.cs" />
     <Compile Include="Graphics\Limb.cs" />
     <Compile Include="Graphics\ProceduralTail.cs" />
     <Compile Include="Graphics\ParityDiagnostics.cs" />
@@ -83,6 +89,8 @@
     <Compile Include="Physics\BodyChunkConnection.cs" />
     <Compile Include="Physics\DesktopCollisionSnapshot.cs" />
     <Compile Include="Physics\DesktopCollisionWorld.cs" />
+    <Compile Include="Physics\DesktopSpear.cs" />
+    <Compile Include="Physics\DesktopRope.cs" />
     <Compile Include="Physics\TerrainImpactData.cs" />
     <Compile Include="Physics\TailSegment.cs" />
     <Compile Include="Program.cs" />
@@ -96,9 +104,13 @@
     <Compile Include="RainWorld\RainWorldInstallation.cs" />
     <Compile Include="RainWorld\RainWorldLocator.cs" />
     <Compile Include="RainWorld\UnitySerializedFileReader.cs" />
+    <Compile Include="RainWorld\UnityFsBundleReader.cs" />
     <Compile Include="UI\LayeredOverlayWindow.cs" />
     <Compile Include="UI\SettingsWindow.cs" />
     <Compile Include="UI\SkinEditorWindow.cs" />
+    <Compile Include="Workshop\DmsSkinCatalog.cs" />
+    <Compile Include="Workshop\WorkshopCatalog.cs" />
+    <Compile Include="Workshop\WorkshopLog.cs" />
   </ItemGroup>
   <ItemGroup>
     <None Include="App.config" />

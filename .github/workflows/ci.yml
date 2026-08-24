@@ -40,5 +40,6 @@ jobs:
           path: |
             artifacts/Release/SlugcatInMyMonitor.exe
             artifacts/Release/SlugcatInMyMonitor.exe.config
+            artifacts/Release/SlugcatInMyMonitor.DirectComposition.dll
             README.md
             LICENSE

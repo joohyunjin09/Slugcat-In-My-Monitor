@@ -1,33 +1,49 @@
 namespace RainWorldDesktopPet.Creature
 {
-    // Names mirror the portions of Player.AnimationIndex and BodyModeIndex that
-    // have a meaningful desktop equivalent. The complete source enum map is in docs.
+    // Retail Rain World v1.11.8 Player.AnimationIndex. Sit and Sleep are the
+    // only desktop-only values and deliberately live after the original map.
     public enum AnimationIndex
     {
         None,
+        CrawlTurn,
         StandUp,
         DownOnFours,
-        CrawlTurn,
         LedgeCrawl,
+        LedgeGrab,
         HangFromBeam,
+        GetUpOnBeam,
+        StandOnBeam,
         ClimbOnBeam,
-        WallClimb,
+        GetUpToBeamTip,
+        HangUnderVerticalBeam,
+        BeamTip,
+        CorridorTurn,
+        SurfaceSwim,
+        DeepSwim,
         Roll,
         Flip,
+        RocketJump,
         BellySlide,
+        AntlerClimb,
+        GrapplingSwing,
+        ZeroGSwim,
+        ZeroGPoleGrab,
+        VineGrab,
+        Dead,
         Sit,
-        Sleep,
-        Dead
+        Sleep
     }
 
+    // Retail Rain World v1.11.8 Player.BodyModeIndex.
     public enum BodyModeIndex
     {
         Default,
-        Stand,
         Crawl,
-        ClimbingOnBeam,
+        Stand,
         CorridorClimb,
+        ClimbIntoShortCut,
         WallClimb,
+        ClimbingOnBeam,
         Swimming,
         ZeroG,
         Stunned,
@@ -46,12 +62,41 @@ namespace RainWorldDesktopPet.Creature
         public double RunCycle;
         public double Stillness;
         public double AerobicLevel;
+        public double Adrenaline;
         public bool Conscious = true;
         public bool Dead;
-        public bool Standing;
+        // Player.standing is an intent/state flag, not a BodyMode-derived pose.
+        public bool Standing = true;
         public int StunCounter;
+        public int SlowMovementStun;
         public int InitialStunValue;
         public int ImpactBlinkTicks;
+
+        // Names and counter semantics mirror Player's connected movement state.
+        public int WantToJump;
+        public int CanJump;
+        public int CanWallJump;
+        public int JumpStun;
+        public int SuperLaunchJump;
+        public int KillSuperLaunchJumpCounter;
+        public int WallSlideCounter;
+        public int AllowRoll;
+        public int RollDirection;
+        public int RollCounter;
+        public int SlideCounter;
+        public int SlideDirection;
+        public int InitSlideCounter;
+        public int BackwardsCounter;
+        public int LandingDelay;
+        public int CrawlTurnDelay;
+        public int ExitBellySlideCounter;
+        public int StopRollingCounter;
+        public int ConsistentDownDiagonal;
+        public int LowerBodyFramesOnGround;
+        public int UpperBodyFramesOffGround;
+        // Player.flipFromSlide selects the 2.5x angular impulse used only by
+        // the belly-slide reversal. A standing backflip uses the base impulse.
+        public bool FlipFromSlide;
 
         // Creature.Stunned is deliberately not equivalent to stun > 0.
         // Rain World considers a creature unconscious only while stun >= 10.

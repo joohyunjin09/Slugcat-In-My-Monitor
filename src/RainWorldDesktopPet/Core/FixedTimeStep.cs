@@ -41,5 +41,6 @@ namespace RainWorldDesktopPet.Core
         {
             accumulator = 0.0;
         }
+
     }
 }

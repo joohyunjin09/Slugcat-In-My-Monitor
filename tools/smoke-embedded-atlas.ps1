@@ -30,7 +30,7 @@ if (-not $SkipBuild) {
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 }
 
-$assemblyPath = Join-Path $repoRoot "artifacts\$Configuration\RainWorldDesktopPet.exe"
+$assemblyPath = Join-Path $repoRoot "artifacts\$Configuration\SlugcatInMyMonitor.exe"
 if (-not (Test-Path -LiteralPath $assemblyPath)) {
     throw "Build output was not found: $assemblyPath"
 }
@@ -65,6 +65,36 @@ try {
     if (-not $atlasSet.TryGet('HeadC0', [ref]$mscSprite)) { throw 'Missing MSC sprite: HeadC0' }
     if ($mscSprite.Atlas.Image.Width -ne 367 -or $mscSprite.Atlas.Image.Height -ne 245) {
         throw "HeadC0 did not resolve to rainworldmsc: $($mscSprite.Atlas.Image.Width)x$($mscSprite.Atlas.Image.Height)"
+    }
+
+    # These are the v1.11.8 MSC frames used for both tail growth and the
+    # physical held/thrown needle. A procedural stand-in must not pass here.
+    $spearmasterFrames = @{
+        BioSpear1 = @(20, 134, 7, 53)
+        BioSpear2 = @(29, 134, 7, 53)
+        BioSpear3 = @(38, 134, 6, 53)
+    }
+    foreach ($name in $spearmasterFrames.Keys) {
+        $sprite = $null
+        if (-not $atlasSet.TryGet($name, [ref]$sprite)) { throw "Missing Spearmaster sprite: $name" }
+        if (-not $sprite.Atlas.ImagePath.EndsWith('#rainworldmsc', [StringComparison]::OrdinalIgnoreCase)) {
+            throw "$name did not come from the embedded MSC atlas: $($sprite.Atlas.ImagePath)"
+        }
+        $expected = $spearmasterFrames[$name]
+        $actual = $sprite.Element.Frame
+        if ($actual.X -ne $expected[0] -or $actual.Y -ne $expected[1] -or
+            $actual.Width -ne $expected[2] -or $actual.Height -ne $expected[3]) {
+            throw "Unexpected $name frame geometry: $actual"
+        }
+    }
+
+    $tinyStar = $null
+    if (-not $atlasSet.TryGet('tinyStar', [ref]$tinyStar)) { throw 'Missing Spearmaster sprite: tinyStar' }
+    $tinyStarFrame = $tinyStar.Element.Frame
+    if (-not $tinyStar.Atlas.ImagePath.EndsWith('#rainWorld', [StringComparison]::OrdinalIgnoreCase) -or
+        $tinyStarFrame.X -ne 450 -or $tinyStarFrame.Y -ne 495 -or
+        $tinyStarFrame.Width -ne 3 -or $tinyStarFrame.Height -ne 3) {
+        throw "Unexpected tinyStar source or frame geometry: $($tinyStar.Atlas.ImagePath) $tinyStarFrame"
     }
 
     # A geometry-only test can pass with an incorrectly decoded transparent texture.
@@ -102,7 +132,7 @@ try {
         throw "Unexpected MSC HeadC0 opaque-pixel signature: $mscOpaquePixels (expected 163 for v1.11.8)."
     }
 
-    Write-Host "PASS: $($atlasSet.AtlasCount) embedded atlases; BodyA opaque pixels=$opaquePixels; MSC HeadC0 opaque pixels=$mscOpaquePixels."
+    Write-Host "PASS: $($atlasSet.AtlasCount) embedded atlases; BodyA opaque pixels=$opaquePixels; MSC HeadC0 opaque pixels=$mscOpaquePixels; BioSpear1/2/3 and tinyStar frames verified."
 }
 finally {
     $atlasSet.Dispose()

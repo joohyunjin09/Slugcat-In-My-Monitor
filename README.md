@@ -87,6 +87,9 @@ Windows ZIP을 내려받아 압축을 푼 뒤 `SlugcatInMyMonitor.exe`를 실행
 # Gourmand로 실행
 .\SlugcatInMyMonitor.exe --slugcat gourmand
 
+# 선택 가능: white, yellow, red, gourmand, artificer,
+#               spearmaster, rivulet, saint
+
 # Rain World 설치 경로 직접 지정
 .\SlugcatInMyMonitor.exe `
   --rain-world "C:\Program Files (x86)\Steam\steamapps\common\Rain World"
@@ -102,7 +105,9 @@ Windows ZIP을 내려받아 압축을 푼 뒤 `SlugcatInMyMonitor.exe`를 실행
 
 ## 개발
 
-PowerShell 5.1 이상에서 Release 빌드와 전체 테스트를 실행할 수 있습니다.
+PowerShell 5.1 이상과 Visual Studio 2022 C++ 데스크톱 빌드 도구에서 Release 빌드와
+전체 테스트를 실행할 수 있습니다. DirectComposition 브리지는 Windows SDK의
+Direct3D 11, DXGI, DirectComposition 라이브러리를 사용합니다.
 
 ```powershell
 .\build.ps1 -Configuration Release
@@ -120,6 +125,7 @@ Windows ZIP과 SHA-256 파일이 자동으로 첨부됩니다. 자세한 절차�
 - [Slugcat 그래픽 프로필](docs/SlugcatGraphicsProfiles.md)
 - [로컬 자산 조사](docs/analysis/AssetFindings.md)
 - [DLL 조사](docs/analysis/DllFindings.md)
+- [원작 충실도 보강 기록](docs/analysis/RainWorldFidelityOverhaul.md)
 
 ## 에셋 및 상표
 
