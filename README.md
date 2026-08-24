@@ -20,7 +20,7 @@ RainWorld.exe, Steam 게임 프로세스, Unity Player, BepInEx를 실행하거�
 - 원작 충돌→연결 제약 순서는 유지하되 제약이 만든 모니터 바닥/외곽 모서리 관통은 같은 terrain snapshot에서 즉시 접촉 재투영
 - 원작 tick stun 감소, 기절 중 계속되는 BodyChunk·꼬리 물리, `FaceStunned`, 손 retract와 mouse attention 차단
 - HWND 수명/누락 유예, 이동하는 창 surface 및 멀티 모니터 추적
-- 전체 virtual desktop persistent DIB 기반 투명 layered overlay, 음수 모니터 좌표, click-through, tray/F1 디버그
+- 전체 virtual desktop persistent DIB 기반 투명 layered overlay, 음수 모니터 좌표, click-through, 트레이 디버그 메뉴
 - 창·커서 desktop pixel을 원작 simulation unit으로 변환하고 렌더/화면 이동에 일관되게 적용하는 2.20배 world scale
 - 마우스로 몸통을 잡아 끌고 놓아 던지는 상호작용
 - 머리에서 원작 90-unit 이내의 실제 좌/우/중 클릭에만 1.5초간 활성화되는 임시 마우스 시선
@@ -85,13 +85,11 @@ SHA-256 파일이 해당 GitHub Release에 자동으로 첨부됩니다. 자세�
 - Slugcat 위에서 마우스 왼쪽 버튼: 잡기
 - 잡은 채 이동 후 놓기: 던지기
 - 모든 모니터 밖으로 던져진 경우: 1초 후 마지막 모니터의 안전한 바닥으로 자동 복귀
-- `F1`: physics/AI/procedural graphics 디버그 표시
-- `F2`: Slugcat 외형 편집기 열기/닫기
-- `F3`: 현재 선택된 종류와 스킨으로 Slugcat 추가 스폰(최대 8마리)
-- `F4`: 다음 Slugcat 선택
 - Slugcat을 클릭하거나 잡기: 해당 개체 선택
 - tray의 `Slugcats`: 개체 스폰·선택·선택 개체 제거
-- tray 메뉴: 선택 개체의 Player 물리/기본색 및 Slugcat skin 변경, 전체 일시 정지, 종료
+- tray 메뉴: 외형 편집기, 디버그 표시, 선택 개체의 캐릭터·기본색 및 visual skin 변경, 전체 일시 정지, 종료
+
+프로그램은 시스템 키 입력을 방해하지 않도록 전역 단축키를 등록하지 않습니다.
 
 스킨 편집기는 일반적인 Windows 프로그램 구조를 사용합니다. 왼쪽 캐릭터 목록,
 가운데 파츠별 스프라이트 선택·색상 버튼, 오른쪽 실제 아틀라스 미리보기와 하단

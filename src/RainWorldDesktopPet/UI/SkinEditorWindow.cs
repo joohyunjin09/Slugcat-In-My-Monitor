@@ -58,7 +58,6 @@ namespace RainWorldDesktopPet.UI
             FormBorderStyle = FormBorderStyle.Sizable;
             StartPosition = FormStartPosition.CenterScreen;
             ShowInTaskbar = true;
-            KeyPreview = true;
             MinimumSize = new Size(920, 600);
             ClientSize = new Size(1120, 700);
             Font = new Font("Segoe UI", 9.0f, FontStyle.Regular, GraphicsUnit.Point);
@@ -79,7 +78,7 @@ namespace RainWorldDesktopPet.UI
             characterGroup.Controls.Add(characterList);
             root.Controls.Add(characterGroup, 0, 0);
 
-            GroupBox partsGroup = new GroupBox { Text = "Appearance parts", Dock = DockStyle.Fill };
+            GroupBox partsGroup = new GroupBox { Text = "Appearance Parts", Dock = DockStyle.Fill };
             TableLayoutPanel parts = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(8),
                 ColumnCount = 3, RowCount = PartNames.Length + 1 };
             parts.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 85));
@@ -103,7 +102,7 @@ namespace RainWorldDesktopPet.UI
                 parts.Controls.Add(selector, 1, i);
                 parts.Controls.Add(color, 2, i);
             }
-            entireSetCheck = new CheckBox { Text = "Apply the selected set to every available part",
+            entireSetCheck = new CheckBox { Text = "Apply Selected Set to Every Available Part",
                 AutoSize = true, Dock = DockStyle.Fill };
             parts.SetColumnSpan(entireSetCheck, 3);
             parts.Controls.Add(entireSetCheck, 0, PartNames.Length);
@@ -128,9 +127,9 @@ namespace RainWorldDesktopPet.UI
                 FlowDirection = FlowDirection.RightToLeft, WrapContents = false,
                 Padding = new Padding(0, 7, 0, 0) };
             actions.Controls.Add(ActionButton("Close", delegate { Close(); }));
-            actions.Controls.Add(ActionButton("Reload sprites", ReloadCatalog));
-            actions.Controls.Add(ActionButton("Load preset...", LoadPreset));
-            actions.Controls.Add(ActionButton("Save preset...", SavePreset));
+            actions.Controls.Add(ActionButton("Reload Sprites", ReloadCatalog));
+            actions.Controls.Add(ActionButton("Load Preset...", LoadPreset));
+            actions.Controls.Add(ActionButton("Save Preset...", SavePreset));
             actions.Controls.Add(ActionButton("Paste", PasteSetup));
             actions.Controls.Add(ActionButton("Copy", CopySetup));
             actions.Controls.Add(ActionButton("Reset", ResetAll));
@@ -166,13 +165,6 @@ namespace RainWorldDesktopPet.UI
             }
             finally { updatingControls = false; }
             previewPanel.Invalidate();
-        }
-
-        protected override void OnKeyDown(KeyEventArgs e)
-        {
-            if (e.KeyCode == Keys.Escape || e.KeyCode == Keys.F2)
-            { Close(); e.Handled = true; }
-            base.OnKeyDown(e);
         }
 
         protected override void Dispose(bool disposing)

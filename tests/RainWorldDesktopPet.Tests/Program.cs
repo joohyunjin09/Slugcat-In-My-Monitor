@@ -2166,7 +2166,7 @@ namespace RainWorldDesktopPet.Tests
                  pose.TailMeshVertexCount == SpriteRenderer.OriginalTailMeshVertexCount,
                 "procedural fallback also renders the one continuous tail mesh");
             Near(0.0, Vec2.Distance(pose.TailTip, pose.TailMeshVertices[14]),
-                0.000001, "F1 mesh diagnostics expose the point tip");
+                0.000001, "debug mesh diagnostics expose the point tip");
             Near(0.0, Vec2.Distance(before, slugcat.Center), 0.000001,
                 "debug rendering must not mutate player physics");
         }
