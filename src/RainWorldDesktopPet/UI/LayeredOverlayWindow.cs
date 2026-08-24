@@ -20,6 +20,7 @@ namespace RainWorldDesktopPet.UI
         private readonly SlugcatSkin startSkin;
         private readonly Timer renderTimer;
         private readonly NotifyIcon trayIcon;
+        private readonly Icon applicationIcon;
         private readonly ToolStripMenuItem variantMenu;
         private readonly ToolStripMenuItem visualSkinMenu;
         private readonly ToolStripMenuItem debugItem;
@@ -62,6 +63,8 @@ namespace RainWorldDesktopPet.UI
             Bounds = overlayBounds;
             renderSpace = new RenderSpace(overlayBounds);
             Text = "SlugcatInMyMonitor";
+            applicationIcon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
+            if (applicationIcon != null) Icon = applicationIcon;
 
             renderTimer = new Timer();
             // This timer is only an error-retry/fallback wakeup. Normal frames
@@ -131,7 +134,7 @@ namespace RainWorldDesktopPet.UI
             menu.Items.Add(exitItem);
 
             trayIcon = new NotifyIcon();
-            trayIcon.Icon = SystemIcons.Application;
+            trayIcon.Icon = applicationIcon ?? SystemIcons.Application;
             trayIcon.Text = "SlugcatInMyMonitor";
             trayIcon.ContextMenuStrip = menu;
             trayIcon.MouseClick += delegate(object sender, MouseEventArgs args)
@@ -183,6 +186,7 @@ namespace RainWorldDesktopPet.UI
             if (backBuffer != null) backBuffer.Dispose();
             trayIcon.Visible = false;
             trayIcon.Dispose();
+            if (applicationIcon != null) applicationIcon.Dispose();
             base.OnHandleDestroyed(e);
         }
 
@@ -533,6 +537,7 @@ namespace RainWorldDesktopPet.UI
             }
 
             settingsWindow = new SettingsWindow(this);
+            if (applicationIcon != null) settingsWindow.Icon = applicationIcon;
             settingsWindow.FormClosed += delegate { settingsWindow = null; };
             settingsWindow.Show();
             settingsWindow.Activate();
@@ -555,6 +560,7 @@ namespace RainWorldDesktopPet.UI
             try
             {
                 skinEditor = new SkinEditorWindow(gameLoop, RefreshAppearanceMenus);
+                if (applicationIcon != null) skinEditor.Icon = applicationIcon;
                 skinEditor.FormClosed += delegate
                 {
                     skinEditor = null;
