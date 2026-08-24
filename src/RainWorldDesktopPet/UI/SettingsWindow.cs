@@ -74,16 +74,18 @@ namespace RainWorldDesktopPet.UI
                 RowCount = 2
             };
             slugcatsLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-            slugcatsLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 38));
+            slugcatsLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             slugcatList = new ListBox { Dock = DockStyle.Fill, IntegralHeight = false };
             slugcatList.SelectedIndexChanged += SlugcatSelectionChanged;
             slugcatsLayout.Controls.Add(slugcatList, 0, 0);
             FlowLayoutPanel slugcatActions = new FlowLayoutPanel
             {
                 Dock = DockStyle.Fill,
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
                 FlowDirection = FlowDirection.LeftToRight,
                 WrapContents = false,
-                Padding = new Padding(0, 5, 0, 0)
+                Padding = new Padding(0)
             };
             addButton = ActionButton("Add Slugcat", delegate { app.SettingsAddSlugcat(); RefreshFromApp(); });
             nextButton = ActionButton("Select Next", delegate { app.SettingsSelectNextSlugcat(); RefreshFromApp(); });
