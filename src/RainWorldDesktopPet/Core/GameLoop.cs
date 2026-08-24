@@ -98,6 +98,8 @@ namespace RainWorldDesktopPet.Core
                 out fireSmokeStatus);
             Renderer = new SpriteRenderer(atlas, fireSmoke);
             AssetStatus += " " + fireSmokeStatus;
+            if (!string.IsNullOrEmpty(Renderer.FireSmokeGpuStatus))
+                AssetStatus += " " + Renderer.FireSmokeGpuStatus;
 #if DEBUG
             workshopLog = new WorkshopLog(true);
 #else

@@ -5,6 +5,7 @@ using System.Drawing.Imaging;
 using System.IO;
 using System.Linq;
 using System.Diagnostics;
+using System.Threading;
 using RainWorldDesktopPet.AI;
 using RainWorldDesktopPet.Core;
 using RainWorldDesktopPet.Creature;
@@ -147,6 +148,10 @@ namespace RainWorldDesktopPet.Tests
                 Run("Local FireSmoke uses the original noise textures", delegate
                 {
                     OriginalFireSmokeAssetsLoad(localInstallation);
+                });
+                Run("Local FireSmoke GPU worker completes asynchronously", delegate
+                {
+                    OriginalFireSmokeGpuWorkerCompletes(localInstallation);
                 });
                 Run("Installed Workshop mods parse without loading their DLLs",
                     delegate { LocalWorkshopIntegrationsParse(localInstallation); });
@@ -1914,6 +1919,38 @@ namespace RainWorldDesktopPet.Tests
                     "original Palettes/noise red channel is sampleable");
                 True(second >= 0.0 && second <= 1.0,
                     "original Palettes/noise2 red channel is sampleable");
+            }
+        }
+
+        private static void OriginalFireSmokeGpuWorkerCompletes(RainWorldInstallation installation)
+        {
+            string assetStatus;
+            using (FireSmokeShaderAssets assets = FireSmokeShaderAssets.TryLoad(installation,
+                out assetStatus))
+            {
+                True(assets != null, assetStatus);
+                string gpuStatus;
+                using (FireSmokeGpuRenderer gpu = FireSmokeGpuRenderer.TryCreate(assets,
+                    out gpuStatus))
+                {
+                    True(gpu != null, gpuStatus);
+                    object owner = new object();
+                    gpu.Queue(owner, 0, 7, new Vec2(320.0, 240.0), 20.0, 128.0,
+                        Vec2.Zero, 1.0, 1920, 1080, 0.8);
+                    Stopwatch wait = Stopwatch.StartNew();
+                    FireSmokeGpuRenderer.CompletedMask completed = null;
+                    while (wait.ElapsedMilliseconds < 2000 &&
+                        !gpu.TryTakeCompleted(out completed)) Thread.Sleep(5);
+                    True(completed != null, "GPU worker should finish a FireSmoke mask");
+                    True(ReferenceEquals(owner, completed.Owner), "GPU result owner");
+                    Equal(0, completed.Layer, "GPU result layer");
+                    Equal(7, completed.Generation, "GPU result generation");
+                    True(completed.Pixels != null && completed.Pixels.Length ==
+                        FireSmokeGpuRenderer.RasterSize * FireSmokeGpuRenderer.RasterSize * 4,
+                        "GPU result pixel buffer");
+                    True(completed.Pixels.Where(delegate(byte value) { return value != 0; }).Any(),
+                        "GPU FireSmoke shader should produce visible original-mask pixels");
+                }
             }
         }
 

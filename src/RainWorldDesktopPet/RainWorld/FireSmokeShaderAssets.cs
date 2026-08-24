@@ -46,6 +46,24 @@ namespace RainWorldDesktopPet.RainWorld
         }
 
         public string Status { get; private set; }
+        public int NoiseWidth { get { return noiseWidth; } }
+        public int NoiseHeight { get { return noiseHeight; } }
+        public int Noise2Width { get { return noise2Width; } }
+        public int Noise2Height { get { return noise2Height; } }
+        public bool UsesPointFiltering { get { return noiseFilter == UnityFilterPoint; } }
+        public bool UsesRepeatWrap { get { return noiseWrapU == UnityWrapRepeat && noiseWrapV == UnityWrapRepeat; } }
+        public bool UsesPointFiltering2 { get { return noise2Filter == UnityFilterPoint; } }
+        public bool UsesRepeatWrap2 { get { return noise2WrapU == UnityWrapRepeat && noise2WrapV == UnityWrapRepeat; } }
+
+        public float[] CopyNoisePixels()
+        {
+            return (float[])noise.Clone();
+        }
+
+        public float[] CopyNoise2Pixels()
+        {
+            return (float[])noise2.Clone();
+        }
 
         public static FireSmokeShaderAssets TryLoad(RainWorldInstallation installation,
             out string status)

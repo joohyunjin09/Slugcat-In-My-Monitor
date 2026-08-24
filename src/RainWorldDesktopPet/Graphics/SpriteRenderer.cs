@@ -57,6 +57,9 @@ namespace RainWorldDesktopPet.Graphics
         private readonly Bitmap tailRaster;
         private readonly System.Drawing.Graphics tailRasterGraphics;
         private readonly FireSmokeShaderAssets fireSmokeAssets;
+        private readonly FireSmokeGpuRenderer fireSmokeGpu;
+        private readonly string fireSmokeGpuStatus;
+        private bool fireSmokeGpuFaulted;
         private readonly double[] fireSmokeDist;
         private readonly double[] fireSmokeUvNoise;
         private readonly Dictionary<AbilityEffect, FireSmokeRasterCache> fireSmokeRasters =
@@ -118,6 +121,8 @@ namespace RainWorldDesktopPet.Graphics
             // shaders remain simple single-role adapters.
             if (fireSmokeAssets != null)
             {
+                fireSmokeGpu = FireSmokeGpuRenderer.TryCreate(fireSmokeAssets,
+                    out fireSmokeGpuStatus);
                 fireSmokeDist = new double[FireSmokeShaderRasterSize *
                     FireSmokeShaderRasterSize];
                 fireSmokeUvNoise = new double[FireSmokeShaderRasterSize *
@@ -128,6 +133,8 @@ namespace RainWorldDesktopPet.Graphics
             lightSourceShaderMask = CreateEffectShaderMask(EffectShaderMask.LightSource);
             shockWaveShaderMask = CreateEffectShaderMask(EffectShaderMask.ShockWave);
         }
+
+        public string FireSmokeGpuStatus { get { return fireSmokeGpuStatus; } }
 
         public bool UsesLocalAtlas { get { return atlas != null; } }
         public DmsSkinDefinition ActiveDmsSkin
@@ -1365,6 +1372,7 @@ namespace RainWorldDesktopPet.Graphics
         private void DrawAbilityObjects(System.Drawing.Graphics graphics,
             Slugcat slugcat, SlugcatPose pose, double interpolation)
         {
+            ConsumeGpuFireSmokeMasks();
             SaintAbilityController saint = slugcat.AbilityController as SaintAbilityController;
             if (saint != null && saint.Mode != SaintTongueMode.Retracted)
             {
@@ -1618,9 +1626,16 @@ namespace RainWorldDesktopPet.Graphics
             public readonly byte[] FrontPixels = new byte[FireSmokeShaderRasterSize *
                 FireSmokeShaderRasterSize * 4];
             public long SimulationTick = long.MinValue;
+            public int BackGeneration;
+            public int FrontGeneration;
+            public bool BackPending;
+            public bool FrontPending;
+            public bool IsDisposed;
 
             public void Dispose()
             {
+                if (IsDisposed) return;
+                IsDisposed = true;
                 BackRaster.Dispose();
                 FrontRaster.Dispose();
             }
@@ -1642,16 +1657,65 @@ namespace RainWorldDesktopPet.Graphics
             double frontSize = baseScale * 0.9 * 16.0;
             if (cache.SimulationTick != simulationTick)
             {
-                RenderOriginalFireSmoke(cache.BackRaster, cache.BackPixels, center,
-                    rotation, backSize, alpha * 0.8);
-                RenderOriginalFireSmoke(cache.FrontRaster, cache.FrontPixels, center,
-                    rotation, frontSize, alpha * 0.6);
+                if (fireSmokeGpu != null && !fireSmokeGpuFaulted)
+                {
+                    cache.BackGeneration++;
+                    cache.FrontGeneration++;
+                    QueueGpuFireSmoke(cache, 0, cache.BackGeneration, center, rotation,
+                        backSize, alpha * 0.8, ref cache.BackPending);
+                    QueueGpuFireSmoke(cache, 1, cache.FrontGeneration, center, rotation,
+                        frontSize, alpha * 0.6, ref cache.FrontPending);
+                }
+                else
+                {
+                    RenderOriginalFireSmoke(cache.BackRaster, cache.BackPixels, center,
+                        rotation, backSize, alpha * 0.8);
+                    RenderOriginalFireSmoke(cache.FrontRaster, cache.FrontPixels, center,
+                        rotation, frontSize, alpha * 0.6);
+                }
                 cache.SimulationTick = simulationTick;
             }
             DrawEffectSprite(graphics, cache.BackRaster, center, rotation, backSize,
                 GetFireSmokeTintAttributes(back));
             DrawEffectSprite(graphics, cache.FrontRaster, center, rotation, frontSize,
                 GetFireSmokeTintAttributes(front));
+        }
+
+        private void QueueGpuFireSmoke(FireSmokeRasterCache cache, int layer,
+            int generation, Vec2 center, double rotation, double size,
+            double vertexAlpha, ref bool pending)
+        {
+            if (pending) return;
+            pending = true;
+            fireSmokeGpu.Queue(cache, layer, generation, center, rotation, size,
+                effectWorldOrigin, effectRenderScale, effectScreenWidth,
+                effectScreenHeight, vertexAlpha);
+        }
+
+        private void ConsumeGpuFireSmokeMasks()
+        {
+            if (fireSmokeGpu == null || fireSmokeGpuFaulted) return;
+            FireSmokeGpuRenderer.CompletedMask completed;
+            while (fireSmokeGpu.TryTakeCompleted(out completed))
+            {
+                FireSmokeRasterCache cache = completed.Owner as FireSmokeRasterCache;
+                if (cache == null || cache.IsDisposed) continue;
+                bool isBack = completed.Layer == 0;
+                if (isBack) cache.BackPending = false;
+                else cache.FrontPending = false;
+                if (completed.Superseded) continue;
+                int currentGeneration = isBack ? cache.BackGeneration : cache.FrontGeneration;
+                if (completed.Pixels == null)
+                {
+                    fireSmokeGpuFaulted = true;
+                    continue;
+                }
+                if (completed.Generation != currentGeneration) continue;
+                Bitmap raster = isBack ? cache.BackRaster : cache.FrontRaster;
+                byte[] pixels = isBack ? cache.BackPixels : cache.FrontPixels;
+                Buffer.BlockCopy(completed.Pixels, 0, pixels, 0, pixels.Length);
+                UploadFireSmokePixels(raster, pixels);
+            }
         }
 
         private void RenderOriginalFireSmoke(Bitmap raster, byte[] pixels, Vec2 center,
@@ -1705,6 +1769,11 @@ namespace RainWorldDesktopPet.Graphics
                     index += 4;
                 }
             });
+            UploadFireSmokePixels(raster, pixels);
+        }
+
+        private static void UploadFireSmokePixels(Bitmap raster, byte[] pixels)
+        {
             BitmapData data = raster.LockBits(new Rectangle(0, 0, raster.Width, raster.Height),
                 ImageLockMode.WriteOnly, PixelFormat.Format32bppPArgb);
             try { Marshal.Copy(pixels, 0, data.Scan0, pixels.Length); }
@@ -1749,6 +1818,7 @@ namespace RainWorldDesktopPet.Graphics
             for (int i = 0; i < staleFireSmokeEffects.Count; i++)
             {
                 AbilityEffect effect = staleFireSmokeEffects[i];
+                if (fireSmokeGpu != null) fireSmokeGpu.Release(fireSmokeRasters[effect]);
                 fireSmokeRasters[effect].Dispose();
                 fireSmokeRasters.Remove(effect);
             }
@@ -1881,7 +1951,10 @@ namespace RainWorldDesktopPet.Graphics
             tailRasterGraphics.Dispose();
             tailRaster.Dispose();
             foreach (KeyValuePair<AbilityEffect, FireSmokeRasterCache> item in fireSmokeRasters)
+            {
+                if (fireSmokeGpu != null) fireSmokeGpu.Release(item.Value);
                 item.Value.Dispose();
+            }
             fireSmokeRasters.Clear();
             foreach (KeyValuePair<int, ImageAttributes> item in fireSmokeTintAttributes)
                 item.Value.Dispose();
