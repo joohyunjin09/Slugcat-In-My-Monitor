@@ -186,7 +186,7 @@ namespace RainWorldDesktopPet.Graphics
             new double[] { 4.0, 7.0, 7.0, 7.0 }, 6.0);
         private static readonly SlugcatTailProfile SpearmasterTail = new SlugcatTailProfile(
             "SpearmasterTail", new double[] { 8.0, 6.0, 4.0, 2.0 },
-            new double[] { 4.0, 7.0, 7.0, 7.0 }, 8.0);
+            new double[] { 4.0, 7.0, 7.0, 7.0 }, 6.0);
 
         public static readonly SlugcatGraphicsProfile White = new SlugcatGraphicsProfile(
             SlugcatId.White, "White", "White", Color.White, Color.FromArgb(16, 16, 16),
@@ -223,7 +223,7 @@ namespace RainWorldDesktopPet.Graphics
             "BodyA", "HipsA", "HeadA", 0.76, 0.76, 0.85, 0.6, SpearmasterTail, 12, 19,
             SlugcatGraphicsExtensionKind.SpearmasterSpeckles,
             new string[] { "TailSpeckles", "CosmeticPearl(inactive)" },
-            new string[] { "BodyA", "HipsA", "HeadA0", "FaceA0", "FaceB0", "FaceStunned", "FaceDead", "tinyStar", "BioSpear1", "JetFishEyeA", "BodyPearl" });
+            new string[] { "BodyA", "HipsA", "HeadA0", "FaceA0", "FaceB0", "FaceStunned", "FaceDead", "tinyStar", "BioSpear1", "BioSpear2", "BioSpear3", "JetFishEyeA", "BodyPearl" });
 
         public static readonly SlugcatGraphicsProfile Rivulet = new SlugcatGraphicsProfile(
             SlugcatId.Rivulet, "Rivulet", "Rivulet", Color.FromArgb(145, 204, 240), Color.FromArgb(16, 16, 16),

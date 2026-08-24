@@ -99,13 +99,13 @@ DesktopPetAI
 - 위 입력이면 X 속도 chest/hips `10*x`, `8*x`; 그 외 `15*x`, `13*x`.
 - `AnimationIndex.Flip`, `BodyModeIndex.Default`를 사용한다.
 
-**Graphics:** 8 `ExplosionSmoke`, radius 160/life 3 white `ExplosionLight`, 10 white `Spark(standard=4, exceptional=18)`. `ExplosionSmoke`는 lifeTime 170-400, rad .6-1.5, 목표점 drift, 회전, 두 `FireSmoke` layer의 1.1/.9 scale과 .8/.6 alpha를 유지한다. `Spark`는 4-position trail, 초기 0-30 offset, 0.4-0.9 gravity, terrain bounce .5, 90%/10% lifetime 분기를 유지한다. safe 이상 idle tick에는 25% smoke와 50% `Spark(4,8)`를 원본 확률로 생성한다.
+**Graphics:** 8 `ExplosionSmoke`, radius 160/life 3 white `ExplosionLight`, 10 white `Spark(standard=4, exceptional=18)`. `ExplosionSmoke`는 lifeTime 170-400, rad .6-1.5, 목표점 drift, 회전, 두 `FireSmoke` layer의 1.1/.9 scale과 .8/.6 alpha를 유지한다. `Futile_White`의 16px quad를 반영해 world radius에 half-size 8을 곱한다. `Spark`는 4-position trail, 초기 0-30 offset, 0.4-0.9 gravity, terrain bounce .5, 90%/10% lifetime 분기를 유지한다. safe 이상 idle tick에는 25% smoke와 50% `Spark(4,8)`를 원본 확률로 생성한다.
 
 **SoundID:** `Fire_Spear_Explode`, 호출 volume `0.3 + random*0.3`, pitch `0.5 + random*2`. `sounds.txt`의 clip volume/pitch 범위를 그 위에 곱한다.
 
 **Desktop Implementation:** `ArtificerAbilityController.UpdateAfterMovement`, `Slugcat.Step`, `SpriteRenderer.DrawAbilityObjects`, `RainWorldAudioEngine`.
 
-**Known Difference:** 원작 room의 creature/weapon 목록이 없으므로 `InGameNoise(position,8000,...)`는 생성하지 않는다. 이 원작 jump/parry 분기에는 `Room.ScreenMovement` 호출이 없으므로 임의 카메라 흔들림을 추가하지 않는다. ZeroG와 수중 room 상태는 데스크톱 지형 모델에 없어 해당 분기는 비활성이다.
+**Known Difference:** 원작 room의 creature/weapon 목록이 없으므로 `InGameNoise(position,8000,...)`는 생성하지 않는다. GDI에는 `FireSmoke`, `FlatLight`, `LightSource` shader가 없어 동일 수치의 scale/alpha/layer를 radial gradient로 어댑트한다. 이 원작 jump/parry 분기에는 `Room.ScreenMovement` 호출이 없으므로 임의 카메라 흔들림을 추가하지 않는다. ZeroG와 수중 room 상태는 데스크톱 지형 모델에 없어 해당 분기는 비활성이다.
 
 ### Explosive Parry
 
@@ -177,7 +177,7 @@ DesktopPetAI
 
 **Activation Condition:** conscious, pickup held, free hand, no edible target, neutral `x/y/jump/throw`, graphics available. 현재 한 손 grasp 모델에서 `heldSpear == null`이 free-hand 판정이다.
 
-**Input Sequence:** `Pickup=true`를 중립 상태로 계속 유지한다. 놓거나 방향/jump/throw 입력을 주면 progress가 `Lerp(progress,0,.05)`로 돌아가고 `<.025`에서 0이다.
+**Input Sequence:** `Pickup=true`를 중립 상태로 계속 유지한다. Pickup을 놓으면 progress가 `Lerp(progress,0,.05)`로 돌아가고 `<.025`에서 0이다. Pickup을 계속 누른 채 방향/jump/throw가 중립 gate를 깨면 원작처럼 progress는 감소하지 않고 그 tick 값에 고정된다.
 
 **Counters:** progress 0에서 line `Random.Range(0, lines-1)`에 해당하는 0/1, row 0-3, type 0-2 선택. `<.1`은 `Lerp(p,.11,.1)`, 이후 `Lerp(p,1,.05)`. `>.95`에서 1로 고정되고 같은 tick에 생성한다. 고정 입력 replay에서 실제 생성 tick은 79다.
 
@@ -207,9 +207,9 @@ DesktopPetAI
 
 **Counters:** spear age는 throw 후 증가한다. 별도 임의 lifetime 삭제를 두지 않는다.
 
-**Physics Changes:** horizontal base velocity `(player.vx*.2 + dir*40, player.vy*.5 + originalY 1.5)`; Spearmaster skill 2에서 X ×1.2, 즉 정지 기준 48. vertical은 `(player.vx*.5, dirY*40)`. throw position `chest + dir*10 + originalY 4`. 원작 `ThrowObject/ThrownSpear`에 없는 임의 몸 recoil은 넣지 않는다. spear chunk radius 5/mass .07, air friction .999, base gravity .9, thrown 추가 gravity .45, bounce/surface friction .4, damage bonus 1.25다. 생성 직후 `Spear_makeNeedle(type,true)` 상태와 10-19 segment `Spear.Umbilical`을 유지한다.
+**Physics Changes:** horizontal base velocity `(player.vx*.2 + dir*40, player.vy*.5 + originalY 1.5)`; Spearmaster skill 2에서 X ×1.2, 즉 정지 기준 48. vertical은 `(player.vx*.5, dirY*40)`. throw position `chest + dir*10 + originalY 4`. `ThrowObject`의 몸 반동도 chest `+dir*8`, hips `-dir*4`로 적용한다. spear chunk radius 5/mass .07, air friction .999, free gravity .9, thrown 상태의 순 중력 .45, bounce/surface friction .4, damage bonus 1.25다. 생성 직후 `Spear_makeNeedle(type,true)` 상태와 10-19 segment `Spear.Umbilical`을 유지한다.
 
-**Graphics:** 완성 창도 절차적 대체 그림이 아니라 원본 `BioSpear1..3` atlas element를 직접 그린다. connected needle은 white, disconnect 뒤에는 400 tick fade를 적용한다. `Thrown`/`StuckInCreature` pivot은 anchorY .85, 그 외는 .5이며 umbilical segment를 보간 렌더링한다.
+**Graphics:** 완성 창도 절차적 대체 그림이 아니라 원본 `BioSpear1..3` atlas element를 직접 그린다. grasp 0의 실제 `SlugcatHand` 위치와 `spearDir` 보행 주기를 사용하고, 원본 `ChangeOverlap` 조건으로 몸 앞/뒤 layer를 바꾼다. 투척 뒤 5 tick 동안 던진 손은 spear를 추적하고 반대 손에는 `-dir*3` follow-through를 준다. connected needle은 white, disconnect 뒤에는 400 tick fade를 적용한다. `Thrown`/`StuckInCreature` pivot은 anchorY .85, 그 외는 .5이며 umbilical segment를 보간 렌더링한다.
 
 **SoundID:** 추출 `SM_Spear_Pull`/`SM_Spear_Grab`, release `Slugcat_Throw_Spear`, 비행 `Spear_Thrown_Through_Air_LOOP`, free 회전 `Spear_Spinning_Through_Air_LOOP`, 지형 `Spear_Stick_In_Wall`/`Spear_Stick_In_Ground`/`Spear_Bounce_Off_Wall`, creature adapter `Spear_Stick_In_Creature`/`Spear_Damage_Creature_But_Fall_Out`/`Spear_Bounce_Off_Creauture_Shell`을 사용한다. loop는 mode 전이에 맞춰 시작/정지한다.
 
@@ -438,7 +438,7 @@ AI에서 velocity, anchor, spear target, rollDirection, cooldown을 직접 쓰�
 2. 캐릭터 전환 시 Artificer effect/sound, SpearMaster needle, Saint tongue,
    Rivulet 전용 sprite extension 정리.
 3. Artificer horizontal/up explosive jump chunk assignment와 parry counter.
-4. SpearMaster 79 tick extraction, `Spear_makeNeedle`, grasp/throw SoundID, throw velocity, umbilical 10-19 segments, 다음 tick gravity 1.35.
+4. SpearMaster 79 tick extraction, Pickup 유지 중 non-neutral progress freeze, `Spear_makeNeedle`, grasp 0 hand target, throw SoundID/velocity/body recoil, 5-tick follow-through, umbilical 10-19 segments, thrown 순 중력 .45.
 5. SpearMaster 8단계 AI, 타깃 없는 hold, 투척 후 recovery 및 접촉 상태 전이당 1회 bounce sound.
 6. Rivulet 공통 air-control과 stats-driven standing jump 6/5.
 7. Saint shoot, window terrain attach, rope state, jump release.

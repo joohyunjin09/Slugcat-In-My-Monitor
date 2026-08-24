@@ -1768,13 +1768,13 @@ namespace RainWorldDesktopPet.Tests
                 Near(expectedLengths[i], graphics.Tail.Segments[i].Length, 0.000001,
                     "Spearmaster tail length " + i);
             }
-            Near(8.0, pose.TailRootRadius, 0.000001, "Spearmaster mesh root width");
+            Near(6.0, pose.TailRootRadius, 0.000001, "Spearmaster mesh root width");
             Near(0.76, pose.VisualBodyScale, 0.000001, "Spearmaster body scale");
             Near(0.76, pose.VisualHipsScale, 0.000001, "Spearmaster hips scale");
             Near(0.85, Math.Abs(pose.HeadScaleX), 0.000001, "Spearmaster head scale");
             Near(0.6, pose.ArmShoulderScale, 0.000001, "Spearmaster shoulder factor");
             Vec2[] mesh = SpriteRenderer.BuildOriginalTailMeshVertices(pose);
-            Near(16.0, Vec2.Distance(mesh[0], mesh[1]), 0.000001,
+            Near(12.0, Vec2.Distance(mesh[0], mesh[1]), 0.000001,
                 "Spearmaster continuous mesh root diameter");
             Equal(19, pose.ExtraParts.Length, "16 tail speckles plus three pearl sprites");
             for (int i = 0; i < 15; i++)

@@ -288,14 +288,20 @@ namespace RainWorldDesktopPet.Graphics
             SpearmasterAbilityController ability =
                 slugcat.AbilityController as SpearmasterAbilityController;
             double spearProgress = ability == null ? 0.0 : ability.SpearProgress;
+            int selectedRow = ability == null ? 0 : ability.SpearRow;
+            int selectedLine = ability == null ? 0 : ability.SpearLine;
+            SpineSample selectedSpine = new SpineSample();
+            Vec2 selectedPosition = Vec2.Zero;
             for (int row = 0; row < 5; row++)
             {
                 double fraction = row / 4.0;
                 double along = MathUtil.Lerp(0.4, 0.95, Math.Pow(fraction, 0.8));
                 SpineSample spine = SampleSpine(pose, along);
                 double depth = 0.8 * Math.Sqrt(fraction);
+                double growthTint = (0.8 - depth) * spearProgress;
                 Color tint = LerpColor(pose.VisualBodyColor,
-                    LerpColor(Color.White, pose.VisualBodyColor, 0.3), 0.2 + depth);
+                    LerpColor(Color.White, pose.VisualBodyColor, 0.3),
+                    0.2 + depth + growthTint);
                 for (int line = 0; line < 3; line++)
                 {
                     double around = (line + (row % 2 == 0 ? 0.5 : 0.0)) / 2.0;
@@ -318,15 +324,17 @@ namespace RainWorldDesktopPet.Graphics
                     part.ScaleY = 1.0;
                     if (ability != null && spearProgress > 0.0)
                     {
-                        if (row == ability.SpearRow && line == ability.SpearLine)
+                        if (row == selectedRow && line == selectedLine)
                         {
                             part.ScaleX *= 1.0 + spearProgress * 2.0;
                             part.ScaleY *= 1.0 + spearProgress * 2.0;
+                            selectedSpine = spine;
+                            selectedPosition = part.RenderPosition;
                         }
-                        else if ((row == ability.SpearRow + 1 && line == ability.SpearLine) ||
-                            (row == ability.SpearRow - 1 && line == ability.SpearLine) ||
-                            (row == ability.SpearRow && line == ability.SpearLine + 1) ||
-                            (row == ability.SpearRow && line == ability.SpearLine - 1))
+                        else if ((row == selectedRow + 1 && line == selectedLine) ||
+                            (row == selectedRow - 1 && line == selectedLine) ||
+                            (row == selectedRow && line == selectedLine + 1) ||
+                            (row == selectedRow && line == selectedLine - 1))
                         {
                             part.ScaleX *= 1.0 + spearProgress;
                             part.ScaleY *= 1.0 + spearProgress;
@@ -344,16 +352,15 @@ namespace RainWorldDesktopPet.Graphics
             ResetHidden(spear, 27, "TailSpeckles", "BioSpear1");
             if (ability != null && spearProgress > 0.0)
             {
-                double rowFraction = ability.SpearRow / 4.0;
-                SpineSample spine = SampleSpine(pose,
-                    MathUtil.Lerp(0.4, 0.95, Math.Pow(rowFraction, 0.8)));
                 spear.Element = "BioSpear" + (ability.SpearType % 3 + 1);
-                spear.LastPosition = spine.Position;
-                spear.CurrentPosition = spine.Position;
-                spear.RenderPosition = spine.Position;
-                spear.SpritePosition = spine.Position;
-                Vec2 direction = new Vec2(spine.Direction.Y, -spine.Direction.X);
-                if (direction.Normalized.Y > 0.35) direction *= -1.0;
+                spear.LastPosition = selectedPosition;
+                spear.CurrentPosition = selectedPosition;
+                spear.RenderPosition = selectedPosition;
+                spear.SpritePosition = selectedPosition;
+                spear.ConnectionPosition = selectedSpine.Position;
+                Vec2 direction = selectedSpine.Perpendicular;
+                // Original checks y-up > .35; desktop simulation is y-down.
+                if (direction.Normalized.Y < -0.35) direction *= -1.0;
                 spear.Rotation = VecToDegrees(direction);
                 spear.ScaleX = 1.0;
                 spear.ScaleY = -spearProgress * 0.5;
@@ -409,7 +416,9 @@ namespace RainWorldDesktopPet.Graphics
             SpineSample sample = new SpineSample();
             sample.Position = Vec2.Lerp(previous, current, local);
             sample.Direction = direction;
-            sample.Perpendicular = direction.Perpendicular;
+            // Custom.PerpendicularVector(-y,x) converted from y-up to desktop
+            // y-down is the negative of Vec2.Perpendicular.
+            sample.Perpendicular = -direction.Perpendicular;
             sample.Radius = MathUtil.Lerp(pose.TailRadii[previousIndex],
                 pose.TailRadii[currentIndex], local);
             return sample;
