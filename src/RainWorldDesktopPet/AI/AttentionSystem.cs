@@ -8,6 +8,7 @@ namespace RainWorldDesktopPet.AI
         Mouse,
         Window,
         ScreenEdge,
+        Food,
         RandomPoint
     }
 

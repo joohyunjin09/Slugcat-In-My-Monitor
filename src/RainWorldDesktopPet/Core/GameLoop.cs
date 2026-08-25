@@ -87,6 +87,7 @@ namespace RainWorldDesktopPet.Core
             int aiSeed = unchecked(Environment.TickCount * 397 ^
                 (spawnIndex + 1) * 7919);
             AI = new DesktopPetAI(aiSeed, spawnIndex);
+            Foods = new DesktopFoodManager(unchecked(aiSeed ^ 0x45A91));
             AI.Attention.SetTarget(AttentionKind.RandomPoint,
                 spawn + new Vec2(Slugcat.State.Facing * 60.0, -20.0));
             RainWorldAssetLoader assetLoader = new RainWorldAssetLoader(installation);
@@ -116,6 +117,7 @@ namespace RainWorldDesktopPet.Core
         public readonly DesktopCollisionWorld World;
         public readonly Slugcat Slugcat;
         public readonly DesktopPetAI AI;
+        public readonly DesktopFoodManager Foods;
         public readonly SlugcatGraphics Graphics;
         public readonly SpriteRenderer Renderer;
         public readonly RainWorldInstallation Installation;
@@ -231,6 +233,7 @@ namespace RainWorldDesktopPet.Core
             int steps = 0;
             while (steps < 3 && fixedTimeStep.ConsumeStep())
             {
+                Foods.StepPhysics(World);
                 if (!Slugcat.State.Conscious || Slugcat.State.Dead ||
                     Slugcat.State.StunCounter > 0)
                 {
@@ -244,6 +247,9 @@ namespace RainWorldDesktopPet.Core
                 VirtualInput input = Slugcat.IsGrabbed
                     ? VirtualInput.Neutral
                     : AI.Step(Slugcat, World, mouse, mouseAttention);
+                VirtualInput foodInput;
+                if (!Slugcat.IsGrabbed && Foods.TryProduceInput(Slugcat, Graphics,
+                    AI.Attention, out foodInput)) input = foodInput;
                 Slugcat.Step(input, World, mouse.Position, mouse.Velocity);
                 RecoverFromDesktopEscape();
                 if (!Slugcat.State.Conscious || Slugcat.State.Dead ||
@@ -255,6 +261,7 @@ namespace RainWorldDesktopPet.Core
                     AI.MouseAttentionActive && Slugcat.State.Conscious &&
                         !Slugcat.State.Dead && Slugcat.State.StunCounter < 1,
                     World);
+                Foods.StepInteraction(Slugcat, Graphics);
                 simulationTick++;
                 steps++;
             }
@@ -269,6 +276,22 @@ namespace RainWorldDesktopPet.Core
             if (Paused) return;
             Vec2 surfaceDelta = Slugcat.ApplyMovingSurfaceDelta(World);
             Graphics.ApplyMovingSurfaceDelta(surfaceDelta);
+            Foods.ApplyMovingSurfaceDelta(World);
+        }
+
+        public bool FeedDangleFruit()
+        {
+            return Foods.TrySpawnDangleFruit(Slugcat, World);
+        }
+
+        public bool FeedEggBugEgg()
+        {
+            return Foods.TrySpawnEggBugEgg(Slugcat, World);
+        }
+
+        public void ClearFoods()
+        {
+            Foods.Clear();
         }
 
         public SlugcatPose BuildPose()
