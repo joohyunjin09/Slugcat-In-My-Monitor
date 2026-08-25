@@ -16,6 +16,7 @@ namespace
 {
     constexpr int MaximumSurfaces = 8;
     constexpr UINT MaximumSmokeEffects = 256;
+    constexpr ULONGLONG InactiveSurfaceReleaseMilliseconds = 10000;
 
     struct GpuSmokeEffect
     {
@@ -32,6 +33,7 @@ namespace
         UINT Width = 0;
         UINT Height = 0;
         bool Active = false;
+        ULONGLONG InactiveSince = 0;
     };
 
     struct EffectVertex
@@ -173,8 +175,12 @@ float4 PSMain(PixelInput input) : SV_TARGET { float2 p=input.uv*2-1;
             if (slot<0 || slot>=MaximumSurfaces || !width || !height) return E_INVALIDARG;
             Surface& s=list[slot];
             if (s.CompositionSurface && s.Width==width && s.Height==height) return S_OK;
-            if (s.Visual) { parent->RemoveVisual(s.Visual.Get()); s.Visual.Reset();
-                s.CompositionSurface.Reset(); }
+            if (s.Visual) {
+                HRESULT remove=parent->RemoveVisual(s.Visual.Get());
+                if (FAILED(remove)) return remove;
+                s.Visual.Reset(); s.CompositionSurface.Reset();
+                s.Width=0; s.Height=0; s.Active=false; s.InactiveSince=0;
+            }
             HRESULT hr=CompositionDevice->CreateSurface(width,height,
                 DXGI_FORMAT_B8G8R8A8_UNORM,DXGI_ALPHA_MODE_PREMULTIPLIED,
                 &s.CompositionSurface);
@@ -182,7 +188,7 @@ float4 PSMain(PixelInput input) : SV_TARGET { float2 p=input.uv*2-1;
             if (FAILED(hr=CompositionDevice->CreateVisual(&s.Visual))) return hr;
             if (FAILED(hr=s.Visual->SetContent(s.CompositionSurface.Get()))) return hr;
             if (FAILED(hr=parent->AddVisual(s.Visual.Get(),TRUE,nullptr))) return hr;
-            s.Width=width; s.Height=height; s.Active=true; return S_OK;
+            s.Width=width; s.Height=height; s.Active=true; s.InactiveSince=0; return S_OK;
         }
 
         static HRESULT SetVisual(Surface& s,float x,float y)
@@ -190,7 +196,7 @@ float4 PSMain(PixelInput input) : SV_TARGET { float2 p=input.uv*2-1;
             HRESULT hr=s.Visual->SetOffsetX(x); if (FAILED(hr)) return hr;
             if (FAILED(hr=s.Visual->SetOffsetY(y))) return hr;
             if (FAILED(hr=s.Visual->SetContent(s.CompositionSurface.Get()))) return hr;
-            s.Active=true; return S_OK;
+            s.Active=true; s.InactiveSince=0; return S_OK;
         }
 
         HRESULT Present(int slot,const void* pixels,UINT width,UINT height,
@@ -273,18 +279,34 @@ float4 PSMain(PixelInput input) : SV_TARGET { float2 p=input.uv*2-1;
             return SetVisual(s,x,y);
         }
 
-        static HRESULT ApplyMask(std::array<Surface,MaximumSurfaces>& list,UINT mask)
+        static HRESULT ApplyMask(std::array<Surface,MaximumSurfaces>& list,
+            IDCompositionVisual* parent,UINT mask,ULONGLONG now)
         {
-            for (int i=0;i<MaximumSurfaces;++i) { Surface& s=list[i];
-                bool active=(mask&(1u<<i))!=0; if (s.Visual && !active && s.Active) {
-                    HRESULT hr=s.Visual->SetContent(nullptr); if (FAILED(hr)) return hr; }
-                s.Active=active; } return S_OK;
+            for (int i=0;i<MaximumSurfaces;++i) {
+                Surface& s=list[i];
+                bool active=(mask&(1u<<i))!=0;
+                if (active) {
+                    s.Active=true; s.InactiveSince=0; continue;
+                }
+                if (s.Visual && s.Active) {
+                    HRESULT hr=s.Visual->SetContent(nullptr); if (FAILED(hr)) return hr;
+                }
+                s.Active=false;
+                if (!s.Visual) { s.InactiveSince=0; continue; }
+                if (!s.InactiveSince) { s.InactiveSince=now; continue; }
+                if (now-s.InactiveSince<InactiveSurfaceReleaseMilliseconds) continue;
+                HRESULT hr=parent->RemoveVisual(s.Visual.Get()); if (FAILED(hr)) return hr;
+                s.Visual.Reset(); s.CompositionSurface.Reset();
+                s.Width=0; s.Height=0; s.InactiveSince=0;
+            }
+            return S_OK;
         }
 
         HRESULT Commit(UINT activeMask,UINT effectMask)
         {
-            HRESULT hr=ApplyMask(Surfaces,activeMask); if (FAILED(hr)) return hr;
-            if (FAILED(hr=ApplyMask(EffectSurfaces,effectMask))) return hr;
+            ULONGLONG now=GetTickCount64();
+            HRESULT hr=ApplyMask(Surfaces,BaseRoot.Get(),activeMask,now); if (FAILED(hr)) return hr;
+            if (FAILED(hr=ApplyMask(EffectSurfaces,EffectRoot.Get(),effectMask,now))) return hr;
             return CompositionDevice->Commit();
         }
     };
