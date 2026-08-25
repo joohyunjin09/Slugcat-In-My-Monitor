@@ -95,8 +95,8 @@ float4 PSMain(PixelInput input) : SV_TARGET { float2 p=input.uv*2-1;
     // Procedural value noise needs extra density to stand in for the original
     // noise textures, but too much turns the silhouette into powder. Keep the
     // screen turbulence moderately detailed and the local breakup coarser.
-    const float screenNoiseDensity=24.0;
-    const float localNoiseDensity=12.0;
+    const float screenNoiseDensity=18.0;
+    const float localNoiseDensity=8.0;
     // FireSmoke's material is shared: particles sample one common turbulence
     // field. Their position, scale and rotation expose different parts of it;
     // a private per-particle offset makes the cloud look like separate blobs.
