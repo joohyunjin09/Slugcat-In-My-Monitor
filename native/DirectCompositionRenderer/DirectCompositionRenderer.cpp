@@ -74,12 +74,18 @@ float4 PSMain(PixelInput input) : SV_TARGET { float2 p=input.uv*2-1;
         float shape=input.seed<-1.5 ? radial*radial : pow(radial,.65);
         float alpha=shape*input.color.a;
         return float4(input.color.rgb*alpha,alpha); }
-    // Evaluate FireSmoke directly per render-target fragment. The procedural
-    // shape remains continuous, but coverage is binary so a touched output
-    // pixel receives the smoke color without edge anti-aliasing or UV-grid
-    // pixelation.
-    float2 stableUv=input.uv;
-    float dist=saturate(1-length(p));
+    // Rain World presents FireSmoke through a low-resolution-looking pixel
+    // grid. Anchor that grid in render-target space instead of particle UVs,
+    // so every 2x2 output cell samples one shader point and keeps one color
+    // even while the smoke quad scales or rotates.
+    const float pixelCell=2.0;
+    float2 cellCenter=floor(input.position.xy/pixelCell)*pixelCell+
+        pixelCell*.5;
+    float2 pixelDelta=cellCenter-input.position.xy;
+    float2 stableUv=input.uv+ddx(input.uv)*pixelDelta.x+
+        ddy(input.uv)*pixelDelta.y;
+    float2 smokeP=stableUv*2-1;
+    float dist=saturate(1-length(smokeP));
     const float rain=.5; const float tau=6.28318530718;
     // SpriteRenderer adds (Lifetime % 97) * .113 to the smoke seed.
     // Remove that integer lifetime component here so one particle keeps the
