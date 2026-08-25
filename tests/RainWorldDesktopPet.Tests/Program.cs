@@ -100,6 +100,7 @@ namespace RainWorldDesktopPet.Tests
             Run("All render paths expose one continuous original tail mesh", OriginalTailMeshIsContinuous);
             Run("Tail mesh topology stays continuous through movement and stun", TailMeshStaysContinuousAcrossStates);
             Run("Sit and sleep flow through VirtualInput into movement", RestPosturesUseVirtualInput);
+            Run("Movement wakes a curled rest posture before locomotion", MovementWakesRestPosture);
             Run("Original Stand forces keep the upper body upright", StandForcesKeepUpperBodyUpright);
             Run("Idle and rest poses do not cycle walking frames", IdleAndRestFramesStayStill);
             Run("Crawl idle has zero facing-dependent drift for 30 seconds", CrawlIdleHasNoFacingDrift);
@@ -1732,6 +1733,48 @@ namespace RainWorldDesktopPet.Tests
             slugcat.Movement.ApplyInput(
                 new VirtualInput(0, 0, false, false, VirtualPosture.Sit), world);
             True(slugcat.State.Animation == AnimationIndex.Sit, "sit posture must be interpreted by movement");
+        }
+
+        private static void MovementWakesRestPosture()
+        {
+            DesktopCollisionWorld world = new DesktopCollisionWorld(new WindowEnumerator());
+            world.Refresh(IntPtr.Zero);
+            Slugcat slugcat = new Slugcat(new Vec2(300.0, 300.0));
+
+            slugcat.BodyChunks[0].Position = new Vec2(292.0, 300.0);
+            slugcat.BodyChunks[1].Position = new Vec2(300.0, 300.0);
+            slugcat.BodyChunks[0].ContactFloor = true;
+            slugcat.BodyChunks[1].ContactFloor = true;
+            slugcat.State.BodyMode = BodyModeIndex.Crawl;
+            slugcat.State.Standing = false;
+            slugcat.Movement.ApplyInput(
+                new VirtualInput(0, 0, false, false, VirtualPosture.Sleep), world);
+            Equal((int)AnimationIndex.Sleep, (int)slugcat.State.Animation,
+                "precondition: curled sleep posture");
+
+            slugcat.BodyChunks[0].ContactFloor = true;
+            slugcat.BodyChunks[1].ContactFloor = true;
+            slugcat.Movement.ApplyInput(new VirtualInput(1, 0, false, false), world);
+            True(slugcat.State.Animation != AnimationIndex.Sleep &&
+                 slugcat.State.Animation != AnimationIndex.Sit,
+                "horizontal locomotion must clear stationary rest animation");
+            True(slugcat.State.Standing &&
+                 slugcat.State.Animation == AnimationIndex.StandUp,
+                "low sleeping body must enter StandUp before normal locomotion pose");
+
+            Slugcat combined = new Slugcat(new Vec2(300.0, 300.0));
+            combined.BodyChunks[0].Position = new Vec2(292.0, 300.0);
+            combined.BodyChunks[1].Position = new Vec2(300.0, 300.0);
+            combined.BodyChunks[0].ContactFloor = true;
+            combined.BodyChunks[1].ContactFloor = true;
+            combined.State.BodyMode = BodyModeIndex.Crawl;
+            combined.State.Animation = AnimationIndex.Sleep;
+            combined.State.Standing = false;
+            combined.Movement.ApplyInput(
+                new VirtualInput(1, 0, false, false, VirtualPosture.Sleep), world);
+            True(combined.State.Animation != AnimationIndex.Sleep &&
+                 combined.State.Animation != AnimationIndex.Sit,
+                "stale rest posture cannot override simultaneous movement");
         }
 
         private static void StandForcesKeepUpperBodyUpright()

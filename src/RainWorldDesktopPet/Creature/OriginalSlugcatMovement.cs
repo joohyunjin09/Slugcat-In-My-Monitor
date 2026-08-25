@@ -700,9 +700,24 @@ namespace RainWorldDesktopPet.Creature
                 if (input.X == 0) state.Animation = AnimationIndex.None;
             }
 
-            if (grounded && input.Posture != VirtualPosture.None)
+            // Sit/Sleep are stationary rest intents. A locomotion/action input must
+            // wake the Player instead of allowing the curled rest animation to be
+            // reapplied while the BodyChunks are already moving.
+            bool activeInput = input.X != 0 || input.Y != 0 || input.Jump ||
+                input.Pickup || input.Throw || input.DropThrough;
+            bool resting = input.Posture != VirtualPosture.None && !activeInput;
+            if (grounded && resting)
                 state.Animation = input.Posture == VirtualPosture.Sleep
                     ? AnimationIndex.Sleep : AnimationIndex.Sit;
+            else if (grounded && activeInput &&
+                (state.Animation == AnimationIndex.Sleep ||
+                 state.Animation == AnimationIndex.Sit))
+            {
+                state.Standing = input.Y <= 0;
+                state.Animation = state.Standing
+                    ? AnimationIndex.StandUp : AnimationIndex.None;
+                state.AnimationFrame = 0;
+            }
             else if (!grounded && state.Animation != AnimationIndex.Flip &&
                 state.Animation != AnimationIndex.RocketJump &&
                 state.Animation != AnimationIndex.DownOnFours &&
