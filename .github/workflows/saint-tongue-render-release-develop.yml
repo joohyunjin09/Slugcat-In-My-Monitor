@@ -1,0 +1,85 @@
+name: Fix Saint tongue rendering and release on develop
+
+on:
+  push:
+    branches: [ develop ]
+    paths:
+      - '.github/workflows/saint-tongue-render-release-develop.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch-test-commit:
+    runs-on: windows-latest
+    steps:
+      - name: Check out develop
+        uses: actions/checkout@v4
+        with:
+          ref: develop
+          fetch-depth: 0
+
+      - name: Patch Saint tongue rendering and release
+        shell: pwsh
+        run: |
+          @'
+          from pathlib import Path
+
+          def replace_once(path, old, new):
+              p = Path(path)
+              text = p.read_text(encoding='utf-8')
+              if old not in text:
+                  raise SystemExit(f'pattern not found in {path}: {old[:80]!r}')
+              text = text.replace(old, new, 1)
+              p.write_text(text, encoding='utf-8')
+
+          abilities = 'src/RainWorldDesktopPet/Creature/SlugcatAbilities.cs'
+          replace_once(
+              abilities,
+              '''        public long AttachedSurfaceId { get { return attachedSurfaceId; } }\n        public override string DebugState\n''',
+              '''        public long AttachedSurfaceId { get { return attachedSurfaceId; } }\n        public bool CanJumpReleaseAttachedTongue\n        {\n            get\n            {\n                if (mode != SaintTongueMode.AttachedToTerrain ||\n                    !Owner.State.Conscious || Owner.State.Grounded ||\n                    Owner.State.CanJump > 0 || Owner.Movement.LaunchedThisTick)\n                    return false;\n                if (Owner.State.BodyMode == BodyModeIndex.CorridorClimb ||\n                    Owner.State.BodyMode == BodyModeIndex.ClimbIntoShortCut ||\n                    Owner.State.BodyMode == BodyModeIndex.WallClimb ||\n                    Owner.State.BodyMode == BodyModeIndex.Swimming ||\n                    Owner.State.BodyMode == BodyModeIndex.ZeroG)\n                    return false;\n                for (int i = 0; i < Owner.BodyChunks.Length; i++)\n                {\n                    BodyChunk chunk = Owner.BodyChunks[i];\n                    if (chunk.ContactFloor || chunk.ContactLeft || chunk.ContactRight)\n                        return false;\n                }\n                return true;\n            }\n        }\n        public override string DebugState\n''')
+          replace_once(
+              abilities,
+              '''                if (input.JumpPressed && attachedTicks >= 2 &&\n                    !Owner.Movement.LaunchedThisTick)\n''',
+              '''                if (input.JumpPressed && attachedTicks >= 2 &&\n                    CanJumpReleaseAttachedTongue)\n''')
+
+          ai = 'src/RainWorldDesktopPet/AI/DesktopPetAI.cs'
+          replace_once(
+              ai,
+              '''                if (saintAttachedTicks >= saintAttachDurationTicks)\n                {\n''',
+              '''                if (saintAttachedTicks >= saintAttachDurationTicks &&\n                    saint.CanJumpReleaseAttachedTongue)\n                {\n''')
+
+          overlay = 'src/RainWorldDesktopPet/UI/LayeredOverlayWindow.cs'
+          tongue_bounds = '''            // Keep Saint's active tongue in the same dynamic composition-bounds\n            // path as a far Spearmaster needle. The required surface follows every\n            // current/interpolated rope point, so a distant attached tongue stays\n            // visible without imposing a fixed render-distance cap. Once retracted,\n            // it stops contributing to the required bounds and normal surface\n            // reclamation can shrink the oversized allocation again.\n            SaintAbilityController saint =\n                loop.Slugcat.AbilityController as SaintAbilityController;\n            if (saint != null && saint.Mode != SaintTongueMode.Retracted)\n            {\n                Vec2[] currentRope = saint.RopeForRender;\n                Vec2[] previousRope = saint.LastRopeForRender;\n                int ropePointCount = Math.Min(currentRope.Length, previousRope.Length);\n                for (int point = 0; point < ropePointCount; point++)\n                {\n                    Vec2 currentPoint = currentRope[point] * scale;\n                    Vec2 previousPoint = previousRope[point] * scale;\n                    content = RectangleF.Union(content, new RectangleF(\n                        (float)(currentPoint.X - 8.0), (float)(currentPoint.Y - 8.0),\n                        16.0f, 16.0f));\n                    content = RectangleF.Union(content, new RectangleF(\n                        (float)(previousPoint.X - 8.0), (float)(previousPoint.Y - 8.0),\n                        16.0f, 16.0f));\n                }\n            }\n\n'''
+          replace_once(
+              overlay,
+              '''            int contentWidth = (int)Math.Ceiling(content.Width) + OverlayPadding * 2;\n''',
+              tongue_bounds + '''            int contentWidth = (int)Math.Ceiling(content.Width) + OverlayPadding * 2;\n''')
+
+          tests = 'tests/RainWorldDesktopPet.Tests/AbilityParityReplayTests.cs'
+          replace_once(
+              tests,
+              '''            True(ability.Rope.Length == 20, "PlayerGraphics uses twenty rope segments");\n\n            IList<AbilityReplayTick> release = AbilityInputReplay.Run(saint, world,\n''',
+              '''            True(ability.Rope.Length == 20, "PlayerGraphics uses twenty rope segments");\n            saint.BodyChunks[0].ContactRight = true;\n            True(!ability.CanJumpReleaseAttachedTongue,\n                "wall contact blocks attached-tongue jump release until fully airborne");\n            saint.BodyChunks[0].ContactRight = false;\n            saint.State.Grounded = false;\n            saint.State.CanJump = 0;\n            saint.State.BodyMode = BodyModeIndex.Default;\n            True(ability.CanJumpReleaseAttachedTongue,\n                "fully airborne attached Saint accepts a fresh jump release");\n\n            IList<AbilityReplayTick> release = AbilityInputReplay.Run(saint, world,\n''')
+          '@ | python -
+
+      - name: Build Release and run tests
+        shell: pwsh
+        run: .\build.ps1 -Configuration Release
+
+      - name: Check DMS validator syntax
+        shell: pwsh
+        run: node --check tools/validate-dms-template.mjs
+
+      - name: Commit tested Saint tongue fix
+        shell: pwsh
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/saint-tongue-render-release-develop.yml
+          git add src/RainWorldDesktopPet/Creature/SlugcatAbilities.cs
+          git add src/RainWorldDesktopPet/AI/DesktopPetAI.cs
+          git add src/RainWorldDesktopPet/UI/LayeredOverlayWindow.cs
+          git add tests/RainWorldDesktopPet.Tests/AbilityParityReplayTests.cs
+          git commit -m "Fix Saint tongue rendering and release"
+          git push origin HEAD:develop
