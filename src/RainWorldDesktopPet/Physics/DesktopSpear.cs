@@ -5,15 +5,14 @@ using RainWorldDesktopPet.Desktop;
 
 namespace RainWorldDesktopPet.Physics
 {
-    // Weapon.Mode plus Spear's two terrain-resting outcomes. A mode transition,
-    // rather than a sound timer, owns every one-shot collision sound.
+    // Rain World's Weapon.Mode has no ground-stuck state: Spear leaves a
+    // floor-resting weapon in Free mode after it stops spinning.
     public enum DesktopSpearMode
     {
         Held,
         Thrown,
         Free,
         StuckInWall,
-        StuckInGround,
         StuckInCreature
     }
 
@@ -294,8 +293,7 @@ namespace RainWorldDesktopPet.Physics
 
         private void FollowStuckSurface(DesktopCollisionWorld world)
         {
-            if ((Mode != DesktopSpearMode.StuckInWall &&
-                Mode != DesktopSpearMode.StuckInGround) || StuckSurfaceId == 0)
+            if (Mode != DesktopSpearMode.StuckInWall || StuckSurfaceId == 0)
                 return;
             DesktopSurface surface;
             if (!world.TryGetSurface(StuckSurfaceId, StuckSurfaceKind, out surface))
