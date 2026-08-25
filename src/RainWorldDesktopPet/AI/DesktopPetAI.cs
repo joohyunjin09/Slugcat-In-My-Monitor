@@ -188,16 +188,8 @@ namespace RainWorldDesktopPet.AI
             }
             ResetSpearmasterState();
 
-            GourmandAbilityController gourmand =
-                slugcat.AbilityController as GourmandAbilityController;
-            if (gourmand != null && !context.Grounded &&
-                (slugcat.BodyChunks[0].Velocity.Y +
-                 slugcat.BodyChunks[1].Velocity.Y) * 0.5 > 2.0)
-            {
-                Behavior = DesktopBehavior.GourmandRoll;
-                input = new VirtualInput(desiredDirection, 1, false, false);
-                return true;
-            }
+            // Falling alone is not Player.downDiagonal. Gourmand roll entry must
+            // come from an explicit movement intent rather than fabricated AI input.
 
             if (!TransitionPlan.IsValid) return false;
             int direction = TransitionPlan.HorizontalDistance < 0.0 ? -1 : 1;
