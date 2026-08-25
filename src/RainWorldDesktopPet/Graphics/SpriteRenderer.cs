@@ -31,6 +31,11 @@ namespace RainWorldDesktopPet.Graphics
     {
         private static readonly Color OutlineColor = Color.FromArgb(255, 28, 39, 51);
         private static readonly Color EyeColor = Color.FromArgb(255, 23, 32, 42);
+        // Desktop has no RoomPalette, so use its fixed equivalent of the
+        // black/fog palette already used by the original-effect renderer.
+        private static readonly Color OriginalUmbilicalFog = Color.FromArgb(255, 92, 98, 105);
+        private static readonly Color OriginalUmbilicalThread = LerpColor(
+            Color.FromArgb(255, 242, 204, 140), OriginalUmbilicalFog, 0.2);
         private readonly RainWorldAtlasSet atlas;
         private readonly Font debugFont = new Font("Consolas", 9.0f, FontStyle.Regular, GraphicsUnit.Point);
         private readonly Dictionary<int, ImageAttributes> tintAttributes = new Dictionary<int, ImageAttributes>();
@@ -1650,6 +1655,8 @@ namespace RainWorldDesktopPet.Graphics
             {
                 DesktopSpear spear = slugcat.Spears[i];
                 if (spear.InFrontOfPlayer != inFront) continue;
+                double spearOpacity = spear.Opacity;
+                if (spearOpacity <= 0.0) continue;
                 Vec2 center = spear.Chunk.RenderPosition(interpolation);
                 Vec2 direction = MathUtil.SlerpDirection(
                     spear.LastRotation, spear.Rotation, interpolation);
@@ -1657,23 +1664,34 @@ namespace RainWorldDesktopPet.Graphics
                 {
                     Vec2[] current = spear.Umbilical;
                     Vec2[] previousFrame = spear.LastUmbilical;
-                    Vec2 previous = Vec2.Lerp(previousFrame[0], current[0], interpolation);
-                    using (Pen umbilical = CreateRoundPen(
-                        LerpColor(pose.VisualBodyColor, Color.White, 0.35), 0.65f))
+                    double[] lives = spear.UmbilicalLife;
+                    for (int segment = 1; segment < current.Length; segment++)
                     {
-                        for (int segment = 1; segment < current.Length; segment++)
-                        {
-                            Vec2 next = Vec2.Lerp(previousFrame[segment],
-                                current[segment], interpolation);
+                        // Spear.Umbilical fades one short mesh section at a
+                        // time after NeedleDisconnect; do not collapse the
+                        // entire tether on the impact frame.
+                        double life = Math.Min(lives[segment - 1], lives[segment]);
+                        double opacity = MathUtil.InverseLerp(0.0, 0.3, life) *
+                            spearOpacity;
+                        if (opacity <= 0.0) continue;
+                        Color color = ResolveOriginalUmbilicalColor(segment,
+                            current.Length, life, lives[segment - 1]);
+                        color = Color.FromArgb((int)Math.Round(255.0 * opacity), color);
+                        Vec2 previous = Vec2.Lerp(previousFrame[segment - 1],
+                            current[segment - 1], interpolation);
+                        Vec2 next = Vec2.Lerp(previousFrame[segment],
+                            current[segment], interpolation);
+                        using (Pen umbilical = CreateRoundPen(color,
+                            (float)(0.65 * opacity)))
                             graphics.DrawLine(umbilical, previous.ToPointF(), next.ToPointF());
-                            previous = next;
-                        }
                     }
                 }
 
                 Color needleColor = spear.NeedleHasConnection
                     ? Color.White
                     : LerpColor(OutlineColor, Color.White, spear.NeedleFadeFraction);
+                needleColor = Color.FromArgb((int)Math.Round(
+                    needleColor.A * spearOpacity), needleColor);
                 string element = "BioSpear" + (spear.NeedleType + 1);
                 AtlasSprite atlasSpear;
                 if (atlas != null && atlas.TryGet(element, out atlasSpear))
@@ -1791,6 +1809,22 @@ namespace RainWorldDesktopPet.Graphics
         private static int QuantizeEffectChannel(int value)
         {
             return MathUtil.Clamp((int)Math.Round(value / 8.0) * 8, 0, 255);
+        }
+
+        public static Color ResolveOriginalUmbilicalColor(int segment,
+            int segmentCount, double life, double previousLife)
+        {
+            if (segmentCount < 2) throw new ArgumentOutOfRangeException("segmentCount");
+            double fraction = MathUtil.InverseLerp(0.0, segmentCount - 1.0, segment);
+            // Spear.Umbilical.DrawSprites: Color.Lerp(fogColor,
+            // Color.Lerp(red, threadCol, .1 + .9 * Pow(f, .25 + life)),
+            // Min(life, previousLife)). There is no water-shininess term on
+            // the desktop, so its source factor remains zero.
+            Color threadGradient = LerpColor(Color.FromArgb(255, 255, 0, 0),
+                OriginalUmbilicalThread, 0.1 + 0.9 * Math.Pow(fraction,
+                    0.25 + Math.Max(0.0, life)));
+            return LerpColor(OriginalUmbilicalFog, threadGradient,
+                Math.Min(life, previousLife));
         }
 
         private static Color LerpColor(Color from, Color to, double amount)

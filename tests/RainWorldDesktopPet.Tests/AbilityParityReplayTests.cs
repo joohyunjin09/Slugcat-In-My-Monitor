@@ -67,18 +67,36 @@ namespace RainWorldDesktopPet.Tests
                 ArtificerExplosiveJumpReplay);
             run("Artificer down input follows the original parry counter branch",
                 ArtificerParryReplay);
+            run("Gourmand AI does not fabricate a fall-roll diagonal",
+                GourmandAiDoesNotForceFallRoll);
+            run("SlugNPC-inspired AI keeps per-slugcat personalities",
+                AutonomousAiPersonalitiesDiffer);
+            run("SlugNPC-inspired AI diversifies equivalent platform routes",
+                AutonomousAiRoutesDiversify);
+            run("Autonomous exploration chooses interior destinations before reversing",
+                AutonomousExplorationAvoidsScreenEdgeOscillation);
+            run("Artificer and Saint AI use traversal abilities on long routes",
+                AutonomousSpecialistsUseTraversalAbilities);
             run("Artificer effects retain original smoke and light lifecycles",
                 ArtificerEffectLifecycleReplay);
             run("Spearmaster extraction creates the needle on original progress tick",
                 SpearmasterExtractionReplay);
-            run("Spearmaster needle grows from the selected tail speckle",
+            run("Spearmaster tail marker stays fixed while BioSpear emerges",
                 SpearmasterTailGrowthReplay);
             run("Spearmaster neutral gate freezes creation while Pickup stays held",
                 SpearmasterNeutralGateReplay);
             run("Spearmaster throw uses ThrowObject velocity and needle gravity",
                 SpearmasterThrowReplay);
+            run("Spearmaster thrown spear fades then expires after fifteen seconds",
+                SpearmasterThrownSpearExpiryReplay);
+            run("Grounded free spear keeps the original diagonal resting spread",
+                SpearGroundRestDirectionReplay);
+            run("Thrown floor contact enters diagonal spear rest",
+                ThrownSpearFloorRestReplay);
             run("Spearmaster AI holds without a target and traverses explicit action states",
                 SpearmasterAiActionStateReplay);
+            run("Spearmaster AI throws without mouse attention after its cooldown",
+                SpearmasterAutonomousThrowReplay);
             run("Rivulet replay uses stats-driven ground jump and shared air control",
                 RivuletMovementReplay);
             run("Movement launch momentum produces character-specific trajectories",
@@ -228,6 +246,253 @@ namespace RainWorldDesktopPet.Tests
                 "parry shockwave exists");
         }
 
+        private static void GourmandAiDoesNotForceFallRoll()
+        {
+            DesktopCollisionWorld world = CreateAirWorld();
+            Slugcat slugcat = CreateAirSlugcat(SlugcatId.Gourmand);
+            slugcat.BodyChunks[0].Velocity.Y = 12.0;
+            slugcat.BodyChunks[1].Velocity.Y = 12.0;
+            DesktopPetAI ai = new DesktopPetAI(4401);
+            MouseTracker mouse = new MouseTracker();
+            VirtualInput input = ai.Step(slugcat, world, mouse, null);
+            True(!(input.X != 0 && input.Y > 0),
+                "falling alone does not synthesize Player.downDiagonal for Gourmand");
+        }
+
+        private static void AutonomousAiPersonalitiesDiffer()
+        {
+            DesktopPetAI first = new DesktopPetAI(1001, 1);
+            DesktopPetAI second = new DesktopPetAI(1002, 2);
+            True(Math.Abs(first.PersonalityEnergy - second.PersonalityEnergy) > 0.000001 ||
+                Math.Abs(first.PersonalityNervous - second.PersonalityNervous) > 0.000001 ||
+                Math.Abs(first.PersonalityAggression - second.PersonalityAggression) > 0.000001 ||
+                Math.Abs(first.PersonalityBravery - second.PersonalityBravery) > 0.000001 ||
+                Math.Abs(first.PersonalityDominance - second.PersonalityDominance) > 0.000001,
+                "distinct SlugNPC seeds retain distinct behavior personalities");
+            UtilityContext cautious = new UtilityContext
+            {
+                Grounded = true,
+                TransitionAvailable = true,
+                JumpReady = true,
+                Curiosity = 0.75,
+                PersonalityEnergy = 0.15,
+                PersonalityBravery = 0.05,
+                PersonalityDominance = 0.05
+            };
+            UtilityContext bold = new UtilityContext
+            {
+                Grounded = true,
+                TransitionAvailable = true,
+                JumpReady = true,
+                Curiosity = 0.75,
+                PersonalityEnergy = 0.95,
+                PersonalityBravery = 0.95,
+                PersonalityDominance = 0.95
+            };
+            True(UtilityEvaluator.Score(DesktopBehavior.Jump, bold, 0.0) >
+                UtilityEvaluator.Score(DesktopBehavior.Jump, cautious, 0.0),
+                "SlugNPC bravery and energy alter route-transition utility");
+
+            UtilityContext exhausted = new UtilityContext
+            {
+                Grounded = true,
+                Fatigue = 1.0,
+                PersonalityEnergy = 0.1,
+                RestReady = false
+            };
+            Near(0.0, UtilityEvaluator.Score(DesktopBehavior.Sleep, exhausted, 0.0),
+                0.000001, "rest cooldown blocks repeated sleep selection");
+            exhausted.RestReady = true;
+            True(UtilityEvaluator.Score(DesktopBehavior.Sleep, exhausted, 0.0) > 0.0,
+                "rest becomes available after its cooldown");
+        }
+
+        private static void AutonomousAiRoutesDiversify()
+        {
+            MonitorInfo monitor = new MonitorInfo("ROUTES",
+                new Rectangle(0, 0, 1200, 1000),
+                new Rectangle(0, 0, 1200, 1000), true);
+            DesktopWindowSnapshot[] windows =
+            {
+                new DesktopWindowSnapshot
+                {
+                    Handle = new IntPtr(7201),
+                    Bounds = new Rectangle(280, 840, 230, 80),
+                    Title = "Left route", ClassName = "Replay"
+                },
+                new DesktopWindowSnapshot
+                {
+                    Handle = new IntPtr(7202),
+                    Bounds = new Rectangle(690, 840, 230, 80),
+                    Title = "Right route", ClassName = "Replay"
+                }
+            };
+            DesktopCollisionWorld world = CreateWorld(monitor, windows);
+            double floorY = FindFloorY(world);
+            DesktopSurface floor = null;
+            for (int i = 0; i < world.Surfaces.Count; i++)
+            {
+                if (!world.Surfaces[i].IsHorizontal ||
+                    Math.Abs(world.Surfaces[i].Top - floorY) > 0.000001) continue;
+                floor = world.Surfaces[i];
+                break;
+            }
+            True(floor != null, "route replay has a source floor");
+            HashSet<long> selectedTargets = new HashSet<long>();
+            for (int seed = 1001; seed <= 1008; seed++)
+            {
+                Slugcat slugcat = new Slugcat(new Vec2(
+                    DesktopWorldTransform.ToSimulationLength(600.0),
+                    floorY - SimulationConstants.HipsChunkRadius - 0.5), SlugcatId.White);
+                slugcat.BodyChunks[1].SupportingSurfaceId = floor.Id;
+                slugcat.BodyChunks[1].SupportingSurfaceKind = floor.Kind;
+                DesktopPetAI ai = new DesktopPetAI(seed, seed - 1000);
+                PlatformTransitionPlan plan = ai.PlanPlatformTransition(slugcat, world);
+                True(plan.IsValid, "each route replay AI finds a viable platform");
+                selectedTargets.Add(plan.TargetSurfaceId);
+            }
+            True(selectedTargets.Count >= 2,
+                "stable personality preferences split equivalent platform routes");
+        }
+
+        private static void AutonomousExplorationAvoidsScreenEdgeOscillation()
+        {
+            MonitorInfo monitor = new MonitorInfo("EXPLORE",
+                new Rectangle(0, 0, 1200, 1000),
+                new Rectangle(0, 0, 1200, 1000), true);
+            DesktopCollisionWorld world = CreateWorld(monitor,
+                new DesktopWindowSnapshot[0]);
+            double floorY = FindFloorY(world);
+            DesktopSurface floor = null;
+            for (int i = 0; i < world.Surfaces.Count; i++)
+            {
+                DesktopSurface candidate = world.Surfaces[i];
+                if (candidate.Kind == DesktopSurfaceKind.MonitorFloor)
+                {
+                    floor = candidate;
+                    break;
+                }
+            }
+            True(floor != null, "exploration replay has a floor");
+
+            Slugcat slugcat = new Slugcat(new Vec2(
+                (floor.Left + floor.Right) * 0.5,
+                floorY - SimulationConstants.HipsChunkRadius - 0.5), SlugcatId.White);
+            slugcat.State.Grounded = true;
+            slugcat.BodyChunks[1].SupportingSurfaceId = floor.Id;
+            slugcat.BodyChunks[1].SupportingSurfaceKind = floor.Kind;
+            DesktopPetAI ai = new DesktopPetAI(5817);
+            MouseTracker mouse = new MouseTracker();
+            int previousDirection = 0;
+            int interiorTurns = 0;
+
+            for (int tick = 0; tick < 800; tick++)
+            {
+                Vec2 before = slugcat.Center;
+                VirtualInput input = ai.Step(slugcat, world, mouse, null);
+                bool exploring = ai.Behavior == DesktopBehavior.Walk ||
+                    ai.Behavior == DesktopBehavior.Explore;
+                if (!exploring || input.X == 0)
+                {
+                    previousDirection = 0;
+                }
+                else
+                {
+                    if (previousDirection != 0 && input.X != previousDirection)
+                    {
+                        double nearestEdge = Math.Min(before.X - floor.Left,
+                            floor.Right - before.X);
+                        True(nearestEdge > 34.0,
+                            "exploration changes direction at an interior destination, not a screen edge");
+                        interiorTurns++;
+                    }
+                    previousDirection = input.X;
+                }
+                slugcat.Step(input, world, mouse.Position, mouse.Velocity);
+            }
+            True(interiorTurns > 0,
+                "seeded exploration reaches at least one independently chosen interior destination");
+        }
+
+        private static void AutonomousSpecialistsUseTraversalAbilities()
+        {
+            MonitorInfo monitor = new MonitorInfo("SPECIALISTS",
+                new Rectangle(0, 0, 1200, 1000),
+                new Rectangle(0, 0, 1200, 1000), true);
+            DesktopWindowSnapshot platform = new DesktopWindowSnapshot
+            {
+                Handle = new IntPtr(8341),
+                Bounds = new Rectangle(690, 840, 230, 80),
+                Title = "Traversal target",
+                ClassName = "Replay"
+            };
+            DesktopCollisionWorld world = CreateWorld(monitor,
+                new[] { platform });
+            double floorY = FindFloorY(world);
+            DesktopSurface floor = null;
+            for (int i = 0; i < world.Surfaces.Count; i++)
+            {
+                if (world.Surfaces[i].Kind == DesktopSurfaceKind.MonitorFloor)
+                {
+                    floor = world.Surfaces[i];
+                    break;
+                }
+            }
+            True(floor != null, "specialist replay has a source floor");
+
+            Slugcat artificer = CreateTraversalSlugcat(SlugcatId.Artificer,
+                floor, floorY);
+            DesktopPetAI artificerAi = new DesktopPetAI(6021);
+            MouseTracker mouse = new MouseTracker();
+            bool artificerUsedAbility = false;
+            for (int tick = 0; tick < 180; tick++)
+            {
+                VirtualInput input = artificerAi.Step(artificer, world, mouse, null);
+                artificer.Step(input, world, mouse.Position, mouse.Velocity);
+                ArtificerAbilityController ability =
+                    (ArtificerAbilityController)artificer.AbilityController;
+                if (ability.ExplosiveJumpCounter > 0)
+                {
+                    artificerUsedAbility = true;
+                    break;
+                }
+            }
+            True(artificerUsedAbility,
+                "Artificer AI uses the original explosive jump for a long route");
+
+            Slugcat saint = CreateTraversalSlugcat(SlugcatId.Saint, floor, floorY);
+            DesktopPetAI saintAi = new DesktopPetAI(6021);
+            bool saintUsedAbility = false;
+            for (int tick = 0; tick < 180; tick++)
+            {
+                VirtualInput input = saintAi.Step(saint, world, mouse, null);
+                saint.Step(input, world, mouse.Position, mouse.Velocity);
+                SaintAbilityController ability =
+                    (SaintAbilityController)saint.AbilityController;
+                if (ability.Mode != SaintTongueMode.Retracted)
+                {
+                    saintUsedAbility = true;
+                    break;
+                }
+            }
+            True(saintUsedAbility,
+                "Saint AI shoots the original tongue for a long route");
+        }
+
+        private static Slugcat CreateTraversalSlugcat(SlugcatId id,
+            DesktopSurface floor, double floorY)
+        {
+            Slugcat slugcat = new Slugcat(new Vec2(
+                DesktopWorldTransform.ToSimulationLength(600.0),
+                floorY - SimulationConstants.HipsChunkRadius - 0.5), id);
+            slugcat.State.Grounded = true;
+            for (int i = 0; i < slugcat.BodyChunks.Length; i++)
+                slugcat.BodyChunks[i].ContactFloor = true;
+            slugcat.BodyChunks[1].SupportingSurfaceId = floor.Id;
+            slugcat.BodyChunks[1].SupportingSurfaceKind = floor.Kind;
+            return slugcat;
+        }
+
         private static void ArtificerEffectLifecycleReplay()
         {
             DesktopCollisionWorld world = CreateAirWorld();
@@ -374,6 +639,13 @@ namespace RainWorldDesktopPet.Tests
             True(spear.HasUmbilical && spear.Umbilical.Length >= 10 &&
                 spear.Umbilical.Length <= 19,
                 "connected needle creates Spear.Umbilical with 10..19 segments");
+            Color umbilicalStart = SpriteRenderer.ResolveOriginalUmbilicalColor(
+                0, spear.Umbilical.Length, 1.0, 1.0);
+            Color umbilicalEnd = SpriteRenderer.ResolveOriginalUmbilicalColor(
+                spear.Umbilical.Length - 1, spear.Umbilical.Length, 1.0, 1.0);
+            True(umbilicalStart.R > umbilicalStart.G &&
+                umbilicalEnd.G > umbilicalStart.G,
+                "Spear.Umbilical uses the original red-to-thread palette gradient");
             Near(48.0, spear.Chunk.Velocity.X, 0.000001,
                 "Spearmaster horizontal skill multiplies 40 by 1.2");
             Near(-1.05045, spear.Chunk.Velocity.Y, 0.00001,
@@ -386,9 +658,87 @@ namespace RainWorldDesktopPet.Tests
                 "Spear.Update cancels half of PhysicalObject .9 gravity");
             Near(beforePositionY + spear.Chunk.Velocity.Y, spear.Chunk.Position.Y,
                 0.00001, "needle integrates the post-friction velocity");
+            spear.DisconnectNeedle();
+            True(!spear.NeedleHasConnection && spear.HasUmbilical,
+                "Spear_NeedleDisconnect leaves the original breaking umbilical alive");
+            for (int tick = 0; tick < 8; tick++)
+                slugcat.Step(VirtualInput.Neutral, world, Vec2.Zero, Vec2.Zero);
+            True(spear.HasUmbilical,
+                "umbilical survives several frames after the needle disconnects");
+            for (int tick = 0; tick < 430; tick++)
+                slugcat.Step(VirtualInput.Neutral, world, Vec2.Zero, Vec2.Zero);
+            True(!spear.HasUmbilical,
+                "all original 150..200 tick umbilical segments eventually expire");
             for (int i = 0; i < 5; i++) graphics.Step(attention, world);
             Equal(0, ability.ThrowFollowTicks,
                 "throwing hand follows the released spear for exactly five graphics ticks");
+        }
+
+        private static void SpearmasterThrownSpearExpiryReplay()
+        {
+            DesktopCollisionWorld world = CreateAirWorld();
+            Slugcat slugcat = CreateAirSlugcat(SlugcatId.SpearMaster);
+            List<VirtualInput> extraction = new List<VirtualInput>();
+            for (int i = 0; i < 80; i++)
+                extraction.Add(new VirtualInput(0, 0, false, true));
+            AbilityInputReplay.Run(slugcat, world, extraction);
+            SpearmasterAbilityController ability =
+                (SpearmasterAbilityController)slugcat.AbilityController;
+            DesktopSpear spear = ability.HeldSpear;
+            slugcat.Step(new VirtualInput(0, 0, false, false, true,
+                VirtualPosture.None, false), world, Vec2.Zero, Vec2.Zero);
+            Equal(600, spear.DespawnAfterTicks,
+                "Spearmaster throw schedules the fifteen-second lifespan");
+
+            for (int tick = 0; tick < 580; tick++)
+                slugcat.Step(VirtualInput.Neutral, world, Vec2.Zero, Vec2.Zero);
+            Near(1.0, spear.Opacity, 0.000001,
+                "needle remains opaque before its final half-second fade");
+            for (int tick = 0; tick < 19; tick++)
+                slugcat.Step(VirtualInput.Neutral, world, Vec2.Zero, Vec2.Zero);
+            True(spear.Opacity > 0.0 && spear.Opacity < 1.0,
+                "needle fades naturally during its final half second");
+            True(slugcat.Spears.Contains(spear),
+                "needle exists until the full fifteen-second lifespan elapses");
+            slugcat.Step(VirtualInput.Neutral, world, Vec2.Zero, Vec2.Zero);
+            True(!slugcat.Spears.Contains(spear),
+                "needle is removed on its fifteen-second expiry tick");
+        }
+
+        private static void SpearGroundRestDirectionReplay()
+        {
+            Vec2 upwardLean = DesktopSpear.CalculateOriginalGroundRestDirection(0.0);
+            Vec2 downwardLean = DesktopSpear.CalculateOriginalGroundRestDirection(1.0);
+            True(upwardLean.X > 0.6 && upwardLean.Y > 0.6,
+                "original -50 degree ground rest points diagonally into the floor");
+            True(downwardLean.X < -0.6 && downwardLean.Y > 0.6,
+                "original +50 degree ground rest keeps the opposite floor-facing diagonal");
+        }
+
+        private static void ThrownSpearFloorRestReplay()
+        {
+            DesktopCollisionWorld world;
+            CreateFloorSlugcat(SlugcatId.White, out world);
+            double floor = FindFloorY(world);
+            DesktopSpear spear = new DesktopSpear(new Vec2(250.0, floor - 6.0));
+            spear.Throw(new Vec2(20.0, 5.0), Vec2.Right);
+            spear.Step(world);
+
+            Equal((int)DesktopSpearMode.Free, (int)spear.Mode,
+                "unaligned thrown floor contact remains in original Free mode");
+            True(Math.Abs(spear.Rotation.Y) > 0.1,
+                "ground-rest spear cannot retain a horizontal airborne rotation");
+            Vec2 restDirection = spear.Rotation;
+            spear.Step(world);
+            Near(restDirection.X, spear.LastRotation.X, 0.000001,
+                "stationary free spear snapshots its settled rotation");
+            Near(restDirection.Y, spear.LastRotation.Y, 0.000001,
+                "settled rotation no longer interpolates from the airborne spin");
+            Near(restDirection.X, spear.Rotation.X, 0.000001,
+                "free ground-rest direction remains stable");
+            Near(restDirection.Y, spear.Rotation.Y, 0.000001,
+                "free ground-rest direction remains stable");
+            True(!spear.IsSpinning, "ground-rest Free spear clears spinning state");
         }
 
         private static void SpearmasterTailGrowthReplay()
@@ -419,7 +769,9 @@ namespace RainWorldDesktopPet.Tests
             Near(selected.RenderPosition.Y, growing.RenderPosition.Y, 0.000001,
                 "growing needle starts at selected speckle y");
             Near(-ability.SpearProgress * 0.5, growing.ScaleY, 0.000001,
-                "BioSpear growth scale follows TailSpeckles spearProg");
+                "white BioSpear retains TailSpeckles spearProg movement");
+            Near(1.0, selected.ScaleY, 0.000001,
+                "selected tinyStar retains its base scale during extraction");
 
             for (int i = 20; i < 79; i++)
             {
@@ -529,6 +881,36 @@ namespace RainWorldDesktopPet.Tests
             True(visited.Contains(SpearmasterActionState.Throwing), "visited Throwing");
             True(visited.Contains(SpearmasterActionState.Recovering),
                 "visited Recovering");
+        }
+
+        private static void SpearmasterAutonomousThrowReplay()
+        {
+            DesktopCollisionWorld world;
+            Slugcat slugcat = CreateFloorSlugcat(SlugcatId.SpearMaster, out world);
+            DesktopPetAI ai = new DesktopPetAI(7319);
+            MouseTracker mouse = new MouseTracker();
+            SpearmasterAbilityController ability =
+                (SpearmasterAbilityController)slugcat.AbilityController;
+            bool threwWithoutMouseAttention = false;
+
+            for (int tick = 0; tick < 900; tick++)
+            {
+                VirtualInput input = ai.Step(slugcat, world, mouse, null);
+                if (input.Throw)
+                {
+                    True(!ai.MouseAttentionActive,
+                        "autonomous throw does not require mouse attention");
+                    threwWithoutMouseAttention = true;
+                }
+                slugcat.Step(input, world, mouse.Position, mouse.Velocity);
+                if (threwWithoutMouseAttention && ability.ThrownSpear != null)
+                    break;
+            }
+
+            True(threwWithoutMouseAttention,
+                "targetless Spearmaster emits a throw after its own cooldown");
+            True(ability.ThrownSpear != null,
+                "autonomous throw releases the held needle");
         }
 
         private static void RivuletMovementReplay()

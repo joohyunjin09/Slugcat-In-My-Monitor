@@ -79,6 +79,9 @@ namespace RainWorldDesktopPet.Tests
             Run("Rain World locator validates an explicit installation", LocatorValidatesExplicitPath);
             Run("Required autonomous behavior states are present", RequiredBehaviorsExist);
             Run("Jump and DropDown utility states are reachable", UtilityActionsAreReachable);
+            Run("Exploration intent makes free jumps reachable", ExplorationJumpIsReachable);
+            Run("Obstacle contact makes an original jump attempt reachable", ObstacleJumpIsReachable);
+            Run("Mouse locomotion requires explicit click attention", MouseLocomotionRequiresAttention);
             Run("Wall contact reaches gravity-driven WallClimb through VirtualInput", WallContactReachesClimbMovement);
             Run("WallClimb hands use alternating wall targets", WallClimbHandsTargetTheWall);
             Run("Sleep curl pulls both hands to the original target", SleepCurlHandsShareOriginalTarget);
@@ -1074,6 +1077,7 @@ namespace RainWorldDesktopPet.Tests
                 Grounded = true,
                 Curiosity = 1.0,
                 JumpReady = true,
+                TransitionAvailable = true,
                 EdgeDistance = 200.0
             };
             double worstJump = UtilityEvaluator.Score(DesktopBehavior.Jump, jump, -0.06);
@@ -1100,6 +1104,67 @@ namespace RainWorldDesktopPet.Tests
                 "Jump cooldown gate");
             Near(0.0, UtilityEvaluator.Score(DesktopBehavior.DropDown, drop, 0.0), 0.000001,
                 "DropDown cooldown gate");
+        }
+
+        private static void MouseLocomotionRequiresAttention()
+        {
+            UtilityContext context = new UtilityContext
+            {
+                Grounded = true,
+                MouseDistance = 180.0,
+                Curiosity = 0.8,
+                PersonalityAggression = 0.8,
+                PersonalityNervous = 0.8
+            };
+            Near(0.0, UtilityEvaluator.Score(DesktopBehavior.FollowMouse, context, 0.0),
+                0.000001, "passive cursor proximity cannot select FollowMouse");
+
+            context.MouseDistance = 50.0;
+            Near(0.0, UtilityEvaluator.Score(DesktopBehavior.AvoidMouse, context, 0.0),
+                0.000001, "passive cursor proximity cannot select AvoidMouse");
+
+            context.MouseAttentionActive = true;
+            context.MouseDistance = 180.0;
+            True(UtilityEvaluator.Score(DesktopBehavior.FollowMouse, context, 0.0) > 0.0,
+                "near clicked mouse can select FollowMouse");
+            context.MouseDistance = 50.0;
+            True(UtilityEvaluator.Score(DesktopBehavior.AvoidMouse, context, 0.0) > 0.0,
+                "near clicked mouse can select AvoidMouse");
+        }
+
+        private static void ObstacleJumpIsReachable()
+        {
+            UtilityContext obstacle = new UtilityContext
+            {
+                Grounded = true,
+                Curiosity = 1.0,
+                JumpReady = true,
+                ObstacleAhead = true,
+                ObstacleDirection = 1,
+                TransitionAvailable = false
+            };
+            True(UtilityEvaluator.Score(DesktopBehavior.Jump, obstacle, 0.0) > 0.0,
+                "a blocking wall enables a Player.Jump attempt without a platform route");
+            obstacle.JumpReady = false;
+            Near(0.0, UtilityEvaluator.Score(DesktopBehavior.Jump, obstacle, 0.0),
+                0.000001, "obstacle jump still respects the original jump cooldown");
+        }
+
+        private static void ExplorationJumpIsReachable()
+        {
+            UtilityContext exploration = new UtilityContext
+            {
+                Grounded = true,
+                Curiosity = 0.9,
+                JumpReady = true,
+                ExplorationJumpAvailable = true,
+                EdgeDistance = 120.0
+            };
+            True(UtilityEvaluator.Score(DesktopBehavior.Jump, exploration, 0.0) > 0.0,
+                "an interior exploration intent can choose an original free jump");
+            exploration.ExplorationJumpAvailable = false;
+            Near(0.0, UtilityEvaluator.Score(DesktopBehavior.Jump, exploration, 0.0),
+                0.000001, "free jump requires an exploration intent or route");
         }
 
         private static void WallContactReachesClimbMovement()
