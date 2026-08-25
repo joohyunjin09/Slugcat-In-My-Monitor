@@ -1,0 +1,76 @@
+name: Saint proactive tongue AI patch
+
+on:
+  push:
+    branches:
+      - fix/saint-tongue-ai-frequency
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-test:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@v4
+        with:
+          ref: fix/saint-tongue-ai-frequency
+
+      - name: Add proactive Saint tongue intent
+        shell: pwsh
+        run: |
+          $path = 'src/RainWorldDesktopPet/AI/DesktopPetAI.cs'
+          $text = [IO.File]::ReadAllText($path)
+          $nl = [Environment]::NewLine
+
+          function Replace-One([string]$old, [string]$new, [string]$label) {
+            $count = ([regex]::Matches($script:text, [regex]::Escape($old))).Count
+            if ($count -ne 1) { throw "$label expected exactly one match, found $count." }
+            $script:text = $script:text.Replace($old, $new)
+          }
+
+          $old = '        private int saintFreestyleCooldownTicks;'
+          $new = $old + $nl + '        private int saintTongueIntentCountdownTicks;'
+          Replace-One $old $new 'Saint proactive countdown field'
+
+          $old = '            if (saintFreestyleCooldownTicks > 0) saintFreestyleCooldownTicks--;'
+          $new = $old + $nl + '            if (saintTongueIntentCountdownTicks > 0) saintTongueIntentCountdownTicks--;'
+          Replace-One $old $new 'Saint proactive countdown tick'
+
+          $old = '            destinationKind = AIDestinationKind.None;' + $nl + '        }'
+          $new = '            destinationKind = AIDestinationKind.None;' + $nl + '            saintTongueIntentCountdownTicks = id == SlugcatId.Saint' + $nl + '                ? SecondsToTicks(SampleCentered(3.0, 7.0)) : 0;' + $nl + '        }'
+          Replace-One $old $new 'Saint initial proactive schedule'
+
+          $old = '            saintAttachedTicks = 0;' + $nl + '            if (saint.Mode != SaintTongueMode.Retracted) return false;' + $nl + $nl + '            if (context.Grounded && Behavior == DesktopBehavior.Jump &&'
+          $new = '            saintAttachedTicks = 0;' + $nl + '            if (saint.Mode != SaintTongueMode.Retracted) return false;' + $nl + $nl + '            if (!saintTransitionArmed && saintTongueIntentCountdownTicks <= 0 &&' + $nl + '                saintFreestyleCooldownTicks == 0 && CanStartProactiveSaintTongue(context))' + $nl + '            {' + $nl + '                saintTransitionArmed = true;' + $nl + '                saintTransitionFreestyle = true;' + $nl + '                saintAwaitingJumpRelease = false;' + $nl + '                saintFreestyleCooldownTicks = SecondsToTicks(SampleCentered(1.5, 3.0));' + $nl + '                saintTongueIntentCountdownTicks = NextSaintTongueIntentTicks();' + $nl + '                EnterBehavior(slugcat, DesktopBehavior.Jump, context);' + $nl + '                input = new VirtualInput(desiredDirection, 0, true, false);' + $nl + '                return true;' + $nl + '            }' + $nl + $nl + '            if (context.Grounded && Behavior == DesktopBehavior.Jump &&'
+          Replace-One $old $new 'Saint proactive tongue launch'
+
+          $old = '                    if (freestyle)' + $nl + '                        saintFreestyleCooldownTicks = SecondsToTicks(SampleCentered(0.9, 2.2));' + $nl + '                    return false;'
+          $new = '                    if (freestyle)' + $nl + '                        saintFreestyleCooldownTicks = SecondsToTicks(SampleCentered(0.9, 2.2));' + $nl + '                    saintTongueIntentCountdownTicks = NextSaintTongueIntentTicks();' + $nl + '                    return false;'
+          Replace-One $old $new 'Saint tongue reschedule after normal jump path'
+
+          $old = '        private double SaintFreestyleChance()' + $nl + '        {' + $nl + '            return MathUtil.Clamp01(0.28 + curiosity * 0.16 +' + $nl + '                playfulness * 0.10 + traitSpecialUse * 0.18 +' + $nl + '                (mood == AIMood.Curious ? 0.08 : 0.0));' + $nl + '        }'
+          $new = $old + $nl + $nl + '        private bool CanStartProactiveSaintTongue(UtilityContext context)' + $nl + '        {' + $nl + '            bool eligibleBehavior = IsLocomotionBehavior(Behavior) ||' + $nl + '                Behavior == DesktopBehavior.Idle ||' + $nl + '                Behavior == DesktopBehavior.LookAround ||' + $nl + '                Behavior == DesktopBehavior.ObserveWindow;' + $nl + '            return eligibleBehavior && context.Grounded && !context.ObstacleAhead &&' + $nl + '                context.EdgeDistance > 24.0;' + $nl + '        }' + $nl + $nl + '        private int NextSaintTongueIntentTicks()' + $nl + '        {' + $nl + '            double seconds = SampleCentered(8.0, 18.0);' + $nl + '            seconds *= MathUtil.Lerp(1.10, 0.82, traitSpecialUse);' + $nl + '            return SecondsToTicks(seconds);' + $nl + '        }'
+          Replace-One $old $new 'Saint proactive helper methods'
+
+          [IO.File]::WriteAllText($path, $text, [Text.UTF8Encoding]::new($false))
+
+      - name: Build Release and run tests
+        shell: pwsh
+        run: .\build.ps1 -Configuration Release
+
+      - name: Check DMS validator syntax
+        shell: pwsh
+        run: node --check tools/validate-dms-template.mjs
+
+      - name: Commit tested Saint AI change
+        shell: pwsh
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/saint-ai-proactive-tongue.yml
+          git add src/RainWorldDesktopPet/AI/DesktopPetAI.cs
+          git commit -m "Make Saint use tongue proactively"
+          git push origin HEAD:fix/saint-tongue-ai-frequency
