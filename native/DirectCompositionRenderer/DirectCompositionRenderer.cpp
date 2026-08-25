@@ -75,12 +75,16 @@ float4 PSMain(PixelInput input) : SV_TARGET { float2 p=input.uv*2-1;
         float alpha=shape*input.color.a;
         return float4(input.color.rgb*alpha,alpha); }
     float dist=saturate(1-length(p)); float2 stableUv=input.uv;
-    float h=Noise(stableUv*3.35+input.seed*float2(7,13));
-    h*=Noise(stableUv*7.5+input.seed*float2(19,3));
-    float inside=.3+.5*input.color.a;
-    h=lerp(h*dist,h+(1-h)*inside,dist);
-    h-=Noise(stableUv*9.65+input.seed*float2(5,23))*lerp(.7,.3,input.color.a);
-    h+=.25*dist;
+    const float rain=.5; const float tau=6.28318530718;
+    float h=sin((1.77*rain+Noise(stableUv*5.2+
+        input.seed*float2(7,13))*3)*tau)*.5+.5;
+    h*=sin((3.5*rain+Noise(stableUv*12.2+
+        input.seed*float2(19,3))*3)*tau)*.5+.5;
+    h*=.5+.5*sin((Noise(stableUv+input.seed*float2(11,17))+
+        rain)*tau*3);
+    h=lerp(h*dist,lerp(h,1,lerp(.3,.8,input.color.a)),dist);
+    h-=Noise(stableUv*15.2+input.seed*float2(5,23))*
+        lerp(.7,.3,input.color.a);
     float cutoff=h*input.color.a;
     float edge=max(fwidth(cutoff)*1.5,.008);
     float coverage=smoothstep(.35-edge,.35+edge,cutoff);
