@@ -87,8 +87,6 @@ namespace RainWorldDesktopPet.Tests
                 ThrownSpearFloorRestReplay);
             run("Spearmaster AI holds without a target and traverses explicit action states",
                 SpearmasterAiActionStateReplay);
-            run("Spearmaster AI occasionally throws without mouse attention",
-                SpearmasterAutonomousThrowReplay);
             run("Rivulet replay uses stats-driven ground jump and shared air control",
                 RivuletMovementReplay);
             run("Movement launch momentum produces character-specific trajectories",
@@ -643,36 +641,6 @@ namespace RainWorldDesktopPet.Tests
             True(visited.Contains(SpearmasterActionState.Throwing), "visited Throwing");
             True(visited.Contains(SpearmasterActionState.Recovering),
                 "visited Recovering");
-        }
-
-        private static void SpearmasterAutonomousThrowReplay()
-        {
-            DesktopCollisionWorld world;
-            Slugcat slugcat = CreateFloorSlugcat(SlugcatId.SpearMaster, out world);
-            DesktopPetAI ai = new DesktopPetAI(7319);
-            MouseTracker mouse = new MouseTracker();
-            SpearmasterAbilityController ability =
-                (SpearmasterAbilityController)slugcat.AbilityController;
-            bool threwWithoutMouseAttention = false;
-
-            for (int tick = 0; tick < 1100; tick++)
-            {
-                VirtualInput input = ai.Step(slugcat, world, mouse, null);
-                if (input.Throw)
-                {
-                    True(!ai.MouseAttentionActive,
-                        "autonomous throw does not require mouse attention");
-                    threwWithoutMouseAttention = true;
-                }
-                slugcat.Step(input, world, mouse.Position, mouse.Velocity);
-                if (threwWithoutMouseAttention && ability.ThrownSpear != null)
-                    break;
-            }
-
-            True(threwWithoutMouseAttention,
-                "targetless Spearmaster eventually emits a single throw input");
-            True(ability.ThrownSpear != null,
-                "autonomous throw releases the held needle");
         }
 
         private static void RivuletMovementReplay()

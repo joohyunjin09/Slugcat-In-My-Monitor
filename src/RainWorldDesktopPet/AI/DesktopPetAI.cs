@@ -86,8 +86,6 @@ namespace RainWorldDesktopPet.AI
         private int spearmasterIdleDuration = 80;
         private int spearmasterMoveDuration = 35;
         private int spearmasterRecoveryDuration = 110;
-        private int spearmasterAutonomousThrowCountdown;
-        private bool spearmasterAutonomousThrow;
         private Vec2 spearmasterTarget;
 
         public DesktopPetAI(int seed)
@@ -297,8 +295,7 @@ namespace RainWorldDesktopPet.AI
             spearmasterStateTicks++;
             bool hasTarget = mouseAttention != null && mouseAttention.IsActive;
             if (hasTarget) spearmasterTarget = mouse.Position;
-            bool hasThrowTarget = hasTarget || spearmasterAutonomousThrow;
-            double targetDistance = hasThrowTarget
+            double targetDistance = hasTarget
                 ? Vec2.Distance(slugcat.Center, spearmasterTarget)
                 : double.MaxValue;
 
@@ -346,34 +343,21 @@ namespace RainWorldDesktopPet.AI
                         ChangeSpearmasterState(SpearmasterActionState.Recovering);
                         return false;
                     }
-                    if (hasTarget && targetDistance >= 80.0 &&
-                        targetDistance <= 450.0)
-                    {
-                        // SlugNPCAI sets throwAtTarget only after a valid
-                        // tracked target is available, then uses its
-                        // personality-based 0.035..0.1 attack chance.
-                        double throwChance = MathUtil.Lerp(0.035, 0.1,
-                            personalityAggression);
-                        if (random.NextDouble() < throwChance)
-                            ChangeSpearmasterState(SpearmasterActionState.Aiming);
+                    // Holding a spear is a normal mobile state. Only a valid
+                    // click-attention target temporarily takes control for an
+                    // aim/throw sequence; no target must not pin the pet.
+                    if (!hasTarget || targetDistance < 80.0 || targetDistance > 450.0)
                         return false;
-                    }
-                    if (hasTarget) return false;
-                    // The desktop has no prey tracker when the mouse is not
-                    // being attended. Keep the original single throw-input
-                    // transition, but occasionally create a brief local
-                    // throw target after an instance-specific cooldown.
-                    // This keeps Spearmasters mobile rather than holding a
-                    // needle forever, without making their throw cadence a
-                    // shared modulo timer.
-                    if (--spearmasterAutonomousThrowCountdown <= 0)
+                    // SlugNPCAI sets throwAtTarget only after a valid tracked
+                    // target is available, then uses its personality-based
+                    // 0.035..0.1 attack chance. Mouse attention is the
+                    // desktop target proxy; this preserves target-gated
+                    // throws while avoiding the former long fixed hold timer
+                    // that usually outlived the attention window.
+                    double throwChance = MathUtil.Lerp(0.035, 0.1,
+                        personalityAggression);
+                    if (random.NextDouble() < throwChance)
                     {
-                        int direction = random.NextDouble() < 0.2
-                            ? -slugcat.State.Facing : slugcat.State.Facing;
-                        spearmasterTarget = slugcat.Center + new Vec2(
-                            direction * (130.0 + random.NextDouble() * 110.0),
-                            (random.NextDouble() * 2.0 - 1.0) * 24.0);
-                        spearmasterAutonomousThrow = true;
                         ChangeSpearmasterState(SpearmasterActionState.Aiming);
                     }
                     return false;
@@ -381,9 +365,8 @@ namespace RainWorldDesktopPet.AI
                 case SpearmasterActionState.Aiming:
                     spear.SetActionState(spearmasterState, spearmasterTarget);
                     Behavior = DesktopBehavior.ThrowSpear;
-                    if (!hasThrowTarget || targetDistance < 80.0 || targetDistance > 450.0)
+                    if (!hasTarget || targetDistance < 80.0 || targetDistance > 450.0)
                     {
-                        spearmasterAutonomousThrow = false;
                         ChangeSpearmasterState(SpearmasterActionState.HoldingSpear);
                         return true;
                     }
@@ -398,9 +381,8 @@ namespace RainWorldDesktopPet.AI
                 case SpearmasterActionState.Throwing:
                     spear.SetActionState(spearmasterState, spearmasterTarget);
                     Behavior = DesktopBehavior.ThrowSpear;
-                    if (!hasThrowTarget || targetDistance < 80.0 || targetDistance > 450.0)
+                    if (!hasTarget || targetDistance < 80.0 || targetDistance > 450.0)
                     {
-                        spearmasterAutonomousThrow = false;
                         ChangeSpearmasterState(SpearmasterActionState.HoldingSpear);
                         return true;
                     }
@@ -409,7 +391,6 @@ namespace RainWorldDesktopPet.AI
                         VirtualPosture.None, false);
                     if (spearmasterStateTicks > 1 || spear.HeldSpear == null)
                     {
-                        spearmasterAutonomousThrow = false;
                         spearmasterRecoveryDuration = 5;
                         ChangeSpearmasterState(SpearmasterActionState.Recovering);
                     }
@@ -429,25 +410,14 @@ namespace RainWorldDesktopPet.AI
 
         private void ChangeSpearmasterState(SpearmasterActionState state)
         {
-            SpearmasterActionState previous = spearmasterState;
             spearmasterState = state;
             spearmasterStateTicks = 0;
-            if (state == SpearmasterActionState.HoldingSpear &&
-                previous != SpearmasterActionState.HoldingSpear)
-            {
-                // 5.5 to 12.5 seconds at the desktop's 40 Hz update rate,
-                // varied per individual so nearby cats do not throw in sync.
-                spearmasterAutonomousThrowCountdown = 220 + random.Next(0, 281);
-                spearmasterAutonomousThrow = false;
-            }
         }
 
         private void ResetSpearmasterState()
         {
             spearmasterState = SpearmasterActionState.Idle;
             spearmasterStateTicks = 0;
-            spearmasterAutonomousThrowCountdown = 0;
-            spearmasterAutonomousThrow = false;
             spearmasterTarget = Vec2.Zero;
         }
 
