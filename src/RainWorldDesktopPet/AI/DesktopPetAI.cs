@@ -233,7 +233,7 @@ namespace RainWorldDesktopPet.AI
         private Vec2 originalAttentionTarget;
         private SpearmasterActionState spearmasterState;
         private int spearmasterStateTicks;
-        private int spearmasterIdleDuration = 220;
+        private int spearmasterIdleDuration = 120;
         private int spearmasterMoveDuration = 35;
         private int spearmasterRecoveryDuration = 110;
         private int spearmasterAutonomousThrowCountdown;
@@ -803,11 +803,11 @@ namespace RainWorldDesktopPet.AI
 
             GourmandAbilityController gourmand =
                 slugcat.AbilityController as GourmandAbilityController;
-            if (gourmand != null && !context.Grounded &&
+            if (gourmand != null && Behavior == DesktopBehavior.GourmandRoll &&
+                !context.Grounded &&
                 (slugcat.BodyChunks[0].Velocity.Y +
                  slugcat.BodyChunks[1].Velocity.Y) * 0.5 > 2.0)
             {
-                Behavior = DesktopBehavior.GourmandRoll;
                 input = new VirtualInput(desiredDirection, 1, false, false);
                 return true;
             }
@@ -916,9 +916,18 @@ namespace RainWorldDesktopPet.AI
                 }
             }
             if (!saintTransitionArmed) return false;
-            if (context.Grounded || !slugcat.State.Conscious)
+            if (!slugcat.State.Conscious)
             {
-                if (context.Grounded) ResetSaintTransition();
+                ResetSaintTransition();
+                return false;
+            }
+            if (context.Grounded)
+            {
+                // Keep a planned tongue transition armed for the same short launch
+                // grace used by the original jump. A grounded contact on the frame
+                // immediately after the jump input must not discard the route.
+                if (Behavior != DesktopBehavior.Jump || behaviorTicks > 8)
+                    ResetSaintTransition();
                 return false;
             }
 
@@ -1035,20 +1044,12 @@ namespace RainWorldDesktopPet.AI
                     spear.SetActionState(spearmasterState, spearmasterTarget);
                     if (spearmasterStateTicks >= spearmasterIdleDuration)
                     {
-                        // SpearMaster is observant and purposeful: drawing a needle is
-                        // an occasional focused action, not a periodic metronome.
-                        double inspectChance = 0.12 + attentionDrive * 0.13 +
-                            traitObservation * 0.13 + (mood == AIMood.Focused ? 0.11 : 0.0);
-                        if (random.NextDouble() < inspectChance)
-                        {
-                            spearmasterMoveDuration = 25 + random.Next(0, 25);
-                            ChangeSpearmasterState(SpearmasterActionState.Moving);
-                        }
-                        else
-                        {
-                            spearmasterStateTicks = 0;
-                            spearmasterIdleDuration = SecondsToTicks(SampleCentered(3.0, 9.0));
-                        }
+                        // Spearmaster always eventually performs its explicit
+                        // extraction sequence; personality still varies how long it
+                        // waits between repetitions instead of making the action
+                        // disappear behind a failed random gate.
+                        spearmasterMoveDuration = 25 + random.Next(0, 25);
+                        ChangeSpearmasterState(SpearmasterActionState.Moving);
                     }
                     // The action scheduler must not replace the normal
                     // utility input while it has nothing to do. The previous
