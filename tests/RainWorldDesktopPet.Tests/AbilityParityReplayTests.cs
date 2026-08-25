@@ -1037,6 +1037,15 @@ namespace RainWorldDesktopPet.Tests
             True(ability.LastElasticityExcess <= 0.000001,
                 "newly attached rope is slack and applies no anchor pull");
             True(ability.Rope.Length == 20, "PlayerGraphics uses twenty rope segments");
+            saint.BodyChunks[0].ContactRight = true;
+            True(!ability.CanJumpReleaseAttachedTongue,
+                "wall contact blocks attached-tongue jump release until fully airborne");
+            saint.BodyChunks[0].ContactRight = false;
+            saint.State.Grounded = false;
+            saint.State.CanJump = 0;
+            saint.State.BodyMode = BodyModeIndex.Default;
+            True(ability.CanJumpReleaseAttachedTongue,
+                "fully airborne attached Saint accepts a fresh jump release");
 
             IList<AbilityReplayTick> release = AbilityInputReplay.Run(saint, world,
                 new[]

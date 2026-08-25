@@ -884,7 +884,8 @@ namespace RainWorldDesktopPet.AI
                 saintTransitionFreestyle = false;
                 saintAwaitingJumpRelease = false;
                 saintAttachedTicks++;
-                if (saintAttachedTicks >= saintAttachDurationTicks)
+                if (saintAttachedTicks >= saintAttachDurationTicks &&
+                    saint.CanJumpReleaseAttachedTongue)
                 {
                     saintAttachedTicks = 0;
                     saintAttachDurationTicks = 45 + random.Next(0, 56);
