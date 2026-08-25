@@ -18,6 +18,7 @@ namespace RainWorldDesktopPet.AI
         public int SaferDirection;
         public bool JumpReady;
         public bool DropReady;
+        public bool RestReady = true;
         public bool TransitionAvailable;
         // A neutral personality keeps standalone utility probes and callers
         // that do not own an AbstractCreature equivalent backward-compatible.
@@ -49,14 +50,18 @@ namespace RainWorldDesktopPet.AI
                         context.PersonalityDominance * 0.12 : 0.01;
                     break;
                 case DesktopBehavior.Sit:
-                    score = context.Grounded ? 0.08 + context.Fatigue * 0.65 +
-                        context.Stillness * 0.18 +
-                        (1.0 - context.PersonalityEnergy) * 0.18 : 0.0;
+                    score = context.Grounded && context.RestReady
+                        ? Math.Max(0.0, context.Fatigue - 0.42) * 0.85 +
+                            context.Stillness * 0.12 +
+                            (1.0 - context.PersonalityEnergy) * 0.10
+                        : 0.0;
                     break;
                 case DesktopBehavior.Sleep:
-                    score = context.Grounded ? Math.Max(0.0, context.Fatigue -
-                        MathUtil.Lerp(0.68, 0.48, 1.0 - context.PersonalityEnergy)) *
-                        1.9 : 0.0;
+                    score = context.Grounded && context.RestReady
+                        ? Math.Max(0.0, context.Fatigue -
+                            MathUtil.Lerp(0.86, 0.72, 1.0 - context.PersonalityEnergy)) *
+                            1.9
+                        : 0.0;
                     break;
                 case DesktopBehavior.LookAround:
                     score = 0.12 + context.Curiosity * 0.30 + context.Stillness * 0.12 +

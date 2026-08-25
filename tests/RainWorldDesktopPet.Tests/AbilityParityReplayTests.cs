@@ -71,6 +71,8 @@ namespace RainWorldDesktopPet.Tests
                 GourmandAiDoesNotForceFallRoll);
             run("SlugNPC-inspired AI keeps per-slugcat personalities",
                 AutonomousAiPersonalitiesDiffer);
+            run("SlugNPC-inspired AI diversifies equivalent platform routes",
+                AutonomousAiRoutesDiversify);
             run("Artificer effects retain original smoke and light lifecycles",
                 ArtificerEffectLifecycleReplay);
             run("Spearmaster extraction creates the needle on original progress tick",
@@ -286,6 +288,67 @@ namespace RainWorldDesktopPet.Tests
             True(UtilityEvaluator.Score(DesktopBehavior.Jump, bold, 0.0) >
                 UtilityEvaluator.Score(DesktopBehavior.Jump, cautious, 0.0),
                 "SlugNPC bravery and energy alter route-transition utility");
+
+            UtilityContext exhausted = new UtilityContext
+            {
+                Grounded = true,
+                Fatigue = 1.0,
+                PersonalityEnergy = 0.1,
+                RestReady = false
+            };
+            Near(0.0, UtilityEvaluator.Score(DesktopBehavior.Sleep, exhausted, 0.0),
+                0.000001, "rest cooldown blocks repeated sleep selection");
+            exhausted.RestReady = true;
+            True(UtilityEvaluator.Score(DesktopBehavior.Sleep, exhausted, 0.0) > 0.0,
+                "rest becomes available after its cooldown");
+        }
+
+        private static void AutonomousAiRoutesDiversify()
+        {
+            MonitorInfo monitor = new MonitorInfo("ROUTES",
+                new Rectangle(0, 0, 1200, 1000),
+                new Rectangle(0, 0, 1200, 1000), true);
+            DesktopWindowSnapshot[] windows =
+            {
+                new DesktopWindowSnapshot
+                {
+                    Handle = new IntPtr(7201),
+                    Bounds = new Rectangle(280, 840, 230, 80),
+                    Title = "Left route", ClassName = "Replay"
+                },
+                new DesktopWindowSnapshot
+                {
+                    Handle = new IntPtr(7202),
+                    Bounds = new Rectangle(690, 840, 230, 80),
+                    Title = "Right route", ClassName = "Replay"
+                }
+            };
+            DesktopCollisionWorld world = CreateWorld(monitor, windows);
+            double floorY = FindFloorY(world);
+            DesktopSurface floor = null;
+            for (int i = 0; i < world.Surfaces.Count; i++)
+            {
+                if (!world.Surfaces[i].IsHorizontal ||
+                    Math.Abs(world.Surfaces[i].Top - floorY) > 0.000001) continue;
+                floor = world.Surfaces[i];
+                break;
+            }
+            True(floor != null, "route replay has a source floor");
+            HashSet<long> selectedTargets = new HashSet<long>();
+            for (int seed = 1001; seed <= 1008; seed++)
+            {
+                Slugcat slugcat = new Slugcat(new Vec2(
+                    DesktopWorldTransform.ToSimulationLength(600.0),
+                    floorY - SimulationConstants.HipsChunkRadius - 0.5), SlugcatId.White);
+                slugcat.BodyChunks[1].SupportingSurfaceId = floor.Id;
+                slugcat.BodyChunks[1].SupportingSurfaceKind = floor.Kind;
+                DesktopPetAI ai = new DesktopPetAI(seed, seed - 1000);
+                PlatformTransitionPlan plan = ai.PlanPlatformTransition(slugcat, world);
+                True(plan.IsValid, "each route replay AI finds a viable platform");
+                selectedTargets.Add(plan.TargetSurfaceId);
+            }
+            True(selectedTargets.Count >= 2,
+                "stable personality preferences split equivalent platform routes");
         }
 
         private static void ArtificerEffectLifecycleReplay()

@@ -68,6 +68,9 @@ namespace RainWorldDesktopPet.AI
         private double curiosity = 0.65;
         private int jumpCooldownTicks;
         private int dropCooldownTicks;
+        private int restCooldownTicks;
+        private int idlePostureCheckCountdown;
+        private int idleRestTicks;
         private int wallContactGraceTicks;
         private int lastWallDirection = 1;
         private readonly double personalityEnergy;
@@ -75,6 +78,10 @@ namespace RainWorldDesktopPet.AI
         private readonly double personalityAggression;
         private readonly double personalityBravery;
         private readonly double personalityDominance;
+        private readonly int routePreferenceSalt;
+        private int routeMemoryTicks;
+        private long recentTransitionSourceSurfaceId;
+        private long recentTransitionTargetSurfaceId;
         private int attentionRetargetCountdown;
         private bool specialTransitionArmed;
         private long specialTransitionTargetSurfaceId;
@@ -109,11 +116,13 @@ namespace RainWorldDesktopPet.AI
             personalityAggression = personalityRandom.NextDouble();
             personalityBravery = personalityRandom.NextDouble();
             personalityDominance = personalityRandom.NextDouble();
+            routePreferenceSalt = personalityRandom.Next();
             fatigue = MathUtil.Lerp(0.30, 0.08, personalityEnergy);
             curiosity = MathUtil.Lerp(0.36, 0.86,
                 MathUtil.Clamp01((personalityEnergy + (1.0 - personalityNervous)) * 0.5));
             desiredDirection = random.Next(0, 2) == 0 ? -1 : 1;
             attentionRetargetCountdown = 40 + random.Next(0, 80);
+            idlePostureCheckCountdown = 120 + random.Next(0, 121);
             // Avoid making every spawned Slugcat scan all desktop surfaces on
             // the same 40 Hz tick. The first still evaluates immediately.
             evaluationCountdown = evaluationPhase == 0 ? 0 : evaluationPhase + 1;
@@ -147,6 +156,9 @@ namespace RainWorldDesktopPet.AI
             behaviorTicks++;
             if (jumpCooldownTicks > 0) jumpCooldownTicks--;
             if (dropCooldownTicks > 0) dropCooldownTicks--;
+            if (restCooldownTicks > 0) restCooldownTicks--;
+            if (idlePostureCheckCountdown > 0) idlePostureCheckCountdown--;
+            if (routeMemoryTicks > 0) routeMemoryTicks--;
             fatigue = MathUtil.Clamp01(fatigue + FatigueDelta(Behavior));
             curiosity = MathUtil.Clamp01(curiosity + CuriosityDelta(Behavior));
 
@@ -185,10 +197,16 @@ namespace RainWorldDesktopPet.AI
             {
                 DesktopSurface surface = world.Surfaces[i];
                 if (!surface.IsHorizontal || surface.Id == slugcat.PrimarySupportingSurfaceId) continue;
+                if (IsRecentTransitionPair(slugcat.PrimarySupportingSurfaceId,
+                    surface.Id)) continue;
                 Vec2 candidate = new Vec2(MathUtil.Clamp(center.X, surface.Left + 12.0,
                     surface.Right - 12.0), surface.Top - SimulationConstants.HipsChunkRadius);
                 Vec2 delta = candidate - center;
                 if (delta.Length > maximumRange || surface.Right - surface.Left < 24.0) continue;
+                // A monitor publishes overlapping work-area and physical
+                // floor surfaces. Neither is a meaningful route from the
+                // other when they resolve to the current position.
+                if (Math.Abs(delta.X) < 24.0 && Math.Abs(delta.Y) < 20.0) continue;
                 // Prefer another window above or across a modest gap. Floors
                 // below remain a DropDown concern handled by the normal AI.
                 if (delta.Y > 50.0) continue;
@@ -201,6 +219,12 @@ namespace RainWorldDesktopPet.AI
                     MathUtil.Lerp(2.4, 1.2, personalityBravery);
                 score += preferredDirection ? -12.0 * personalityDominance :
                     24.0 * (1.0 - personalityDominance);
+                // SlugNPCAI's IdleScore distinguishes viable destinations by
+                // personality and recent visits. Preserve a stable per-cat
+                // preference among otherwise equivalent desktop platforms so
+                // co-spawned cats do not all converge on one nearest ledge.
+                score -= SurfaceAffinity(surface.Id) * MathUtil.Lerp(7.0,
+                    24.0, (personalityBravery + personalityDominance) * 0.5);
                 if (score >= bestScore) continue;
                 bestScore = score;
                 best = surface;
@@ -451,15 +475,25 @@ namespace RainWorldDesktopPet.AI
 
         private void ApplyOriginalIdlePosture(Slugcat slugcat, UtilityContext context)
         {
-            if (Behavior != DesktopBehavior.Idle || !context.Grounded) return;
-            // SlugNPCAI.Move changes standing state at its idle destination
-            // with these exact energy-weighted probabilities.  This keeps
-            // low-energy cats restful without making every spawned cat lie
-            // down on the same cadence.
+            if (idleRestTicks > 0)
+            {
+                idleRestTicks--;
+                if (idleRestTicks == 0) slugcat.State.Standing = true;
+                return;
+            }
+            // SlugNPCAI.Move changes standing state only after reaching its
+            // idle destination. A desktop has no room tile destination, so
+            // require sustained stillness and rate-limit the equivalent
+            // check; running the original probability on every idle tick
+            // made low-energy cats remain prone almost continuously.
+            if (Behavior != DesktopBehavior.Idle || !context.Grounded ||
+                context.Stillness < 0.9 || idlePostureCheckCountdown > 0) return;
+            idlePostureCheckCountdown = 160 + random.Next(0, 161);
             if (random.NextDouble() < MathUtil.InverseLerp(0.35, 0.0,
                 personalityEnergy) * 0.01)
             {
                 slugcat.State.Standing = false;
+                idleRestTicks = 80 + random.Next(0, 161);
             }
             else if (random.NextDouble() < MathUtil.InverseLerp(0.65, 1.0,
                 personalityEnergy) * 0.01)
@@ -497,6 +531,7 @@ namespace RainWorldDesktopPet.AI
             context.BehaviorAgeSeconds = behaviorTicks * SimulationConstants.LogicStepSeconds;
             context.JumpReady = jumpCooldownTicks == 0;
             context.DropReady = dropCooldownTicks == 0;
+            context.RestReady = restCooldownTicks == 0;
             context.PersonalityEnergy = personalityEnergy;
             context.PersonalityNervous = personalityNervous;
             context.PersonalityAggression = personalityAggression;
@@ -551,9 +586,43 @@ namespace RainWorldDesktopPet.AI
                     // was the cause of mirrored, repeated left/right jumps.
                     desiredDirection = TransitionPlan.HorizontalDistance < 0.0 ? -1 : 1;
                 }
-                if (best == DesktopBehavior.Jump) jumpCooldownTicks = 240;
+                if (best == DesktopBehavior.Jump)
+                {
+                    jumpCooldownTicks = 240;
+                    RememberTransition(TransitionPlan);
+                }
                 if (best == DesktopBehavior.DropDown) dropCooldownTicks = 400;
+                if (best == DesktopBehavior.Sit) restCooldownTicks = 520;
+                if (best == DesktopBehavior.Sleep) restCooldownTicks = 1200;
             }
+        }
+
+        private bool IsRecentTransitionPair(long sourceSurfaceId, long targetSurfaceId)
+        {
+            if (routeMemoryTicks <= 0 || sourceSurfaceId == 0 ||
+                targetSurfaceId == 0) return false;
+            return (sourceSurfaceId == recentTransitionSourceSurfaceId &&
+                targetSurfaceId == recentTransitionTargetSurfaceId) ||
+                (sourceSurfaceId == recentTransitionTargetSurfaceId &&
+                targetSurfaceId == recentTransitionSourceSurfaceId);
+        }
+
+        private void RememberTransition(PlatformTransitionPlan plan)
+        {
+            if (!plan.IsValid) return;
+            recentTransitionSourceSurfaceId = plan.SourceSurfaceId;
+            recentTransitionTargetSurfaceId = plan.TargetSurfaceId;
+            // Keep the route-pair memory longer than Jump's own input
+            // cooldown. A missed landing therefore cannot turn into a
+            // left-right jump loop on the next evaluation.
+            routeMemoryTicks = 520;
+        }
+
+        private double SurfaceAffinity(long surfaceId)
+        {
+            long mixed = unchecked(surfaceId * 1103515245L +
+                routePreferenceSalt * 12345L);
+            return ((mixed & 0x7fffffffL) / (double)int.MaxValue) * 2.0 - 1.0;
         }
 
         private VirtualInput ProduceInput(Slugcat slugcat, MouseTracker mouse, UtilityContext context)
