@@ -78,31 +78,18 @@ float4 PSMain(PixelInput input) : SV_TARGET { float2 p=input.uv*2-1;
         float shape=input.seed<-1.5 ? radial*radial : pow(radial,.65);
         float alpha=shape*input.color.a;
         return float4(input.color.rgb*alpha,alpha); }
-    // Vanilla FireSmoke quantizes screen position first. Its dominant noise
-    // layers are screen-axis aligned through _spriteRect, so sprite rotation
-    // does not drag the whole smoke pattern around like a rigid decal.
+    // Vanilla FireSmoke quantizes screen position first. _spriteRect is a
+    // camera/level-space mapping, not a per-particle rectangle, so the
+    // dominant turbulence should never be reconstructed from the rotated quad.
     float pixelCell=max(input.pixelInfo.x,.001);
     float2 screenPos=input.position.xy+input.pixelInfo.yz;
     float2 snappedPos=floor(screenPos/pixelCell)*pixelCell;
-
-    // Recover the quad center and scale from UV derivatives, then build an
-    // axis-aligned sprite coordinate from screen space. Geometry may rotate,
-    // but these dominant turbulence coordinates do not rotate with it.
-    float2 dUvDx=ddx(input.uv),dUvDy=ddy(input.uv);
-    float det=dUvDx.x*dUvDy.y-dUvDy.x*dUvDx.y;
-    float safeDet=abs(det)<1e-8 ? (det<0 ? -1e-8 : 1e-8) : det;
-    float invDet=1.0/safeDet;
-    float2 uvFromCenter=input.uv-.5;
-    float2 screenFromCenter=float2(
-        (uvFromCenter.x*dUvDy.y-dUvDy.x*uvFromCenter.y)*invDet,
-        (-dUvDx.y*uvFromCenter.x+dUvDx.x*uvFromCenter.y)*invDet);
-    float2 screenCenter=screenPos-screenFromCenter;
-    float2 uAxis=float2(dUvDy.y,-dUvDx.y)*invDet;
-    float2 vAxis=float2(-dUvDy.x,dUvDx.x)*invDet;
-    float spriteSize=max((length(uAxis)+length(vAxis))*.5,pixelCell);
-    float2 textCoord=(snappedPos-screenCenter)/spriteSize+.5;
+    float2 virtualScreen=float2(1366.0,768.0)*pixelCell;
+    float2 textCoord=snappedPos/virtualScreen;
     textCoord.y+=.04;
 
+    // Keep the radial body in local sprite UVs so the smoke stays circular,
+    // while the major noise layers remain screen-axis aligned like vanilla.
     float dist=saturate(1-length(p));
     const float rain=.5; const float tau=6.28318530718;
     // SpriteRenderer adds (Lifetime % 97) * .113 to the smoke seed.
