@@ -81,7 +81,7 @@ namespace RainWorldDesktopPet.Tests
                 SpearmasterNeutralGateReplay);
             run("Spearmaster throw uses ThrowObject velocity and needle gravity",
                 SpearmasterThrowReplay);
-            run("Spearmaster thrown spear fades then expires after five seconds",
+            run("Spearmaster thrown spear fades then expires after fifteen seconds",
                 SpearmasterThrownSpearExpiryReplay);
             run("Grounded free spear keeps the original diagonal resting spread",
                 SpearGroundRestDirectionReplay);
@@ -89,6 +89,8 @@ namespace RainWorldDesktopPet.Tests
                 ThrownSpearFloorRestReplay);
             run("Spearmaster AI holds without a target and traverses explicit action states",
                 SpearmasterAiActionStateReplay);
+            run("Spearmaster AI throws without mouse attention after its cooldown",
+                SpearmasterAutonomousThrowReplay);
             run("Rivulet replay uses stats-driven ground jump and shared air control",
                 RivuletMovementReplay);
             run("Movement launch momentum produces character-specific trajectories",
@@ -480,10 +482,10 @@ namespace RainWorldDesktopPet.Tests
             DesktopSpear spear = ability.HeldSpear;
             slugcat.Step(new VirtualInput(0, 0, false, false, true,
                 VirtualPosture.None, false), world, Vec2.Zero, Vec2.Zero);
-            Equal(200, spear.DespawnAfterTicks,
-                "Spearmaster throw schedules the five-second lifespan");
+            Equal(600, spear.DespawnAfterTicks,
+                "Spearmaster throw schedules the fifteen-second lifespan");
 
-            for (int tick = 0; tick < 180; tick++)
+            for (int tick = 0; tick < 580; tick++)
                 slugcat.Step(VirtualInput.Neutral, world, Vec2.Zero, Vec2.Zero);
             Near(1.0, spear.Opacity, 0.000001,
                 "needle remains opaque before its final half-second fade");
@@ -492,10 +494,10 @@ namespace RainWorldDesktopPet.Tests
             True(spear.Opacity > 0.0 && spear.Opacity < 1.0,
                 "needle fades naturally during its final half second");
             True(slugcat.Spears.Contains(spear),
-                "needle exists until the full five-second lifespan elapses");
+                "needle exists until the full fifteen-second lifespan elapses");
             slugcat.Step(VirtualInput.Neutral, world, Vec2.Zero, Vec2.Zero);
             True(!slugcat.Spears.Contains(spear),
-                "needle is removed on its five-second expiry tick");
+                "needle is removed on its fifteen-second expiry tick");
         }
 
         private static void SpearGroundRestDirectionReplay()
@@ -674,6 +676,36 @@ namespace RainWorldDesktopPet.Tests
             True(visited.Contains(SpearmasterActionState.Throwing), "visited Throwing");
             True(visited.Contains(SpearmasterActionState.Recovering),
                 "visited Recovering");
+        }
+
+        private static void SpearmasterAutonomousThrowReplay()
+        {
+            DesktopCollisionWorld world;
+            Slugcat slugcat = CreateFloorSlugcat(SlugcatId.SpearMaster, out world);
+            DesktopPetAI ai = new DesktopPetAI(7319);
+            MouseTracker mouse = new MouseTracker();
+            SpearmasterAbilityController ability =
+                (SpearmasterAbilityController)slugcat.AbilityController;
+            bool threwWithoutMouseAttention = false;
+
+            for (int tick = 0; tick < 900; tick++)
+            {
+                VirtualInput input = ai.Step(slugcat, world, mouse, null);
+                if (input.Throw)
+                {
+                    True(!ai.MouseAttentionActive,
+                        "autonomous throw does not require mouse attention");
+                    threwWithoutMouseAttention = true;
+                }
+                slugcat.Step(input, world, mouse.Position, mouse.Velocity);
+                if (threwWithoutMouseAttention && ability.ThrownSpear != null)
+                    break;
+            }
+
+            True(threwWithoutMouseAttention,
+                "targetless Spearmaster emits a throw after its own cooldown");
+            True(ability.ThrownSpear != null,
+                "autonomous throw releases the held needle");
         }
 
         private static void RivuletMovementReplay()

@@ -507,7 +507,7 @@ namespace RainWorldDesktopPet.Creature
     public sealed class SpearmasterAbilityController : DefaultAbilityController
     {
         private const int ThrownSpearLifetimeTicks =
-            (int)(5.0 * SimulationConstants.LogicTicksPerSecond);
+            (int)(15.0 * SimulationConstants.LogicTicksPerSecond);
         private const int ThrownSpearFadeTicks =
             (int)(0.5 * SimulationConstants.LogicTicksPerSecond);
         private readonly Random random = new Random(0x5EA2);
