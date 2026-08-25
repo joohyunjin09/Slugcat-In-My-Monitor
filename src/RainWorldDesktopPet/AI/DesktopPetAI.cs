@@ -1265,10 +1265,16 @@ namespace RainWorldDesktopPet.AI
             context.ExplorationJumpAvailable = explorationJumpRequested &&
                 explorationJumpCooldownTicks == 0 && context.Grounded &&
                 !context.ObstacleAhead && context.EdgeDistance > 48.0;
-            context.FreeJumpOpportunity = context.Grounded &&
-                jumpCooldownTicks == 0 && explorationJumpCooldownTicks == 0 &&
-                !context.ObstacleAhead && context.EdgeDistance > 54.0 &&
-                playfulness > 0.58 && (restlessness + boredom) > 0.82;
+            bool saintFreeJumpOpportunity =
+                slugcat.AbilityController is SaintAbilityController &&
+                context.Grounded && jumpCooldownTicks == 0 &&
+                explorationJumpCooldownTicks == 0 && saintFreestyleCooldownTicks == 0 &&
+                !context.ObstacleAhead && context.EdgeDistance > 38.0;
+            context.FreeJumpOpportunity = saintFreeJumpOpportunity ||
+                (context.Grounded && jumpCooldownTicks == 0 &&
+                 explorationJumpCooldownTicks == 0 && !context.ObstacleAhead &&
+                 context.EdgeDistance > 54.0 && playfulness > 0.58 &&
+                 (restlessness + boredom) > 0.82);
 
             context.OnWindow = slugcat.PrimarySupportingSurfaceId > 0;
             context.MouseDistance = Vec2.Distance(slugcat.Center, mouse.Position);
@@ -1308,6 +1314,15 @@ namespace RainWorldDesktopPet.AI
                 double variation = (random.NextDouble() - 0.5) * 0.055;
                 double score = UtilityEvaluator.Score(candidate, context, variation);
                 score = ApplyIntentContinuity(candidate, score, urgentAvoid, urgentClimb);
+                if (candidate == DesktopBehavior.Jump &&
+                    slugcat.AbilityController is SaintAbilityController &&
+                    context.FreeJumpOpportunity && saintFreestyleCooldownTicks == 0)
+                {
+                    // Saint has low base playfulness, so generic free-jump utility almost
+                    // never wins. Give safe Saint hops a character-only utility boost to
+                    // create more natural tongue-launch opportunities.
+                    score += 0.45 + traitSpecialUse * 0.22 + curiosity * 0.10;
+                }
                 score -= RecentBehaviorPenalty(candidate);
                 if (score < 0.0) score = 0.0;
                 utilityScores[i] = score;
