@@ -241,13 +241,15 @@ namespace RainWorldDesktopPet.Physics
                 bool restingOnGround = Chunk.ContactFloor &&
                     Chunk.Velocity.LengthSquared < 0.01;
                 stillTicks = restingOnGround ? stillTicks + 1 : 0;
-                if (stillTicks > 20)
+                // Spear.Update settles a spinning spear immediately on a
+                // floor contact, or after twenty near-still ticks. Preserve
+                // its original -50..50 degree resting spread instead of
+                // retaining the last airborne rotation.
+                if (Chunk.ContactFloor || stillTicks > 20)
                 {
                     ChangeMode(DesktopSpearMode.StuckInGround);
                     RotationSpeed = 0.0;
-                    double angle = (MathUtil.Lerp(-50.0, 50.0,
-                        random.NextDouble()) + 180.0) * Math.PI / 180.0;
-                    Rotation = new Vec2(Math.Cos(angle), Math.Sin(angle));
+                    Rotation = CalculateOriginalGroundRestDirection(random.NextDouble());
                     Chunk.Velocity = Vec2.Zero;
                     StuckSurfaceId = Chunk.SupportingSurfaceId;
                     StuckSurfaceKind = Chunk.SupportingSurfaceKind;
@@ -392,6 +394,15 @@ namespace RainWorldDesktopPet.Physics
             double speed = MathUtil.Lerp(-100.0, 100.0, random.NextDouble());
             if (Math.Abs(speed) < 10.0) speed = speed < 0.0 ? -10.0 : 10.0;
             return speed;
+        }
+
+        public static Vec2 CalculateOriginalGroundRestDirection(double randomValue)
+        {
+            double angle = (MathUtil.Lerp(-50.0, 50.0, randomValue) + 180.0) *
+                Math.PI / 180.0;
+            // Custom.DegToVec is evaluated in Rain World's y-up world. The
+            // desktop renderer uses y-down screen coordinates.
+            return new Vec2(Math.Cos(angle), -Math.Sin(angle));
         }
 
         private void ChangeMode(DesktopSpearMode mode)

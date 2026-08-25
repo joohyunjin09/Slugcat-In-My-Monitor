@@ -81,6 +81,8 @@ namespace RainWorldDesktopPet.Tests
                 SpearmasterNeutralGateReplay);
             run("Spearmaster throw uses ThrowObject velocity and needle gravity",
                 SpearmasterThrowReplay);
+            run("Grounded spear keeps the original diagonal resting spread",
+                SpearGroundRestDirectionReplay);
             run("Spearmaster AI holds without a target and traverses explicit action states",
                 SpearmasterAiActionStateReplay);
             run("Rivulet replay uses stats-driven ground jump and shared air control",
@@ -426,6 +428,13 @@ namespace RainWorldDesktopPet.Tests
             True(spear.HasUmbilical && spear.Umbilical.Length >= 10 &&
                 spear.Umbilical.Length <= 19,
                 "connected needle creates Spear.Umbilical with 10..19 segments");
+            Color umbilicalStart = SpriteRenderer.ResolveOriginalUmbilicalColor(
+                0, spear.Umbilical.Length, 1.0, 1.0);
+            Color umbilicalEnd = SpriteRenderer.ResolveOriginalUmbilicalColor(
+                spear.Umbilical.Length - 1, spear.Umbilical.Length, 1.0, 1.0);
+            True(umbilicalStart.R > umbilicalStart.G &&
+                umbilicalEnd.G > umbilicalStart.G,
+                "Spear.Umbilical uses the original red-to-thread palette gradient");
             Near(48.0, spear.Chunk.Velocity.X, 0.000001,
                 "Spearmaster horizontal skill multiplies 40 by 1.2");
             Near(-1.05045, spear.Chunk.Velocity.Y, 0.00001,
@@ -452,6 +461,16 @@ namespace RainWorldDesktopPet.Tests
             for (int i = 0; i < 5; i++) graphics.Step(attention, world);
             Equal(0, ability.ThrowFollowTicks,
                 "throwing hand follows the released spear for exactly five graphics ticks");
+        }
+
+        private static void SpearGroundRestDirectionReplay()
+        {
+            Vec2 upwardLean = DesktopSpear.CalculateOriginalGroundRestDirection(0.0);
+            Vec2 downwardLean = DesktopSpear.CalculateOriginalGroundRestDirection(1.0);
+            True(upwardLean.X < -0.6 && upwardLean.Y < -0.7,
+                "original -50 degree ground rest leans diagonally on the desktop");
+            True(downwardLean.X < -0.6 && downwardLean.Y > 0.7,
+                "original +50 degree ground rest keeps the opposite diagonal");
         }
 
         private static void SpearmasterTailGrowthReplay()
