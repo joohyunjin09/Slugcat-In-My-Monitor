@@ -29,12 +29,19 @@ namespace RainWorldDesktopPet.Core
         private const double PickupVerticalTolerance = 32.0;
         private const int HoldBeforeBitingTicks = 8;
         private const int BiteIntervalTicks = 18;
+        private const int BiteFaceTicks = 4;
+        private const double FoodHandReachDistance = 34.0;
+        private const double HeldFoodBlend = 0.48;
+        private const double BitingFoodBlend = 0.72;
+        private const double SeekingHandBlend = 0.34;
+        private const double EatingHandBlend = 0.62;
 
         private readonly List<DesktopFood> foods = new List<DesktopFood>(MaximumActiveFoods);
         private readonly IList<DesktopFood> foodView;
         private readonly Random random;
         private DesktopFood target;
         private int interactionCountdown;
+        private int biteFaceTicks;
         private double fullness;
 
         public DesktopFoodManager()
@@ -155,6 +162,7 @@ namespace RainWorldDesktopPet.Core
 
         public void StepPhysics(DesktopCollisionWorld world)
         {
+            if (biteFaceTicks > 0) biteFaceTicks--;
             StepMetabolism();
             RemoveInactive();
             for (int i = 0; i < foods.Count; i++) foods[i].StepPhysics(world);
@@ -209,8 +217,10 @@ namespace RainWorldDesktopPet.Core
             if (offset.Length <= PickupDistance &&
                 Math.Abs(offset.Y) <= PickupVerticalTolerance && slugcat.State.Grounded)
             {
-                Vec2 mouth = MouthPosition(slugcat, graphics);
-                if (target.PickUp(mouth))
+                // Keep the food where it was picked up. StepInteraction raises it
+                // into the hand over the following ticks instead of teleporting it
+                // directly to the mouth on the pickup frame.
+                if (target.PickUp(target.Chunk.Position))
                 {
                     interactionCountdown = HoldBeforeBitingTicks;
                     InteractionState = FoodInteractionState.Holding;
@@ -229,45 +239,60 @@ namespace RainWorldDesktopPet.Core
                 InteractionState = FoodInteractionState.None;
                 return;
             }
-            if (target == null || !target.IsActive) return;
-            if (slugcat.IsGrabbed || !slugcat.State.Conscious || slugcat.State.Dead ||
-                slugcat.State.StunCounter > 0)
-            {
-                DropTarget(slugcat);
-                return;
-            }
-            if (target.State != DesktopFoodState.Held &&
-                target.State != DesktopFoodState.Biting) return;
 
-            target.HoldAt(MouthPosition(slugcat, graphics));
-            if (interactionCountdown > 0)
+            try
             {
-                interactionCountdown--;
-                return;
-            }
+                if (target == null || !target.IsActive) return;
+                if (slugcat.IsGrabbed || !slugcat.State.Conscious || slugcat.State.Dead ||
+                    slugcat.State.StunCounter > 0)
+                {
+                    DropTarget(slugcat);
+                    return;
+                }
+                if (target.State != DesktopFoodState.Held &&
+                    target.State != DesktopFoodState.Biting) return;
 
-            if (target.State == DesktopFoodState.Held)
-            {
-                target.BeginBiting();
-                InteractionState = FoodInteractionState.Eating;
+                Vec2 presentation = FoodPresentationPosition(slugcat, graphics);
+                double blend = target.State == DesktopFoodState.Biting
+                    ? BitingFoodBlend : HeldFoodBlend;
+                target.HoldAt(Vec2.Lerp(target.Chunk.Position, presentation, blend));
+                if (interactionCountdown > 0)
+                {
+                    interactionCountdown--;
+                    return;
+                }
+
+                if (target.State == DesktopFoodState.Held)
+                {
+                    target.BeginBiting();
+                    InteractionState = FoodInteractionState.Eating;
+                    interactionCountdown = BiteIntervalTicks;
+                    return;
+                }
+
+                if (!target.Bite()) return;
+                biteFaceTicks = BiteFaceTicks;
+                TotalBites++;
+                LastEvent = FoodEventName(target, "Bite");
+                if (target.State == DesktopFoodState.Consumed)
+                {
+                    FoodPointsEaten += target.FoodPoints;
+                    fullness = Math.Min(MaximumFullness,
+                        fullness + target.FoodPoints);
+                    LastEvent = FoodEventName(target, "Eaten");
+                    target = null;
+                    InteractionState = FoodInteractionState.None;
+                    return;
+                }
                 interactionCountdown = BiteIntervalTicks;
-                return;
             }
-
-            if (!target.Bite()) return;
-            TotalBites++;
-            LastEvent = FoodEventName(target, "Bite");
-            if (target.State == DesktopFoodState.Consumed)
+            finally
             {
-                FoodPointsEaten += target.FoodPoints;
-                fullness = Math.Min(MaximumFullness,
-                    fullness + target.FoodPoints);
-                LastEvent = FoodEventName(target, "Eaten");
-                target = null;
-                InteractionState = FoodInteractionState.None;
-                return;
+                // Graphics.Step has already run for this simulation tick. Apply
+                // the food-specific hand target afterwards so the normal idle /
+                // movement arm controller remains untouched when no food is active.
+                ApplyFoodAnimation(slugcat, graphics);
             }
-            interactionCountdown = BiteIntervalTicks;
         }
 
         public void ApplyMovingSurfaceDelta(DesktopCollisionWorld world)
@@ -281,6 +306,7 @@ namespace RainWorldDesktopPet.Core
             foods.Clear();
             target = null;
             interactionCountdown = 0;
+            biteFaceTicks = 0;
             InteractionState = FoodInteractionState.None;
             LastSpawnAccepted = false;
             LastEvent = "Food_Clear";
@@ -313,6 +339,7 @@ namespace RainWorldDesktopPet.Core
             }
             target = null;
             interactionCountdown = 0;
+            biteFaceTicks = 0;
             InteractionState = FoodInteractionState.None;
         }
 
@@ -329,6 +356,75 @@ namespace RainWorldDesktopPet.Core
             target = null;
             interactionCountdown = 0;
             InteractionState = FoodInteractionState.None;
+        }
+
+        private Vec2 FoodPresentationPosition(Slugcat slugcat, SlugcatGraphics graphics)
+        {
+            int facing = slugcat.State.Facing == 0 ? 1 : slugcat.State.Facing;
+            Vec2 mouth = MouthPosition(slugcat, graphics);
+            Vec2 handRest = graphics.Head.Position + new Vec2(facing * 8.5, 5.5);
+            if (target == null || target.State != DesktopFoodState.Biting)
+                return handRest;
+
+            double progress = 1.0 - MathUtil.Clamp(
+                interactionCountdown / (double)BiteIntervalTicks, 0.0, 1.0);
+            double eased = 0.5 - Math.Cos(progress * Math.PI) * 0.5;
+            return Vec2.Lerp(handRest, mouth, eased);
+        }
+
+        private void ApplyFoodAnimation(Slugcat slugcat, SlugcatGraphics graphics)
+        {
+            if (biteFaceTicks > 0)
+            {
+                // PlayerGraphics already maps ImpactBlinkTicks to the original
+                // closed-eye FaceB family. Reuse that existing visual channel so
+                // a bite gets an atlas-backed face change without inventing a
+                // desktop-only face sprite.
+                slugcat.State.ImpactBlinkTicks = Math.Max(
+                    slugcat.State.ImpactBlinkTicks, biteFaceTicks);
+            }
+
+            if (target == null || !target.IsActive) return;
+            bool carrying = target.State == DesktopFoodState.Held ||
+                target.State == DesktopFoodState.Biting;
+            if (!carrying && InteractionState != FoodInteractionState.Seeking) return;
+
+            Vec2 connection = slugcat.BodyChunks[0].Position;
+            if (!carrying && Vec2.Distance(connection, target.Chunk.Position) >
+                FoodHandReachDistance) return;
+
+            int facing = slugcat.State.Facing == 0 ? 1 : slugcat.State.Facing;
+            int handIndex = facing < 0 ? 0 : 1;
+            SpearmasterAbilityController spear =
+                slugcat.AbilityController as SpearmasterAbilityController;
+            if (spear != null && spear.HeldSpear != null && spear.HeldHand == handIndex)
+                handIndex = 1 - handIndex;
+
+            Limb hand = graphics.Arms[handIndex];
+            Vec2 handTarget = carrying
+                ? target.Chunk.Position + new Vec2(-facing * 1.5, 1.5)
+                : target.Chunk.Position;
+            Vec2 offset = handTarget - connection;
+            double maximumReach = hand.Length * 0.95;
+            if (offset.Length > maximumReach)
+                handTarget = connection + offset.Normalized * maximumReach;
+
+            hand.Mode = LimbMode.HuntAbsolutePosition;
+            hand.AbsoluteHuntPosition = handTarget;
+            hand.TargetPosition = handTarget;
+            hand.GripSurfaceId = 0;
+            hand.RetractCounter = 0;
+            hand.HuntSpeed = carrying ? 12.0 : 9.0;
+            hand.Quickness = carrying ? 0.85 : 0.65;
+
+            // The ordinary Limb update already happened this tick. Move only a
+            // fraction toward the food here; render interpolation then turns the
+            // pickup / bite cycle into a visible reach rather than a hand teleport.
+            Vec2 previous = hand.End.Position;
+            double blend = carrying ? EatingHandBlend : SeekingHandBlend;
+            hand.End.Position = Vec2.Lerp(previous, handTarget, blend);
+            hand.End.LastPosition = previous;
+            hand.End.Velocity = hand.End.Position - previous;
         }
 
         private static Vec2 MouthPosition(Slugcat slugcat, SlugcatGraphics graphics)
