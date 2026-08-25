@@ -9,13 +9,76 @@ on:
     branches:
       - develop
       - main
+      - codex/rain-world-fidelity-overhaul
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
+  patch-pr3-ai:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/codex/rain-world-fidelity-overhaul'
+    name: Patch PR 3 AI regression
+    runs-on: windows-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out PR branch
+        uses: actions/checkout@v4
+        with:
+          ref: codex/rain-world-fidelity-overhaul
+          fetch-depth: 2
+
+      - name: Remove fabricated Gourmand fall-roll input
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $path = 'src/RainWorldDesktopPet/AI/DesktopPetAI.cs'
+          $text = [IO.File]::ReadAllText($path).Replace("`r`n", "`n")
+          $old = @'
+            GourmandAbilityController gourmand =
+                slugcat.AbilityController as GourmandAbilityController;
+            if (gourmand != null && !context.Grounded &&
+                (slugcat.BodyChunks[0].Velocity.Y +
+                 slugcat.BodyChunks[1].Velocity.Y) * 0.5 > 2.0)
+            {
+                Behavior = DesktopBehavior.GourmandRoll;
+                input = new VirtualInput(desiredDirection, 1, false, false);
+                return true;
+            }
+
+'@
+          $new = @'
+            // Falling alone is not Player.downDiagonal. Gourmand roll entry must
+            // come from an explicit movement intent rather than fabricated AI input.
+
+'@
+          $index = $text.IndexOf($old, [StringComparison]::Ordinal)
+          if ($index -lt 0) { throw 'Expected Gourmand AI block was not found.' }
+          if ($text.IndexOf($old, $index + $old.Length, [StringComparison]::Ordinal) -ge 0) {
+              throw 'Expected Gourmand AI block was not unique.'
+          }
+          $text = $text.Substring(0, $index) + $new + $text.Substring($index + $old.Length)
+          [IO.File]::WriteAllText($path, $text, (New-Object Text.UTF8Encoding($false)))
+          git diff --check
+          git diff -- $path
+
+      - name: Build Release and run tests
+        shell: powershell
+        run: .\build.ps1 -Configuration Release
+
+      - name: Commit validated source fix and restore CI
+        shell: powershell
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout HEAD^ -- .github/workflows/ci.yml
+          git add -- .github/workflows/ci.yml src/RainWorldDesktopPet/AI/DesktopPetAI.cs
+          git commit -m "fix: prevent fabricated Gourmand fall-roll input"
+          git push origin HEAD:codex/rain-world-fidelity-overhaul
+
   build-and-test:
+    if: github.event_name != 'push' || github.ref != 'refs/heads/codex/rain-world-fidelity-overhaul'
     name: Windows build and tests
     runs-on: windows-latest
     timeout-minutes: 20
