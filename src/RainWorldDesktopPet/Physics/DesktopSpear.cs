@@ -422,9 +422,10 @@ namespace RainWorldDesktopPet.Physics
         {
             double angle = (MathUtil.Lerp(-50.0, 50.0, randomValue) + 180.0) *
                 Math.PI / 180.0;
-            // Custom.DegToVec is evaluated in Rain World's y-up world. The
-            // desktop renderer uses y-down screen coordinates.
-            return new Vec2(Math.Cos(angle), -Math.Sin(angle));
+            // RWCustom.Custom.DegToVec uses (sin(angle), cos(angle)), with
+            // zero degrees pointing up in its y-up world. Reflect only its
+            // y component for the desktop's y-down coordinate system.
+            return new Vec2(Math.Sin(angle), -Math.Cos(angle));
         }
 
         private void ChangeMode(DesktopSpearMode mode)

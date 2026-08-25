@@ -469,10 +469,10 @@ namespace RainWorldDesktopPet.Tests
         {
             Vec2 upwardLean = DesktopSpear.CalculateOriginalGroundRestDirection(0.0);
             Vec2 downwardLean = DesktopSpear.CalculateOriginalGroundRestDirection(1.0);
-            True(upwardLean.X < -0.6 && upwardLean.Y < -0.7,
-                "original -50 degree ground rest leans diagonally on the desktop");
-            True(downwardLean.X < -0.6 && downwardLean.Y > 0.7,
-                "original +50 degree ground rest keeps the opposite diagonal");
+            True(upwardLean.X > 0.6 && upwardLean.Y > 0.6,
+                "original -50 degree ground rest points diagonally into the floor");
+            True(downwardLean.X < -0.6 && downwardLean.Y > 0.6,
+                "original +50 degree ground rest keeps the opposite floor-facing diagonal");
         }
 
         private static void ThrownSpearFloorRestReplay()
