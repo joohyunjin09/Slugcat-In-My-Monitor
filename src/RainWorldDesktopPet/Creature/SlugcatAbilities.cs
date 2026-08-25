@@ -840,6 +840,29 @@ namespace RainWorldDesktopPet.Creature
             }
         }
         public long AttachedSurfaceId { get { return attachedSurfaceId; } }
+        public bool CanJumpReleaseAttachedTongue
+        {
+            get
+            {
+                if (mode != SaintTongueMode.AttachedToTerrain ||
+                    !Owner.State.Conscious || Owner.State.Grounded ||
+                    Owner.State.CanJump > 0 || Owner.Movement.LaunchedThisTick)
+                    return false;
+                if (Owner.State.BodyMode == BodyModeIndex.CorridorClimb ||
+                    Owner.State.BodyMode == BodyModeIndex.ClimbIntoShortCut ||
+                    Owner.State.BodyMode == BodyModeIndex.WallClimb ||
+                    Owner.State.BodyMode == BodyModeIndex.Swimming ||
+                    Owner.State.BodyMode == BodyModeIndex.ZeroG)
+                    return false;
+                for (int i = 0; i < Owner.BodyChunks.Length; i++)
+                {
+                    BodyChunk chunk = Owner.BodyChunks[i];
+                    if (chunk.ContactFloor || chunk.ContactLeft || chunk.ContactRight)
+                        return false;
+                }
+                return true;
+            }
+        }
         public override string DebugState
         {
             get { return string.Format("tongue:{0} rope:{1:0}/{2:0}", mode,
@@ -861,7 +884,7 @@ namespace RainWorldDesktopPet.Creature
                 if (input.Y < 0) idealLength = Math.Max(50.0, idealLength - 3.0);
                 if (input.Y > 0) idealLength = Math.Min(170.0, idealLength + 3.0);
                 if (input.JumpPressed && attachedTicks >= 2 &&
-                    !Owner.Movement.LaunchedThisTick)
+                    CanJumpReleaseAttachedTongue)
                 {
                     Release();
                     double jumpFactor = MathUtil.Lerp(1.0, 1.15,

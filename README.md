@@ -204,7 +204,7 @@ DMS 스킨이 목록에 나타나려면 다음 조건을 모두 확인하세요.
 Release 빌드와 전체 테스트는 다음 명령으로 실행합니다.
 
 ```powershell
-.\build.ps1 -Configuration Release
+.uild.ps1 -Configuration Release
 ```
 
 DirectComposition 브리지는 Windows SDK의 Direct3D 11, DXGI, DirectComposition 라이브러리를 사용합니다.
@@ -462,7 +462,7 @@ The build script downloads the `.NET Framework 4.8` reference assemblies when ne
 Run a Release build and the full test suite with:
 
 ```powershell
-.\build.ps1 -Configuration Release
+.uild.ps1 -Configuration Release
 ```
 
 The DirectComposition bridge uses the Windows SDK's Direct3D 11, DXGI, and DirectComposition libraries.
