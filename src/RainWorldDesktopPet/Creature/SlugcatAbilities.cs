@@ -506,6 +506,10 @@ namespace RainWorldDesktopPet.Creature
 
     public sealed class SpearmasterAbilityController : DefaultAbilityController
     {
+        private const int ThrownSpearLifetimeTicks =
+            (int)(15.0 * SimulationConstants.LogicTicksPerSecond);
+        private const int ThrownSpearFadeTicks =
+            (int)(0.5 * SimulationConstants.LogicTicksPerSecond);
         private readonly Random random = new Random(0x5EA2);
         private double spearProgress;
         private bool pullSoundPlayed;
@@ -608,6 +612,8 @@ namespace RainWorldDesktopPet.Creature
                     heldSpear.HoldAt(throwPosition, direction);
                     heldSpear.SetConnectionAnchor(TailConnectionAnchor());
                     heldSpear.Throw(velocity, direction);
+                    heldSpear.SetDespawnAfterTicks(ThrownSpearLifetimeTicks,
+                        ThrownSpearFadeTicks);
                     Owner.BodyChunks[0].Velocity += direction * 8.0;
                     Owner.BodyChunks[1].Velocity -= direction * 4.0;
                     Owner.EmitSound("Slugcat_Throw_Spear", throwPosition,
