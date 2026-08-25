@@ -1,0 +1,51 @@
+name: Saint tongue 0.5s cooldown
+
+on:
+  push:
+    branches:
+      - tune/saint-tongue-0.5s
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-test:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@v4
+        with:
+          ref: tune/saint-tongue-0.5s
+
+      - name: Set Saint tongue cooldown to 0.5 seconds
+        shell: pwsh
+        run: |
+          $path = 'src/RainWorldDesktopPet/AI/DesktopPetAI.cs'
+          $text = [IO.File]::ReadAllText($path)
+          $old = 'saintFreestyleCooldownTicks = SecondsToTicks(SampleCentered(1.6, 4.0));'
+          $new = 'saintFreestyleCooldownTicks = SecondsToTicks(0.5);'
+          if (-not $text.Contains($old)) { throw 'Saint cooldown assignment not found' }
+          $text = $text.Replace($old, $new)
+          [IO.File]::WriteAllText($path, $text, [Text.UTF8Encoding]::new($false))
+          if ((Select-String -Path $path -SimpleMatch 'saintFreestyleCooldownTicks = SecondsToTicks(0.5);').Count -ne 1) {
+            throw 'Saint 0.5 second cooldown was not applied exactly once'
+          }
+
+      - name: Build Release and run tests
+        shell: pwsh
+        run: .\build.ps1 -Configuration Release
+
+      - name: Check DMS validator syntax
+        shell: pwsh
+        run: node --check tools/validate-dms-template.mjs
+
+      - name: Commit tested tuning
+        shell: pwsh
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/saint-tongue-0.5s.yml
+          git add src/RainWorldDesktopPet/AI/DesktopPetAI.cs
+          git commit -m "Reduce Saint tongue cooldown to 0.5 seconds"
+          git push origin HEAD:tune/saint-tongue-0.5s
