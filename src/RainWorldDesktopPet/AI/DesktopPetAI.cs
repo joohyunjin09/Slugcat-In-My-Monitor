@@ -67,6 +67,8 @@ namespace RainWorldDesktopPet.AI
         private long explorationSurfaceId;
         private double explorationTargetX;
         private int explorationTargetTicks;
+        private int explorationJumpCooldownTicks;
+        private bool explorationJumpRequested;
         private int obstacleJumpAttemptTicks;
         private int obstacleJumpDirection;
         private bool obstacleJumpWasAirborne;
@@ -169,6 +171,7 @@ namespace RainWorldDesktopPet.AI
             if (idlePostureCheckCountdown > 0) idlePostureCheckCountdown--;
             if (routeMemoryTicks > 0) routeMemoryTicks--;
             if (explorationTargetTicks > 0) explorationTargetTicks--;
+            if (explorationJumpCooldownTicks > 0) explorationJumpCooldownTicks--;
             fatigue = MathUtil.Clamp01(fatigue + FatigueDelta(Behavior));
             curiosity = MathUtil.Clamp01(curiosity + CuriosityDelta(Behavior));
 
@@ -182,9 +185,14 @@ namespace RainWorldDesktopPet.AI
                 evaluationCountdown = 8 + random.Next(0, 8);
                 PlanPlatformTransition(slugcat, world);
                 context.TransitionAvailable = TransitionPlan.IsValid;
-                SelectBehavior(context);
+                context.SpecialTraversalAvailable = IsSpecialTraversalAvailable(slugcat);
+                SelectBehavior(slugcat, context);
             }
-            else context.TransitionAvailable = TransitionPlan.IsValid;
+            else
+            {
+                context.TransitionAvailable = TransitionPlan.IsValid;
+                context.SpecialTraversalAvailable = IsSpecialTraversalAvailable(slugcat);
+            }
             ApplyOriginalIdlePosture(slugcat, context);
             UpdateExplorationTarget(slugcat, world);
 
@@ -388,16 +396,30 @@ namespace RainWorldDesktopPet.AI
             // periodic airborne timer.
             return TransitionPlan.Mode == PlatformTransitionMode.ExplosiveJump &&
                 TransitionPlan.IsValid &&
-                (Math.Abs(TransitionPlan.HorizontalDistance) >= 64.0 ||
-                 TransitionPlan.VerticalDistance <= -24.0);
+                (Math.Abs(TransitionPlan.HorizontalDistance) >= 44.0 ||
+                 TransitionPlan.VerticalDistance <= -16.0);
         }
 
         private bool RequiresTongueTransition()
         {
             return TransitionPlan.Mode == PlatformTransitionMode.TongueSwing &&
                 TransitionPlan.IsValid &&
-                (Math.Abs(TransitionPlan.HorizontalDistance) >= 54.0 ||
-                 TransitionPlan.VerticalDistance <= -25.0);
+                (Math.Abs(TransitionPlan.HorizontalDistance) >= 42.0 ||
+                 TransitionPlan.VerticalDistance <= -20.0);
+        }
+
+        private bool IsSpecialTraversalAvailable(Slugcat slugcat)
+        {
+            return (slugcat.AbilityController is ArtificerAbilityController &&
+                    RequiresExplosiveTransition()) ||
+                (slugcat.AbilityController is SaintAbilityController &&
+                    RequiresTongueTransition());
+        }
+
+        private double PersonalityCuriosity()
+        {
+            return MathUtil.Clamp01((personalityEnergy +
+                (1.0 - personalityNervous)) * 0.5);
         }
 
         private void ResetSaintTransition()
@@ -620,6 +642,9 @@ namespace RainWorldDesktopPet.AI
             context.ObstacleAhead = context.Grounded &&
                 context.ObstacleDirection != 0 &&
                 context.ObstacleDirection == desiredDirection;
+            context.ExplorationJumpAvailable = explorationJumpRequested &&
+                explorationJumpCooldownTicks == 0 && context.Grounded &&
+                !context.ObstacleAhead && context.EdgeDistance > 48.0;
             context.OnWindow = slugcat.PrimarySupportingSurfaceId > 0;
             context.MouseDistance = Vec2.Distance(slugcat.Center, mouse.Position);
             context.MouseSpeed = mouse.Velocity.Length;
@@ -642,7 +667,7 @@ namespace RainWorldDesktopPet.AI
             return context;
         }
 
-        private void SelectBehavior(UtilityContext context)
+        private void SelectBehavior(Slugcat slugcat, UtilityContext context)
         {
             int minimumTicks = MinimumTicks(Behavior);
             bool urgentAvoid = Behavior != DesktopBehavior.AvoidMouse && context.MouseDistance < 55.0;
@@ -695,13 +720,27 @@ namespace RainWorldDesktopPet.AI
                         obstacleJumpDirection = context.ObstacleDirection;
                         obstacleJumpWasAirborne = false;
                     }
-                    jumpCooldownTicks = 240;
+                    if (context.ExplorationJumpAvailable)
+                    {
+                        explorationJumpRequested = false;
+                        // Keep free hops occasional, but let a curious pet consider another
+                        // one after it has had time to resume its normal traversal.
+                        explorationJumpCooldownTicks = 120;
+                    }
+                    jumpCooldownTicks = JumpCooldownFor(slugcat);
                     RememberTransition(TransitionPlan);
                 }
                 if (best == DesktopBehavior.DropDown) dropCooldownTicks = 400;
                 if (best == DesktopBehavior.Sit) restCooldownTicks = 520;
                 if (best == DesktopBehavior.Sleep) restCooldownTicks = 1200;
             }
+        }
+
+        private static int JumpCooldownFor(Slugcat slugcat)
+        {
+            if (slugcat.AbilityController is ArtificerAbilityController) return 150;
+            if (slugcat.AbilityController is SaintAbilityController) return 170;
+            return 240;
         }
 
         private bool IsRecentTransitionPair(long sourceSurfaceId, long targetSurfaceId)
@@ -739,6 +778,7 @@ namespace RainWorldDesktopPet.AI
                 Behavior != DesktopBehavior.Explore)
             {
                 explorationSurfaceId = 0;
+                explorationJumpRequested = false;
                 return;
             }
 
@@ -765,6 +805,16 @@ namespace RainWorldDesktopPet.AI
 
             explorationSurfaceId = surface.Id;
             explorationTargetTicks = 120 + random.Next(0, 241);
+            if (explorationJumpCooldownTicks == 0)
+            {
+                // This intent is only considered from a safe, interior portion of a
+                // supporting surface (see BuildContext).  Make exploration visibly
+                // more expressive without turning edge navigation into random jumps.
+                double hopChance = 0.18 + (personalityEnergy +
+                    personalityBravery + PersonalityCuriosity()) * 0.13;
+                explorationJumpRequested = random.NextDouble() < hopChance;
+            }
+            else explorationJumpRequested = false;
             double minimumTravel = Math.Min(42.0, (right - left) * 0.25);
             for (int attempt = 0; attempt < 4; attempt++)
             {

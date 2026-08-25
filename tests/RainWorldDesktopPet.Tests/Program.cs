@@ -79,6 +79,7 @@ namespace RainWorldDesktopPet.Tests
             Run("Rain World locator validates an explicit installation", LocatorValidatesExplicitPath);
             Run("Required autonomous behavior states are present", RequiredBehaviorsExist);
             Run("Jump and DropDown utility states are reachable", UtilityActionsAreReachable);
+            Run("Exploration intent makes free jumps reachable", ExplorationJumpIsReachable);
             Run("Obstacle contact makes an original jump attempt reachable", ObstacleJumpIsReachable);
             Run("Mouse locomotion requires explicit click attention", MouseLocomotionRequiresAttention);
             Run("Wall contact reaches gravity-driven WallClimb through VirtualInput", WallContactReachesClimbMovement);
@@ -1147,6 +1148,23 @@ namespace RainWorldDesktopPet.Tests
             obstacle.JumpReady = false;
             Near(0.0, UtilityEvaluator.Score(DesktopBehavior.Jump, obstacle, 0.0),
                 0.000001, "obstacle jump still respects the original jump cooldown");
+        }
+
+        private static void ExplorationJumpIsReachable()
+        {
+            UtilityContext exploration = new UtilityContext
+            {
+                Grounded = true,
+                Curiosity = 0.9,
+                JumpReady = true,
+                ExplorationJumpAvailable = true,
+                EdgeDistance = 120.0
+            };
+            True(UtilityEvaluator.Score(DesktopBehavior.Jump, exploration, 0.0) > 0.0,
+                "an interior exploration intent can choose an original free jump");
+            exploration.ExplorationJumpAvailable = false;
+            Near(0.0, UtilityEvaluator.Score(DesktopBehavior.Jump, exploration, 0.0),
+                0.000001, "free jump requires an exploration intent or route");
         }
 
         private static void WallContactReachesClimbMovement()
