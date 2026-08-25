@@ -54,6 +54,7 @@
     <Compile Include="AI\DesktopPetAI.cs" />
     <Compile Include="AI\UtilityEvaluator.cs" />
     <Compile Include="Core\FixedTimeStep.cs" />
+    <Compile Include="Core\DesktopFoodManager.cs" />
     <Compile Include="Core\GameLoop.cs" />
     <Compile Include="Core\DesktopWorldTransform.cs" />
     <Compile Include="Core\DesktopRecovery.cs" />
@@ -77,6 +78,7 @@
     <Compile Include="Graphics\BodyPart.cs" />
     <Compile Include="Graphics\CompositionBatchPlanner.cs" />
     <Compile Include="Graphics\DirectCompositionHost.cs" />
+    <Compile Include="Graphics\FoodRenderPalette.cs" />
     <Compile Include="Graphics\Limb.cs" />
     <Compile Include="Graphics\ProceduralTail.cs" />
     <Compile Include="Graphics\ParityDiagnostics.cs" />
@@ -90,6 +92,7 @@
     <Compile Include="Physics\BodyChunkConnection.cs" />
     <Compile Include="Physics\DesktopCollisionSnapshot.cs" />
     <Compile Include="Physics\DesktopCollisionWorld.cs" />
+    <Compile Include="Physics\DesktopFood.cs" />
     <Compile Include="Physics\DesktopSpear.cs" />
     <Compile Include="Physics\DesktopRope.cs" />
     <Compile Include="Physics\TerrainImpactData.cs" />
