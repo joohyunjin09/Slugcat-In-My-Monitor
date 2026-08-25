@@ -1,0 +1,85 @@
+name: Tune Saint jump frequency on develop
+
+on:
+  push:
+    branches:
+      - develop
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-test:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out develop
+        uses: actions/checkout@v4
+        with:
+          ref: develop
+
+      - name: Increase Saint jump opportunities
+        shell: pwsh
+        run: |
+          $path = 'src/RainWorldDesktopPet/AI/DesktopPetAI.cs'
+          $text = [IO.File]::ReadAllText($path)
+          $nl = [Environment]::NewLine
+
+          $oldOpportunity = '            context.FreeJumpOpportunity = context.Grounded &&' + $nl +
+            '                jumpCooldownTicks == 0 && explorationJumpCooldownTicks == 0 &&' + $nl +
+            '                !context.ObstacleAhead && context.EdgeDistance > 54.0 &&' + $nl +
+            '                playfulness > 0.58 && (restlessness + boredom) > 0.82;'
+          $newOpportunity = '            bool saintFreeJumpOpportunity =' + $nl +
+            '                slugcat.AbilityController is SaintAbilityController &&' + $nl +
+            '                context.Grounded && jumpCooldownTicks == 0 &&' + $nl +
+            '                explorationJumpCooldownTicks == 0 && saintFreestyleCooldownTicks == 0 &&' + $nl +
+            '                !context.ObstacleAhead && context.EdgeDistance > 38.0;' + $nl +
+            '            context.FreeJumpOpportunity = saintFreeJumpOpportunity ||' + $nl +
+            '                (context.Grounded && jumpCooldownTicks == 0 &&' + $nl +
+            '                 explorationJumpCooldownTicks == 0 && !context.ObstacleAhead &&' + $nl +
+            '                 context.EdgeDistance > 54.0 && playfulness > 0.58 &&' + $nl +
+            '                 (restlessness + boredom) > 0.82);'
+          if (-not $text.Contains($oldOpportunity)) { throw 'FreeJumpOpportunity block not found' }
+          $text = $text.Replace($oldOpportunity, $newOpportunity)
+
+          $oldScore = '                score = ApplyIntentContinuity(candidate, score, urgentAvoid, urgentClimb);'
+          $newScore = $oldScore + $nl +
+            '                if (candidate == DesktopBehavior.Jump &&' + $nl +
+            '                    slugcat.AbilityController is SaintAbilityController &&' + $nl +
+            '                    context.FreeJumpOpportunity && saintFreestyleCooldownTicks == 0)' + $nl +
+            '                {' + $nl +
+            '                    // Saint has low base playfulness, so generic free-jump utility almost' + $nl +
+            '                    // never wins. Give safe Saint hops a character-only utility boost to' + $nl +
+            '                    // create more natural tongue-launch opportunities.' + $nl +
+            '                    score += 0.45 + traitSpecialUse * 0.22 + curiosity * 0.10;' + $nl +
+            '                }'
+          if (-not $text.Contains($oldScore)) { throw 'utility score insertion point not found' }
+          $text = $text.Replace($oldScore, $newScore)
+
+          [IO.File]::WriteAllText($path, $text, [Text.UTF8Encoding]::new($false))
+
+          if ((Select-String -Path $path -SimpleMatch 'bool saintFreeJumpOpportunity =').Count -ne 1) {
+            throw 'Saint free-jump opportunity was not applied exactly once'
+          }
+          if ((Select-String -Path $path -SimpleMatch 'score += 0.45 + traitSpecialUse * 0.22 + curiosity * 0.10;').Count -ne 1) {
+            throw 'Saint jump utility boost was not applied exactly once'
+          }
+
+      - name: Build Release and run tests
+        shell: pwsh
+        run: .\build.ps1 -Configuration Release
+
+      - name: Check DMS validator syntax
+        shell: pwsh
+        run: node --check tools/validate-dms-template.mjs
+
+      - name: Commit tested tuning to develop
+        shell: pwsh
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/saint-jump-frequency-develop.yml
+          git add src/RainWorldDesktopPet/AI/DesktopPetAI.cs
+          git commit -m "Increase Saint jump frequency"
+          git push origin HEAD:develop
