@@ -78,33 +78,51 @@ float4 PSMain(PixelInput input) : SV_TARGET { float2 p=input.uv*2-1;
         float shape=input.seed<-1.5 ? radial*radial : pow(radial,.65);
         float alpha=shape*input.color.a;
         return float4(input.color.rgb*alpha,alpha); }
-    // Vanilla FireSmoke floors screen coordinates against Rain World's
-    // 1366x768 render grid before sampling its noise textures. Reconstruct
-    // that grid in desktop space instead of using an arbitrary 2x2 block.
+    // Vanilla FireSmoke quantizes screen position first. Its dominant noise
+    // layers are screen-axis aligned through _spriteRect, so sprite rotation
+    // does not drag the whole smoke pattern around like a rigid decal.
     float pixelCell=max(input.pixelInfo.x,.001);
     float2 screenPos=input.position.xy+input.pixelInfo.yz;
     float2 snappedPos=floor(screenPos/pixelCell)*pixelCell;
-    float2 pixelDelta=snappedPos-screenPos;
-    float2 stableUv=input.uv+ddx(input.uv)*pixelDelta.x+
-        ddy(input.uv)*pixelDelta.y;
-    float2 smokeP=stableUv*2-1;
-    float dist=saturate(1-length(smokeP));
+
+    // Recover the quad center and scale from UV derivatives, then build an
+    // axis-aligned sprite coordinate from screen space. Geometry may rotate,
+    // but these dominant turbulence coordinates do not rotate with it.
+    float2 dUvDx=ddx(input.uv),dUvDy=ddy(input.uv);
+    float det=dUvDx.x*dUvDy.y-dUvDy.x*dUvDx.y;
+    float safeDet=abs(det)<1e-8 ? (det<0 ? -1e-8 : 1e-8) : det;
+    float invDet=1.0/safeDet;
+    float2 uvFromCenter=input.uv-.5;
+    float2 screenFromCenter=float2(
+        (uvFromCenter.x*dUvDy.y-dUvDy.x*uvFromCenter.y)*invDet,
+        (-dUvDx.y*uvFromCenter.x+dUvDx.x*uvFromCenter.y)*invDet);
+    float2 screenCenter=screenPos-screenFromCenter;
+    float2 uAxis=float2(dUvDy.y,-dUvDx.y)*invDet;
+    float2 vAxis=float2(-dUvDy.x,dUvDx.x)*invDet;
+    float spriteSize=max((length(uAxis)+length(vAxis))*.5,pixelCell);
+    float2 textCoord=(snappedPos-screenCenter)/spriteSize+.5;
+    textCoord.y+=.04;
+
+    float dist=saturate(1-length(p));
     const float rain=.5; const float tau=6.28318530718;
     // SpriteRenderer adds (Lifetime % 97) * .113 to the smoke seed.
     // Remove that integer lifetime component here so one particle keeps the
-    // same procedural mask for its entire life instead of re-rolling noise
-    // every simulation tick. Quantization prevents float roundoff from
-    // occasionally crossing frac() boundaries.
+    // same procedural identity for its entire life.
     float stableSeed=frac(input.seed/.113);
     stableSeed=floor(stableSeed*1024+.5)/1024;
-    float h=sin((1.77*rain+Noise(stableUv*5.2+
-        stableSeed*float2(7,13))*3)*tau)*.5+.5;
-    h*=sin((3.5*rain+Noise(stableUv*12.2+
-        stableSeed*float2(19,3))*3)*tau)*.5+.5;
-    h*=.5+.5*sin((Noise(stableUv+stableSeed*float2(11,17))+
+    float h=sin((1.77*rain+Noise(float2(
+        textCoord.x*5.2+stableSeed*7,
+        rain*.1+textCoord.y*2.6+stableSeed*13))*3)*tau)*.5+.5;
+    h*=sin((3.5*rain+Noise(float2(
+        textCoord.x*12.2+stableSeed*19,
+        rain*.25+textCoord.y*6.6+stableSeed*3))*3)*tau)*.5+.5;
+    // Vanilla keeps one local-UV noise layer, so rotation still adds a small
+    // amount of organic variation without rotating the entire smoke mass.
+    h*=.5+.5*sin((Noise(input.uv+stableSeed*float2(11,17))+
         rain)*tau*3);
     h=lerp(h*dist,lerp(h,1,lerp(.3,.8,input.color.a)),dist);
-    h-=Noise(stableUv*15.2+stableSeed*float2(5,23))*
+    h-=Noise(float2(textCoord.x*15.2+stableSeed*5,
+        rain*.1+textCoord.y*7.6+stableSeed*23))*
         lerp(.7,.3,input.color.a);
     float cutoff=h*input.color.a;
     clip(cutoff-.35);
