@@ -470,6 +470,32 @@ namespace RainWorldDesktopPet.UI
                 }
             }
 
+            // Keep Saint's active tongue in the same dynamic composition-bounds
+            // path as a far Spearmaster needle. The required surface follows every
+            // current/interpolated rope point, so a distant attached tongue stays
+            // visible without imposing a fixed render-distance cap. Once retracted,
+            // it stops contributing to the required bounds and normal surface
+            // reclamation can shrink the oversized allocation again.
+            SaintAbilityController saint =
+                loop.Slugcat.AbilityController as SaintAbilityController;
+            if (saint != null && saint.Mode != SaintTongueMode.Retracted)
+            {
+                Vec2[] currentRope = saint.RopeForRender;
+                Vec2[] previousRope = saint.LastRopeForRender;
+                int ropePointCount = Math.Min(currentRope.Length, previousRope.Length);
+                for (int point = 0; point < ropePointCount; point++)
+                {
+                    Vec2 currentPoint = currentRope[point] * scale;
+                    Vec2 previousPoint = previousRope[point] * scale;
+                    content = RectangleF.Union(content, new RectangleF(
+                        (float)(currentPoint.X - 8.0), (float)(currentPoint.Y - 8.0),
+                        16.0f, 16.0f));
+                    content = RectangleF.Union(content, new RectangleF(
+                        (float)(previousPoint.X - 8.0), (float)(previousPoint.Y - 8.0),
+                        16.0f, 16.0f));
+                }
+            }
+
             int contentWidth = (int)Math.Ceiling(content.Width) + OverlayPadding * 2;
             int contentHeight = (int)Math.Ceiling(content.Height) + OverlayPadding * 2;
             int width = RoundOverlaySize(Math.Max(MinimumOverlaySize, contentWidth));
