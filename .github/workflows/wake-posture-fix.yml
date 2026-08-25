@@ -23,33 +23,8 @@ jobs:
         run: |
           $path = 'src/RainWorldDesktopPet/Creature/OriginalSlugcatMovement.cs'
           $text = [IO.File]::ReadAllText($path)
-          $old = @'
-            if (grounded && input.Posture != VirtualPosture.None)
-                state.Animation = input.Posture == VirtualPosture.Sleep
-                    ? AnimationIndex.Sleep : AnimationIndex.Sit;
-            else if (!grounded && state.Animation != AnimationIndex.Flip &&
-'@
-          $new = @'
-            // Sit/Sleep are stationary rest intents. A locomotion/action input must
-            // wake the Player instead of allowing the curled rest animation to be
-            // reapplied while the BodyChunks are already moving.
-            bool activeInput = input.X != 0 || input.Y != 0 || input.Jump ||
-                input.Pickup || input.Throw || input.DropThrough;
-            bool resting = input.Posture != VirtualPosture.None && !activeInput;
-            if (grounded && resting)
-                state.Animation = input.Posture == VirtualPosture.Sleep
-                    ? AnimationIndex.Sleep : AnimationIndex.Sit;
-            else if (grounded && activeInput &&
-                (state.Animation == AnimationIndex.Sleep ||
-                 state.Animation == AnimationIndex.Sit))
-            {
-                state.Standing = input.Y <= 0;
-                state.Animation = state.Standing
-                    ? AnimationIndex.StandUp : AnimationIndex.None;
-                state.AnimationFrame = 0;
-            }
-            else if (!grounded && state.Animation != AnimationIndex.Flip &&
-'@
+          $old = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('ICAgICAgICAgICAgaWYgKGdyb3VuZGVkICYmIGlucHV0LlBvc3R1cmUgIT0gVmlydHVhbFBvc3R1cmUuTm9uZSkKICAgICAgICAgICAgICAgIHN0YXRlLkFuaW1hdGlvbiA9IGlucHV0LlBvc3R1cmUgPT0gVmlydHVhbFBvc3R1cmUuU2xlZXAKICAgICAgICAgICAgICAgICAgICA/IEFuaW1hdGlvbkluZGV4LlNsZWVwIDogQW5pbWF0aW9uSW5kZXguU2l0OwogICAgICAgICAgICBlbHNlIGlmICghZ3JvdW5kZWQgJiYgc3RhdGUuQW5pbWF0aW9uICE9IEFuaW1hdGlvbkluZGV4LkZsaXAgJiYK'))
+          $new = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('ICAgICAgICAgICAgLy8gU2l0L1NsZWVwIGFyZSBzdGF0aW9uYXJ5IHJlc3QgaW50ZW50cy4gQSBsb2NvbW90aW9uL2FjdGlvbiBpbnB1dCBtdXN0CiAgICAgICAgICAgIC8vIHdha2UgdGhlIFBsYXllciBpbnN0ZWFkIG9mIGFsbG93aW5nIHRoZSBjdXJsZWQgcmVzdCBhbmltYXRpb24gdG8gYmUKICAgICAgICAgICAgLy8gcmVhcHBsaWVkIHdoaWxlIHRoZSBCb2R5Q2h1bmtzIGFyZSBhbHJlYWR5IG1vdmluZy4KICAgICAgICAgICAgYm9vbCBhY3RpdmVJbnB1dCA9IGlucHV0LlggIT0gMCB8fCBpbnB1dC5ZICE9IDAgfHwgaW5wdXQuSnVtcCB8fAogICAgICAgICAgICAgICAgaW5wdXQuUGlja3VwIHx8IGlucHV0LlRocm93IHx8IGlucHV0LkRyb3BUaHJvdWdoOwogICAgICAgICAgICBib29sIHJlc3RpbmcgPSBpbnB1dC5Qb3N0dXJlICE9IFZpcnR1YWxQb3N0dXJlLk5vbmUgJiYgIWFjdGl2ZUlucHV0OwogICAgICAgICAgICBpZiAoZ3JvdW5kZWQgJiYgcmVzdGluZykKICAgICAgICAgICAgICAgIHN0YXRlLkFuaW1hdGlvbiA9IGlucHV0LlBvc3R1cmUgPT0gVmlydHVhbFBvc3R1cmUuU2xlZXAKICAgICAgICAgICAgICAgICAgICA/IEFuaW1hdGlvbkluZGV4LlNsZWVwIDogQW5pbWF0aW9uSW5kZXguU2l0OwogICAgICAgICAgICBlbHNlIGlmIChncm91bmRlZCAmJiBhY3RpdmVJbnB1dCAmJgogICAgICAgICAgICAgICAgKHN0YXRlLkFuaW1hdGlvbiA9PSBBbmltYXRpb25JbmRleC5TbGVlcCB8fAogICAgICAgICAgICAgICAgIHN0YXRlLkFuaW1hdGlvbiA9PSBBbmltYXRpb25JbmRleC5TaXQpKQogICAgICAgICAgICB7CiAgICAgICAgICAgICAgICBzdGF0ZS5TdGFuZGluZyA9IGlucHV0LlkgPD0gMDsKICAgICAgICAgICAgICAgIHN0YXRlLkFuaW1hdGlvbiA9IHN0YXRlLlN0YW5kaW5nCiAgICAgICAgICAgICAgICAgICAgPyBBbmltYXRpb25JbmRleC5TdGFuZFVwIDogQW5pbWF0aW9uSW5kZXguTm9uZTsKICAgICAgICAgICAgICAgIHN0YXRlLkFuaW1hdGlvbkZyYW1lID0gMDsKICAgICAgICAgICAgfQogICAgICAgICAgICBlbHNlIGlmICghZ3JvdW5kZWQgJiYgc3RhdGUuQW5pbWF0aW9uICE9IEFuaW1hdGlvbkluZGV4LkZsaXAgJiYK'))
           if (-not $text.Contains($old)) { throw 'posture block not found' }
           $text = $text.Replace($old, $new)
           [IO.File]::WriteAllText($path, $text, [Text.UTF8Encoding]::new($false))
@@ -60,54 +35,8 @@ jobs:
           $runNew = $runOld + [Environment]::NewLine + '            Run("Movement wakes a curled rest posture before locomotion", MovementWakesRestPosture);'
           if (-not $tests.Contains($runOld)) { throw 'test registration anchor not found' }
           $tests = $tests.Replace($runOld, $runNew)
-
-          $methodAnchor = @'
-        private static void StandForcesKeepUpperBodyUpright()
-'@
-          $method = @'
-        private static void MovementWakesRestPosture()
-        {
-            DesktopCollisionWorld world = new DesktopCollisionWorld(new WindowEnumerator());
-            world.Refresh(IntPtr.Zero);
-            Slugcat slugcat = new Slugcat(new Vec2(300.0, 300.0));
-
-            slugcat.BodyChunks[0].Position = new Vec2(292.0, 300.0);
-            slugcat.BodyChunks[1].Position = new Vec2(300.0, 300.0);
-            slugcat.BodyChunks[0].ContactFloor = true;
-            slugcat.BodyChunks[1].ContactFloor = true;
-            slugcat.State.BodyMode = BodyModeIndex.Crawl;
-            slugcat.State.Standing = false;
-            slugcat.Movement.ApplyInput(
-                new VirtualInput(0, 0, false, false, VirtualPosture.Sleep), world);
-            Equal((int)AnimationIndex.Sleep, (int)slugcat.State.Animation,
-                "precondition: curled sleep posture");
-
-            slugcat.BodyChunks[0].ContactFloor = true;
-            slugcat.BodyChunks[1].ContactFloor = true;
-            slugcat.Movement.ApplyInput(new VirtualInput(1, 0, false, false), world);
-            True(slugcat.State.Animation != AnimationIndex.Sleep &&
-                 slugcat.State.Animation != AnimationIndex.Sit,
-                "horizontal locomotion must clear stationary rest animation");
-            True(slugcat.State.Standing &&
-                 slugcat.State.Animation == AnimationIndex.StandUp,
-                "low sleeping body must enter StandUp before normal locomotion pose");
-
-            Slugcat combined = new Slugcat(new Vec2(300.0, 300.0));
-            combined.BodyChunks[0].Position = new Vec2(292.0, 300.0);
-            combined.BodyChunks[1].Position = new Vec2(300.0, 300.0);
-            combined.BodyChunks[0].ContactFloor = true;
-            combined.BodyChunks[1].ContactFloor = true;
-            combined.State.BodyMode = BodyModeIndex.Crawl;
-            combined.State.Animation = AnimationIndex.Sleep;
-            combined.State.Standing = false;
-            combined.Movement.ApplyInput(
-                new VirtualInput(1, 0, false, false, VirtualPosture.Sleep), world);
-            True(combined.State.Animation != AnimationIndex.Sleep &&
-                 combined.State.Animation != AnimationIndex.Sit,
-                "stale rest posture cannot override simultaneous movement");
-        }
-
-'@
+          $methodAnchor = '        private static void StandForcesKeepUpperBodyUpright()'
+          $method = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('ICAgICAgICBwcml2YXRlIHN0YXRpYyB2b2lkIE1vdmVtZW50V2FrZXNSZXN0UG9zdHVyZSgpCiAgICAgICAgewogICAgICAgICAgICBEZXNrdG9wQ29sbGlzaW9uV29ybGQgd29ybGQgPSBuZXcgRGVza3RvcENvbGxpc2lvbldvcmxkKG5ldyBXaW5kb3dFbnVtZXJhdG9yKCkpOwogICAgICAgICAgICB3b3JsZC5SZWZyZXNoKEludFB0ci5aZXJvKTsKICAgICAgICAgICAgU2x1Z2NhdCBzbHVnY2F0ID0gbmV3IFNsdWdjYXQobmV3IFZlYzIoMzAwLjAsIDMwMC4wKSk7CgogICAgICAgICAgICBzbHVnY2F0LkJvZHlDaHVua3NbMF0uUG9zaXRpb24gPSBuZXcgVmVjMigyOTIuMCwgMzAwLjApOwogICAgICAgICAgICBzbHVnY2F0LkJvZHlDaHVua3NbMV0uUG9zaXRpb24gPSBuZXcgVmVjMigzMDAuMCwgMzAwLjApOwogICAgICAgICAgICBzbHVnY2F0LkJvZHlDaHVua3NbMF0uQ29udGFjdEZsb29yID0gdHJ1ZTsKICAgICAgICAgICAgc2x1Z2NhdC5Cb2R5Q2h1bmtzWzFdLkNvbnRhY3RGbG9vciA9IHRydWU7CiAgICAgICAgICAgIHNsdWdjYXQuU3RhdGUuQm9keU1vZGUgPSBCb2R5TW9kZUluZGV4LkNyYXdsOwogICAgICAgICAgICBzbHVnY2F0LlN0YXRlLlN0YW5kaW5nID0gZmFsc2U7CiAgICAgICAgICAgIHNsdWdjYXQuTW92ZW1lbnQuQXBwbHlJbnB1dCgKICAgICAgICAgICAgICAgIG5ldyBWaXJ0dWFsSW5wdXQoMCwgMCwgZmFsc2UsIGZhbHNlLCBWaXJ0dWFsUG9zdHVyZS5TbGVlcCksIHdvcmxkKTsKICAgICAgICAgICAgRXF1YWwoKGludClBbmltYXRpb25JbmRleC5TbGVlcCwgKGludClzbHVnY2F0LlN0YXRlLkFuaW1hdGlvbiwKICAgICAgICAgICAgICAgICJwcmVjb25kaXRpb246IGN1cmxlZCBzbGVlcCBwb3N0dXJlIik7CgogICAgICAgICAgICBzbHVnY2F0LkJvZHlDaHVua3NbMF0uQ29udGFjdEZsb29yID0gdHJ1ZTsKICAgICAgICAgICAgc2x1Z2NhdC5Cb2R5Q2h1bmtzWzFdLkNvbnRhY3RGbG9vciA9IHRydWU7CiAgICAgICAgICAgIHNsdWdjYXQuTW92ZW1lbnQuQXBwbHlJbnB1dChuZXcgVmlydHVhbElucHV0KDEsIDAsIGZhbHNlLCBmYWxzZSksIHdvcmxkKTsKICAgICAgICAgICAgVHJ1ZShzbHVnY2F0LlN0YXRlLkFuaW1hdGlvbiAhPSBBbmltYXRpb25JbmRleC5TbGVlcCAmJgogICAgICAgICAgICAgICAgIHNsdWdjYXQuU3RhdGUuQW5pbWF0aW9uICE9IEFuaW1hdGlvbkluZGV4LlNpdCwKICAgICAgICAgICAgICAgICJob3Jpem9udGFsIGxvY29tb3Rpb24gbXVzdCBjbGVhciBzdGF0aW9uYXJ5IHJlc3QgYW5pbWF0aW9uIik7CiAgICAgICAgICAgIFRydWUoc2x1Z2NhdC5TdGF0ZS5TdGFuZGluZyAmJgogICAgICAgICAgICAgICAgIHNsdWdjYXQuU3RhdGUuQW5pbWF0aW9uID09IEFuaW1hdGlvbkluZGV4LlN0YW5kVXAsCiAgICAgICAgICAgICAgICAibG93IHNsZWVwaW5nIGJvZHkgbXVzdCBlbnRlciBTdGFuZFVwIGJlZm9yZSBub3JtYWwgbG9jb21vdGlvbiBwb3NlIik7CgogICAgICAgICAgICBTbHVnY2F0IGNvbWJpbmVkID0gbmV3IFNsdWdjYXQobmV3IFZlYzIoMzAwLjAsIDMwMC4wKSk7CiAgICAgICAgICAgIGNvbWJpbmVkLkJvZHlDaHVua3NbMF0uUG9zaXRpb24gPSBuZXcgVmVjMigyOTIuMCwgMzAwLjApOwogICAgICAgICAgICBjb21iaW5lZC5Cb2R5Q2h1bmtzWzFdLlBvc2l0aW9uID0gbmV3IFZlYzIoMzAwLjAsIDMwMC4wKTsKICAgICAgICAgICAgY29tYmluZWQuQm9keUNodW5rc1swXS5Db250YWN0Rmxvb3IgPSB0cnVlOwogICAgICAgICAgICBjb21iaW5lZC5Cb2R5Q2h1bmtzWzFdLkNvbnRhY3RGbG9vciA9IHRydWU7CiAgICAgICAgICAgIGNvbWJpbmVkLlN0YXRlLkJvZHlNb2RlID0gQm9keU1vZGVJbmRleC5DcmF3bDsKICAgICAgICAgICAgY29tYmluZWQuU3RhdGUuQW5pbWF0aW9uID0gQW5pbWF0aW9uSW5kZXguU2xlZXA7CiAgICAgICAgICAgIGNvbWJpbmVkLlN0YXRlLlN0YW5kaW5nID0gZmFsc2U7CiAgICAgICAgICAgIGNvbWJpbmVkLk1vdmVtZW50LkFwcGx5SW5wdXQoCiAgICAgICAgICAgICAgICBuZXcgVmlydHVhbElucHV0KDEsIDAsIGZhbHNlLCBmYWxzZSwgVmlydHVhbFBvc3R1cmUuU2xlZXApLCB3b3JsZCk7CiAgICAgICAgICAgIFRydWUoY29tYmluZWQuU3RhdGUuQW5pbWF0aW9uICE9IEFuaW1hdGlvbkluZGV4LlNsZWVwICYmCiAgICAgICAgICAgICAgICAgY29tYmluZWQuU3RhdGUuQW5pbWF0aW9uICE9IEFuaW1hdGlvbkluZGV4LlNpdCwKICAgICAgICAgICAgICAgICJzdGFsZSByZXN0IHBvc3R1cmUgY2Fubm90IG92ZXJyaWRlIHNpbXVsdGFuZW91cyBtb3ZlbWVudCIpOwogICAgICAgIH0KCg=='))
           if (-not $tests.Contains($methodAnchor)) { throw 'test method anchor not found' }
           $tests = $tests.Replace($methodAnchor, $method + $methodAnchor)
           [IO.File]::WriteAllText($testPath, $tests, [Text.UTF8Encoding]::new($false))
