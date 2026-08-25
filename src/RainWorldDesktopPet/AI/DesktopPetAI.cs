@@ -911,7 +911,7 @@ namespace RainWorldDesktopPet.AI
                     saintTransitionFreestyle = freestyle;
                     saintAwaitingJumpRelease = false;
                     if (freestyle)
-                        saintFreestyleCooldownTicks = SecondsToTicks(SampleCentered(1.6, 4.0));
+                        saintFreestyleCooldownTicks = SecondsToTicks(0.5);
                     return false;
                 }
             }
