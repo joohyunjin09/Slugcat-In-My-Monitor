@@ -47,12 +47,12 @@ jobs:
                 return true;
             }
 
-'@
+          '@
           $new = @'
             // Falling alone is not Player.downDiagonal. Gourmand roll entry must
             // come from an explicit movement intent rather than fabricated AI input.
 
-'@
+          '@
           $index = $text.IndexOf($old, [StringComparison]::Ordinal)
           if ($index -lt 0) { throw 'Expected Gourmand AI block was not found.' }
           if ($text.IndexOf($old, $index + $old.Length, [StringComparison]::Ordinal) -ge 0) {
@@ -72,7 +72,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git checkout HEAD^ -- .github/workflows/ci.yml
+          git checkout HEAD^^ -- .github/workflows/ci.yml
           git add -- .github/workflows/ci.yml src/RainWorldDesktopPet/AI/DesktopPetAI.cs
           git commit -m "fix: prevent fabricated Gourmand fall-roll input"
           git push origin HEAD:codex/rain-world-fidelity-overhaul
