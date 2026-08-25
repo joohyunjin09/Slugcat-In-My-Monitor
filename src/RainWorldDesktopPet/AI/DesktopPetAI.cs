@@ -228,6 +228,7 @@ namespace RainWorldDesktopPet.AI
         private int saintAttachedTicks;
         private int saintAttachDurationTicks = 70;
         private int saintFreestyleCooldownTicks;
+        private int saintTongueIntentCountdownTicks;
         private bool originalAttentionInitialized;
         private AttentionKind originalAttentionKind;
         private Vec2 originalAttentionTarget;
@@ -408,6 +409,7 @@ namespace RainWorldDesktopPet.AI
             if (directionCommitmentTicks > 0) directionCommitmentTicks--;
             if (artificerFreestyleCooldownTicks > 0) artificerFreestyleCooldownTicks--;
             if (saintFreestyleCooldownTicks > 0) saintFreestyleCooldownTicks--;
+            if (saintTongueIntentCountdownTicks > 0) saintTongueIntentCountdownTicks--;
             if (microCooldownTicks > 0) microCooldownTicks--;
             if (moodTicksRemaining > 0) moodTicksRemaining--;
 
@@ -516,6 +518,8 @@ namespace RainWorldDesktopPet.AI
             evaluationCountdown = 1;
             freeRoamRetargetCountdown = 0;
             destinationKind = AIDestinationKind.None;
+            saintTongueIntentCountdownTicks = id == SlugcatId.Saint
+                ? SecondsToTicks(SampleCentered(3.0, 7.0)) : 0;
         }
 
         private static CharacterAIProfile ProfileFor(SlugcatId id)
@@ -898,6 +902,19 @@ namespace RainWorldDesktopPet.AI
             saintAttachedTicks = 0;
             if (saint.Mode != SaintTongueMode.Retracted) return false;
 
+            if (!saintTransitionArmed && saintTongueIntentCountdownTicks <= 0 &&
+                saintFreestyleCooldownTicks == 0 && CanStartProactiveSaintTongue(context))
+            {
+                saintTransitionArmed = true;
+                saintTransitionFreestyle = true;
+                saintAwaitingJumpRelease = false;
+                saintFreestyleCooldownTicks = SecondsToTicks(SampleCentered(1.5, 3.0));
+                saintTongueIntentCountdownTicks = NextSaintTongueIntentTicks();
+                EnterBehavior(slugcat, DesktopBehavior.Jump, context);
+                input = new VirtualInput(desiredDirection, 0, true, false);
+                return true;
+            }
+
             if (context.Grounded && Behavior == DesktopBehavior.Jump &&
                 behaviorTicks <= 8)
             {
@@ -912,6 +929,7 @@ namespace RainWorldDesktopPet.AI
                     saintAwaitingJumpRelease = false;
                     if (freestyle)
                         saintFreestyleCooldownTicks = SecondsToTicks(SampleCentered(0.9, 2.2));
+                    saintTongueIntentCountdownTicks = NextSaintTongueIntentTicks();
                     return false;
                 }
             }
@@ -1008,6 +1026,23 @@ namespace RainWorldDesktopPet.AI
             return MathUtil.Clamp01(0.28 + curiosity * 0.16 +
                 playfulness * 0.10 + traitSpecialUse * 0.18 +
                 (mood == AIMood.Curious ? 0.08 : 0.0));
+        }
+
+        private bool CanStartProactiveSaintTongue(UtilityContext context)
+        {
+            bool eligibleBehavior = IsLocomotionBehavior(Behavior) ||
+                Behavior == DesktopBehavior.Idle ||
+                Behavior == DesktopBehavior.LookAround ||
+                Behavior == DesktopBehavior.ObserveWindow;
+            return eligibleBehavior && context.Grounded && !context.ObstacleAhead &&
+                context.EdgeDistance > 24.0;
+        }
+
+        private int NextSaintTongueIntentTicks()
+        {
+            double seconds = SampleCentered(8.0, 18.0);
+            seconds *= MathUtil.Lerp(1.10, 0.82, traitSpecialUse);
+            return SecondsToTicks(seconds);
         }
 
         private void ResetArtificerTransition()
