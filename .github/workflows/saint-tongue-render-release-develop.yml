@@ -82,4 +82,13 @@ jobs:
           git add src/RainWorldDesktopPet/UI/LayeredOverlayWindow.cs
           git add tests/RainWorldDesktopPet.Tests/AbilityParityReplayTests.cs
           git commit -m "Fix Saint tongue rendering and release"
-          git push origin HEAD:develop
+          $pushed = $false
+          for ($attempt = 1; $attempt -le 4; $attempt++) {
+            git push origin HEAD:develop
+            if ($LASTEXITCODE -eq 0) {
+              $pushed = $true
+              break
+            }
+            Start-Sleep -Seconds 2
+          }
+          if (-not $pushed) { throw "Could not push tested Saint tongue fix after retries." }
