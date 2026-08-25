@@ -41,16 +41,20 @@ namespace
         float X, Y, U, V;
         float Red, Green, Blue, Alpha;
         float Seed;
+        float PixelScale, ScreenBiasX, ScreenBiasY;
     };
 
     constexpr char EffectShader[] = R"(
 struct VertexInput { float2 position : POSITION; float2 uv : TEXCOORD0;
-    float4 color : COLOR0; float seed : TEXCOORD1; };
+    float4 color : COLOR0; float seed : TEXCOORD1;
+    float3 pixelInfo : TEXCOORD2; };
 struct PixelInput { float4 position : SV_POSITION; float2 uv : TEXCOORD0;
-    float4 color : COLOR0; float seed : TEXCOORD1; };
+    float4 color : COLOR0; float seed : TEXCOORD1;
+    float3 pixelInfo : TEXCOORD2; };
 PixelInput VSMain(VertexInput input) { PixelInput output;
     output.position=float4(input.position,0,1); output.uv=input.uv;
-    output.color=input.color; output.seed=input.seed; return output; }
+    output.color=input.color; output.seed=input.seed;
+    output.pixelInfo=input.pixelInfo; return output; }
 float Hash(float2 value) { return frac(sin(dot(value,float2(12.9898,78.233)))*43758.5453); }
 float Noise(float2 value) { float2 cell=floor(value),f=frac(value);
     f=f*f*(3-2*f); float a=Hash(cell),b=Hash(cell+float2(1,0));
@@ -74,23 +78,48 @@ float4 PSMain(PixelInput input) : SV_TARGET { float2 p=input.uv*2-1;
         float shape=input.seed<-1.5 ? radial*radial : pow(radial,.65);
         float alpha=shape*input.color.a;
         return float4(input.color.rgb*alpha,alpha); }
-    float dist=saturate(1-length(p)); float2 stableUv=input.uv;
-    float h=Noise(stableUv*3.35+input.seed*float2(7,13));
-    h*=Noise(stableUv*7.5+input.seed*float2(19,3));
-    float inside=.3+.5*input.color.a;
-    h=lerp(h*dist,h+(1-h)*inside,dist);
-    h-=Noise(stableUv*9.65+input.seed*float2(5,23))*lerp(.7,.3,input.color.a);
-    h+=.25*dist;
+    // Vanilla FireSmoke quantizes screen position first. _spriteRect is a
+    // camera/level-space mapping, not a per-particle rectangle, so the
+    // dominant turbulence should never be reconstructed from the rotated quad.
+    float pixelCell=max(input.pixelInfo.x,.001);
+    float2 screenPos=input.position.xy+input.pixelInfo.yz;
+    float2 snappedPos=floor(screenPos/pixelCell)*pixelCell;
+    float2 virtualScreen=float2(1366.0,768.0)*pixelCell;
+    float2 textCoord=snappedPos/virtualScreen;
+    textCoord.y+=.04;
+
+    // Keep the radial body in local sprite UVs so the smoke stays circular,
+    // while the major noise layers remain screen-axis aligned like vanilla.
+    float dist=saturate(1-length(p));
+    const float rain=.5; const float tau=6.28318530718;
+    // Procedural value noise needs extra density to stand in for the original
+    // noise textures, but too much turns the silhouette into powder. Keep the
+    // screen turbulence moderately detailed and the local breakup coarser.
+    const float screenNoiseDensity=18.0;
+    const float localNoiseDensity=8.0;
+    // FireSmoke's material is shared: particles sample one common turbulence
+    // field. Their position, scale and rotation expose different parts of it;
+    // a private per-particle offset makes the cloud look like separate blobs.
+    float h=sin((1.77*rain+Noise(
+        float2(textCoord.x*5.2,rain*.1+textCoord.y*2.6)*screenNoiseDensity)*3)*tau)*.5+.5;
+    h*=sin((3.5*rain+Noise(
+        float2(textCoord.x*12.2,rain*.25+textCoord.y*6.6)*screenNoiseDensity)*3)*tau)*.5+.5;
+    // Vanilla keeps one local-UV noise layer, so rotation still adds a small
+    // amount of organic variation without rotating the entire smoke mass.
+    h*=.5+.5*sin((Noise(input.uv*localNoiseDensity)+rain)*tau*3);
+    h=lerp(h*dist,lerp(h,1,lerp(.3,.8,input.color.a)),dist);
+    h-=Noise(float2(textCoord.x*15.2,rain*.1+textCoord.y*7.6)*
+        screenNoiseDensity)*lerp(.7,.3,input.color.a);
     float cutoff=h*input.color.a;
-    float edge=max(fwidth(cutoff)*1.5,.008);
-    float coverage=smoothstep(.35-edge,.35+edge,cutoff);
-    clip(coverage-.01);
-    float alpha=input.color.a*coverage;
-    return float4(input.color.rgb*alpha,alpha); }
+    clip(cutoff-.35);
+    // Vanilla FireSmoke uses color alpha to decide which pixels survive, but
+    // surviving pixels are emitted at alpha 1 instead of softly fading out.
+    return float4(input.color.rgb,1); }
 )";
 
     struct Renderer
     {
+        HWND Window = nullptr;
         ComPtr<ID3D11Device> Device;
         ComPtr<ID3D11DeviceContext> Context;
         ComPtr<ID3D11DeviceContext1> Context1;
@@ -107,6 +136,7 @@ float4 PSMain(PixelInput input) : SV_TARGET { float2 p=input.uv*2-1;
 
         HRESULT Initialize(HWND window)
         {
+            Window=window;
             UINT flags = D3D11_CREATE_DEVICE_BGRA_SUPPORT;
 #if defined(_DEBUG)
             flags |= D3D11_CREATE_DEVICE_DEBUG;
@@ -151,7 +181,8 @@ float4 PSMain(PixelInput input) : SV_TARGET { float2 p=input.uv*2-1;
                 {"POSITION",0,DXGI_FORMAT_R32G32_FLOAT,0,0,D3D11_INPUT_PER_VERTEX_DATA,0},
                 {"TEXCOORD",0,DXGI_FORMAT_R32G32_FLOAT,0,8,D3D11_INPUT_PER_VERTEX_DATA,0},
                 {"COLOR",0,DXGI_FORMAT_R32G32B32A32_FLOAT,0,16,D3D11_INPUT_PER_VERTEX_DATA,0},
-                {"TEXCOORD",1,DXGI_FORMAT_R32_FLOAT,0,32,D3D11_INPUT_PER_VERTEX_DATA,0} };
+                {"TEXCOORD",1,DXGI_FORMAT_R32_FLOAT,0,32,D3D11_INPUT_PER_VERTEX_DATA,0},
+                {"TEXCOORD",2,DXGI_FORMAT_R32G32B32_FLOAT,0,36,D3D11_INPUT_PER_VERTEX_DATA,0} };
             if (FAILED(hr=Device->CreateInputLayout(elements,ARRAYSIZE(elements),
                 vs->GetBufferPointer(),vs->GetBufferSize(),&EffectInputLayout))) return hr;
             D3D11_BUFFER_DESC buffer = {};
@@ -219,6 +250,7 @@ float4 PSMain(PixelInput input) : SV_TARGET { float2 p=input.uv*2-1;
 
         static void AddQuad(std::vector<EffectVertex>& out,float cx,float cy,
             float size,float rotation,float r,float g,float b,float a,float seed,
+            float pixelScale,float screenBiasX,float screenBiasY,
             UINT width,UINT height)
         {
             if (size<=.01f || a<=.001f) return;
@@ -228,7 +260,8 @@ float4 PSMain(PixelInput input) : SV_TARGET { float2 p=input.uv*2-1;
             EffectVertex v[4]={};
             for (int i=0;i<4;++i) { float px=cx+local[i][0]*c-local[i][1]*s;
                 float py=cy+local[i][0]*s+local[i][1]*c;
-                v[i]={px/width*2-1,1-py/height*2,uv[i][0],uv[i][1],r,g,b,a,seed}; }
+                v[i]={px/width*2-1,1-py/height*2,uv[i][0],uv[i][1],r,g,b,a,
+                    seed,pixelScale,screenBiasX,screenBiasY}; }
             const int indices[6]={0,1,2,0,2,3};
             for (int i:indices) out.push_back(v[i]);
         }
@@ -247,14 +280,35 @@ float4 PSMain(PixelInput input) : SV_TARGET { float2 p=input.uv*2-1;
             ComPtr<ID3D11RenderTargetView> target;
             if (SUCCEEDED(draw=drawing.As(&texture)))
                 draw=Device->CreateRenderTargetView(texture.Get(),nullptr,&target);
+
+            // Rain World's 16:9 render grid is 1366x768. Use the smaller
+            // client-axis scale so virtual pixels stay square on widescreen
+            // and multi-monitor desktop windows.
+            float pixelScale=1.0f;
+            RECT client={};
+            if (Window && GetClientRect(Window,&client)) {
+                float clientWidth=(float)(client.right-client.left);
+                float clientHeight=(float)(client.bottom-client.top);
+                if (clientWidth>0 && clientHeight>0) {
+                    float scaleX=clientWidth/1366.0f;
+                    float scaleY=clientHeight/768.0f;
+                    pixelScale=scaleX<scaleY?scaleX:scaleY;
+                    if (pixelScale<.001f) pixelScale=.001f;
+                }
+            }
+            float screenBiasX=x-(float)offset.x;
+            float screenBiasY=y-(float)offset.y;
+
             std::vector<EffectVertex> vertices;
             if (SUCCEEDED(draw)) { vertices.reserve(count*12);
                 for (UINT i=0;i<count;++i) { const auto& e=effects[i];
                     AddQuad(vertices,e.CenterX,e.CenterY,e.BackSize,e.Rotation,e.BackRed,
-                        e.BackGreen,e.BackBlue,e.BackAlpha,e.Seed,width,height);
+                        e.BackGreen,e.BackBlue,e.BackAlpha,e.Seed,pixelScale,
+                        screenBiasX,screenBiasY,width,height);
                     AddQuad(vertices,e.CenterX,e.CenterY,e.FrontSize,e.Rotation,e.FrontRed,
                         e.FrontGreen,e.FrontBlue,e.FrontAlpha,
-                        e.Seed==-1?-2:e.Seed+.37f,width,height); }
+                        e.Seed==-1?-2:e.Seed+.37f,pixelScale,
+                        screenBiasX,screenBiasY,width,height); }
                 D3D11_MAPPED_SUBRESOURCE mapped={};
                 draw=Context->Map(EffectVertexBuffer.Get(),0,D3D11_MAP_WRITE_DISCARD,0,&mapped);
                 if (SUCCEEDED(draw)) { std::memcpy(mapped.pData,vertices.data(),
