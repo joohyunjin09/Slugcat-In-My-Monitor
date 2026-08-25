@@ -73,6 +73,8 @@ namespace RainWorldDesktopPet.Tests
                 AutonomousAiPersonalitiesDiffer);
             run("SlugNPC-inspired AI diversifies equivalent platform routes",
                 AutonomousAiRoutesDiversify);
+            run("Autonomous exploration chooses interior destinations before reversing",
+                AutonomousExplorationAvoidsScreenEdgeOscillation);
             run("Artificer effects retain original smoke and light lifecycles",
                 ArtificerEffectLifecycleReplay);
             run("Spearmaster extraction creates the needle on original progress tick",
@@ -349,6 +351,65 @@ namespace RainWorldDesktopPet.Tests
             }
             True(selectedTargets.Count >= 2,
                 "stable personality preferences split equivalent platform routes");
+        }
+
+        private static void AutonomousExplorationAvoidsScreenEdgeOscillation()
+        {
+            MonitorInfo monitor = new MonitorInfo("EXPLORE",
+                new Rectangle(0, 0, 1200, 1000),
+                new Rectangle(0, 0, 1200, 1000), true);
+            DesktopCollisionWorld world = CreateWorld(monitor,
+                new DesktopWindowSnapshot[0]);
+            double floorY = FindFloorY(world);
+            DesktopSurface floor = null;
+            for (int i = 0; i < world.Surfaces.Count; i++)
+            {
+                DesktopSurface candidate = world.Surfaces[i];
+                if (candidate.Kind == DesktopSurfaceKind.MonitorFloor)
+                {
+                    floor = candidate;
+                    break;
+                }
+            }
+            True(floor != null, "exploration replay has a floor");
+
+            Slugcat slugcat = new Slugcat(new Vec2(
+                (floor.Left + floor.Right) * 0.5,
+                floorY - SimulationConstants.HipsChunkRadius - 0.5), SlugcatId.White);
+            slugcat.State.Grounded = true;
+            slugcat.BodyChunks[1].SupportingSurfaceId = floor.Id;
+            slugcat.BodyChunks[1].SupportingSurfaceKind = floor.Kind;
+            DesktopPetAI ai = new DesktopPetAI(5817);
+            MouseTracker mouse = new MouseTracker();
+            int previousDirection = 0;
+            int interiorTurns = 0;
+
+            for (int tick = 0; tick < 800; tick++)
+            {
+                Vec2 before = slugcat.Center;
+                VirtualInput input = ai.Step(slugcat, world, mouse, null);
+                bool exploring = ai.Behavior == DesktopBehavior.Walk ||
+                    ai.Behavior == DesktopBehavior.Explore;
+                if (!exploring || input.X == 0)
+                {
+                    previousDirection = 0;
+                }
+                else
+                {
+                    if (previousDirection != 0 && input.X != previousDirection)
+                    {
+                        double nearestEdge = Math.Min(before.X - floor.Left,
+                            floor.Right - before.X);
+                        True(nearestEdge > 34.0,
+                            "exploration changes direction at an interior destination, not a screen edge");
+                        interiorTurns++;
+                    }
+                    previousDirection = input.X;
+                }
+                slugcat.Step(input, world, mouse.Position, mouse.Velocity);
+            }
+            True(interiorTurns > 0,
+                "seeded exploration reaches at least one independently chosen interior destination");
         }
 
         private static void ArtificerEffectLifecycleReplay()

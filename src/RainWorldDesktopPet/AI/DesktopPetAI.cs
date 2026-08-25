@@ -64,6 +64,9 @@ namespace RainWorldDesktopPet.AI
         private int evaluationCountdown;
         private int behaviorTicks;
         private int desiredDirection = 1;
+        private long explorationSurfaceId;
+        private double explorationTargetX;
+        private int explorationTargetTicks;
         private double fatigue = 0.18;
         private double curiosity = 0.65;
         private int jumpCooldownTicks;
@@ -159,6 +162,7 @@ namespace RainWorldDesktopPet.AI
             if (restCooldownTicks > 0) restCooldownTicks--;
             if (idlePostureCheckCountdown > 0) idlePostureCheckCountdown--;
             if (routeMemoryTicks > 0) routeMemoryTicks--;
+            if (explorationTargetTicks > 0) explorationTargetTicks--;
             fatigue = MathUtil.Clamp01(fatigue + FatigueDelta(Behavior));
             curiosity = MathUtil.Clamp01(curiosity + CuriosityDelta(Behavior));
 
@@ -175,6 +179,7 @@ namespace RainWorldDesktopPet.AI
             }
             else context.TransitionAvailable = TransitionPlan.IsValid;
             ApplyOriginalIdlePosture(slugcat, context);
+            UpdateExplorationTarget(slugcat, world);
 
             VirtualInput input = ProduceInput(slugcat, mouse, context);
             VirtualInput abilityInput;
@@ -627,6 +632,53 @@ namespace RainWorldDesktopPet.AI
             return ((mixed & 0x7fffffffL) / (double)int.MaxValue) * 2.0 - 1.0;
         }
 
+        private void UpdateExplorationTarget(Slugcat slugcat,
+            DesktopCollisionWorld world)
+        {
+            if (Behavior != DesktopBehavior.Walk &&
+                Behavior != DesktopBehavior.Explore)
+            {
+                explorationSurfaceId = 0;
+                return;
+            }
+
+            DesktopSurface surface;
+            if (!world.TryGetSurface(slugcat.PrimarySupportingSurfaceId,
+                slugcat.PrimarySupportingSurfaceKind, out surface) ||
+                !surface.IsHorizontal)
+                return;
+
+            double width = surface.Right - surface.Left;
+            double margin = Math.Min(80.0, width * 0.18);
+            if (margin < 12.0) margin = 12.0;
+            double left = surface.Left + margin;
+            double right = surface.Right - margin;
+            if (right <= left) return;
+
+            double centerX = slugcat.Center.X;
+            bool atSurfaceBoundary = centerX <= surface.Left + 12.0 ||
+                centerX >= surface.Right - 12.0;
+            bool reachedTarget = Math.Abs(centerX - explorationTargetX) < 14.0;
+            if (explorationSurfaceId == surface.Id && explorationTargetTicks > 0 &&
+                !atSurfaceBoundary && !reachedTarget)
+                return;
+
+            explorationSurfaceId = surface.Id;
+            explorationTargetTicks = 120 + random.Next(0, 241);
+            double minimumTravel = Math.Min(42.0, (right - left) * 0.25);
+            for (int attempt = 0; attempt < 4; attempt++)
+            {
+                explorationTargetX = MathUtil.Lerp(left, right, random.NextDouble());
+                if (Math.Abs(explorationTargetX - centerX) >= minimumTravel) break;
+            }
+            if (Math.Abs(explorationTargetX - centerX) < minimumTravel)
+            {
+                explorationTargetX = centerX <= (left + right) * 0.5
+                    ? right : left;
+            }
+            desiredDirection = explorationTargetX < centerX ? -1 : 1;
+        }
+
         private VirtualInput ProduceInput(Slugcat slugcat, MouseTracker mouse, UtilityContext context)
         {
             int towardMouse = mouse.Position.X < slugcat.Center.X ? -1 : 1;
@@ -634,10 +686,6 @@ namespace RainWorldDesktopPet.AI
             {
                 case DesktopBehavior.Walk:
                 case DesktopBehavior.Explore:
-                    if (context.EdgeDistance < 24.0)
-                    {
-                        desiredDirection = context.SaferDirection;
-                    }
                     return new VirtualInput(desiredDirection, 0, false, false);
                 case DesktopBehavior.FollowMouse:
                     if (!context.MouseAttentionActive) return VirtualInput.Neutral;
