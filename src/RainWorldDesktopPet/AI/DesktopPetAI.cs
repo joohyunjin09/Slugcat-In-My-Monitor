@@ -1315,6 +1315,9 @@ namespace RainWorldDesktopPet.AI
                 double variation = (random.NextDouble() - 0.5) * 0.055;
                 double score = UtilityEvaluator.Score(candidate, context, variation);
                 score = ApplyIntentContinuity(candidate, score, urgentAvoid, urgentClimb);
+                // Crawl remains a valid personality/rest behavior, but it should be
+                // occasional rather than competing evenly with normal locomotion.
+                if (candidate == DesktopBehavior.Crawl) score *= 0.48;
                 if (candidate == DesktopBehavior.Jump &&
                     slugcat.AbilityController is SaintAbilityController &&
                     context.FreeJumpOpportunity && saintFreestyleCooldownTicks == 0)
@@ -1550,7 +1553,7 @@ namespace RainWorldDesktopPet.AI
                 case DesktopBehavior.Idle: minimum = 0.5; maximum = 15.0; break;
                 case DesktopBehavior.Walk: minimum = 1.4; maximum = 7.5; break;
                 case DesktopBehavior.Run: minimum = 0.4; maximum = 4.0; break;
-                case DesktopBehavior.Crawl: minimum = 0.8; maximum = 6.5; break;
+                case DesktopBehavior.Crawl: minimum = 0.35; maximum = 2.4; break;
                 case DesktopBehavior.Explore: minimum = 1.2; maximum = 10.0; break;
                 case DesktopBehavior.Sit: minimum = 0.7; maximum = 12.0; break;
                 case DesktopBehavior.Sleep: minimum = 3.0; maximum = 22.0; break;
@@ -1931,28 +1934,32 @@ namespace RainWorldDesktopPet.AI
                 return VirtualInput.Neutral;
 
             int towardMouse = mouse.Position.X < slugcat.Center.X ? -1 : 1;
+            // Releasing Crawl/brief crouch to neutral Y can leave Player.Standing
+            // false. Upright locomotion therefore sends the original up intent
+            // while grounded until the movement state has actually stood up.
+            int uprightY = context.Grounded && !slugcat.State.Standing ? -1 : 0;
             switch (Behavior)
             {
                 case DesktopBehavior.Walk:
                 case DesktopBehavior.Run:
                 case DesktopBehavior.Explore:
-                    return new VirtualInput(desiredDirection, 0, false, false);
+                    return new VirtualInput(desiredDirection, uprightY, false, false);
                 case DesktopBehavior.Crawl:
                     return new VirtualInput(desiredDirection, 1, false, false);
                 case DesktopBehavior.Play:
                     // Play remains an intent; actual motion still goes through the
                     // existing movement system. Short targets/micro-actions make it
                     // visually distinct without inventing a new speed or physics path.
-                    return new VirtualInput(desiredDirection, 0, false, false);
+                    return new VirtualInput(desiredDirection, uprightY, false, false);
                 case DesktopBehavior.TurnAround:
-                    return new VirtualInput(desiredDirection, 0, false, false);
+                    return new VirtualInput(desiredDirection, uprightY, false, false);
                 case DesktopBehavior.FollowMouse:
                     if (!context.MouseAttentionActive) return VirtualInput.Neutral;
-                    return new VirtualInput(towardMouse, 0, context.Grounded &&
+                    return new VirtualInput(towardMouse, uprightY, context.Grounded &&
                         mouse.Position.Y < slugcat.Center.Y - 80.0, false);
                 case DesktopBehavior.AvoidMouse:
                     if (!context.MouseAttentionActive) return VirtualInput.Neutral;
-                    return new VirtualInput(-towardMouse, 0, context.Grounded &&
+                    return new VirtualInput(-towardMouse, uprightY, context.Grounded &&
                         context.MouseDistance < 55.0, false);
                 case DesktopBehavior.Jump:
                     return new VirtualInput(desiredDirection, 0,
