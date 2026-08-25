@@ -242,7 +242,7 @@ namespace RainWorldDesktopPet.AI
                 case DesktopBehavior.DropDown:
                     score = context.Grounded && context.OnWindow && context.DropReady &&
                             context.EdgeDistance < 24.0 && context.Confidence > 0.40
-                        ? 0.36 + context.Curiosity * 0.16 + context.Boredom * 0.15 +
+                        ? 0.72 + context.Curiosity * 0.16 + context.Boredom * 0.15 +
                             context.Confidence * 0.20
                         : 0.0;
                     break;
