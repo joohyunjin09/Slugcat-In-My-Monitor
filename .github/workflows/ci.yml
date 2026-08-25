@@ -27,7 +27,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: codex/rain-world-fidelity-overhaul
-          fetch-depth: 2
+          fetch-depth: 4
 
       - name: Remove fabricated Gourmand fall-roll input
         shell: powershell
@@ -35,30 +35,15 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $path = 'src/RainWorldDesktopPet/AI/DesktopPetAI.cs'
           $text = [IO.File]::ReadAllText($path).Replace("`r`n", "`n")
-          $old = @'
-            GourmandAbilityController gourmand =
-                slugcat.AbilityController as GourmandAbilityController;
-            if (gourmand != null && !context.Grounded &&
-                (slugcat.BodyChunks[0].Velocity.Y +
-                 slugcat.BodyChunks[1].Velocity.Y) * 0.5 > 2.0)
-            {
-                Behavior = DesktopBehavior.GourmandRoll;
-                input = new VirtualInput(desiredDirection, 1, false, false);
-                return true;
-            }
-
-          '@
-          $new = @'
-            // Falling alone is not Player.downDiagonal. Gourmand roll entry must
-            // come from an explicit movement intent rather than fabricated AI input.
-
-          '@
-          $index = $text.IndexOf($old, [StringComparison]::Ordinal)
-          if ($index -lt 0) { throw 'Expected Gourmand AI block was not found.' }
-          if ($text.IndexOf($old, $index + $old.Length, [StringComparison]::Ordinal) -ge 0) {
-              throw 'Expected Gourmand AI block was not unique.'
-          }
-          $text = $text.Substring(0, $index) + $new + $text.Substring($index + $old.Length)
+          $startToken = "            GourmandAbilityController gourmand =`n"
+          $endToken = "            if (!TransitionPlan.IsValid) return false;"
+          $start = $text.IndexOf($startToken, [StringComparison]::Ordinal)
+          if ($start -lt 0) { throw 'Gourmand AI start token was not found.' }
+          $end = $text.IndexOf($endToken, $start, [StringComparison]::Ordinal)
+          if ($end -lt 0) { throw 'Post-Gourmand transition token was not found.' }
+          $replacement = "            // Falling alone is not Player.downDiagonal. Gourmand roll entry must`n" +
+              "            // come from an explicit movement intent rather than fabricated AI input.`n`n"
+          $text = $text.Substring(0, $start) + $replacement + $text.Substring($end)
           [IO.File]::WriteAllText($path, $text, (New-Object Text.UTF8Encoding($false)))
           git diff --check
           git diff -- $path
@@ -72,7 +57,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git checkout HEAD^^ -- .github/workflows/ci.yml
+          git checkout HEAD^^^ -- .github/workflows/ci.yml
           git add -- .github/workflows/ci.yml src/RainWorldDesktopPet/AI/DesktopPetAI.cs
           git commit -m "fix: prevent fabricated Gourmand fall-roll input"
           git push origin HEAD:codex/rain-world-fidelity-overhaul
