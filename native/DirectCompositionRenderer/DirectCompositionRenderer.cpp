@@ -97,25 +97,19 @@ float4 PSMain(PixelInput input) : SV_TARGET { float2 p=input.uv*2-1;
     // screen turbulence moderately detailed and the local breakup coarser.
     const float screenNoiseDensity=24.0;
     const float localNoiseDensity=12.0;
-    // SpriteRenderer adds (Lifetime % 97) * .113 to the smoke seed.
-    // Remove that integer lifetime component here so one particle keeps the
-    // same procedural identity for its entire life.
-    float stableSeed=frac(input.seed/.113);
-    stableSeed=floor(stableSeed*1024+.5)/1024;
+    // FireSmoke's material is shared: particles sample one common turbulence
+    // field. Their position, scale and rotation expose different parts of it;
+    // a private per-particle offset makes the cloud look like separate blobs.
     float h=sin((1.77*rain+Noise(
-        float2(textCoord.x*5.2,rain*.1+textCoord.y*2.6)*screenNoiseDensity+
-        stableSeed*float2(7,13))*3)*tau)*.5+.5;
+        float2(textCoord.x*5.2,rain*.1+textCoord.y*2.6)*screenNoiseDensity)*3)*tau)*.5+.5;
     h*=sin((3.5*rain+Noise(
-        float2(textCoord.x*12.2,rain*.25+textCoord.y*6.6)*screenNoiseDensity+
-        stableSeed*float2(19,3))*3)*tau)*.5+.5;
+        float2(textCoord.x*12.2,rain*.25+textCoord.y*6.6)*screenNoiseDensity)*3)*tau)*.5+.5;
     // Vanilla keeps one local-UV noise layer, so rotation still adds a small
     // amount of organic variation without rotating the entire smoke mass.
-    h*=.5+.5*sin((Noise(input.uv*localNoiseDensity+
-        stableSeed*float2(11,17))+rain)*tau*3);
+    h*=.5+.5*sin((Noise(input.uv*localNoiseDensity)+rain)*tau*3);
     h=lerp(h*dist,lerp(h,1,lerp(.3,.8,input.color.a)),dist);
     h-=Noise(float2(textCoord.x*15.2,rain*.1+textCoord.y*7.6)*
-        screenNoiseDensity+stableSeed*float2(5,23))*
-        lerp(.7,.3,input.color.a);
+        screenNoiseDensity)*lerp(.7,.3,input.color.a);
     float cutoff=h*input.color.a;
     clip(cutoff-.35);
     // Vanilla FireSmoke uses color alpha to decide which pixels survive, but
