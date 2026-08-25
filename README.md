@@ -33,7 +33,7 @@ Rain World, Steam 또는 Unity를 동시에 실행할 필요는 없습니다. �
 * **바탕화면 지형:** 창과 모니터를 이용하는 자율 이동, 점프, 벽 오르기 및 휴식
 * **여러 Slugcat:** 생성·선택·삭제와 캐릭터별 이동 능력 및 특수 능력
 * **직접 상호작용:** 마우스로 잡기와 던지기
-* **먹이 주기:** 트레이에서 파란 열매 또는 알벌레 알을 주고, 포만감에 따른 섭취·거절 관찰
+* **먹이 주기:** 트레이에서 푸른 열매 또는 알벌레 알을 주고, 포만감에 따른 섭취·거절 관찰
 * **원본 외형:** Rain World 원본 atlas 기반 그래픽
 * **DMS 스킨:** 파츠별 스킨 선택 및 색상 편집 *(실험적)*
 * **GPU 렌더링:** DirectComposition 기반 다중 표면 합성과 연기·폭발 이펙트
@@ -151,7 +151,7 @@ Downpour DLC는 프로그램 자체의 필수 구성 요소는 아니지만, 선
 * **잡고 있는 동안:** 바탕화면 선택 영역 등 다른 마우스 드래그 입력 차단
 * **Slugcat 클릭 또는 잡기:** 설정할 Slugcat 선택
 * **트레이 아이콘 왼쪽 클릭:** 설정 패널 열기
-* **트레이 아이콘 우클릭 → 먹이 주기:** 파란 열매 또는 알벌레 알을 선택한 Slugcat 주변에 떨어뜨리기
+* **트레이 아이콘 우클릭 → 먹이 주기:** 푸른 열매 또는 알벌레 알을 선택한 Slugcat 주변에 떨어뜨리기
 * **모든 모니터 밖으로 벗어남:** 약 1초 후 안전한 바닥으로 자동 복귀
 
 시스템 단축키와 충돌하지 않도록 전역 단축키는 등록하지 않습니다.
@@ -278,7 +278,7 @@ Rain World assets and community-created skin assets are not included in this rep
 * **Desktop terrain:** Autonomous movement using monitor and window boundaries, including jumping, wall climbing, and resting
 * **Multiple Slugcats:** Create, select, and remove Slugcats with character-specific movement stats and abilities
 * **Direct interaction:** Pick up and throw Slugcats with the mouse
-* **Feeding:** Drop a Dangle Fruit or Eggbug Egg from the tray and observe appetite-driven eating or refusal
+* **Feeding:** Drop a Blue Fruit or Eggbug Egg from the tray and observe appetite-driven eating or refusal
 * **Original appearance:** Graphics based on the original Rain World atlases
 * **DMS skins:** Per-part skin selection and color customization *(experimental)*
 * **GPU rendering:** DirectComposition-based multi-surface composition with smoke and explosion effects
@@ -403,7 +403,7 @@ Basic controls:
 * **While holding a Slugcat:** Other mouse-drag interactions, such as desktop selection, are blocked
 * **Click or grab a Slugcat:** Select it for configuration
 * **Left-click the tray icon:** Open the settings panel
-* **Right-click the tray icon → Feed:** Drop a Dangle Fruit or Eggbug Egg around the selected Slugcat
+* **Right-click the tray icon → Feed:** Drop a Blue Fruit or Eggbug Egg around the selected Slugcat
 * **Leaves all monitor bounds:** Automatically returns to a safe floor after approximately one second
 
 No global keyboard shortcuts are registered in order to avoid conflicts with system shortcuts.

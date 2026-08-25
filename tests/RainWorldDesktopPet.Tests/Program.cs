@@ -75,7 +75,7 @@ namespace RainWorldDesktopPet.Tests
             Run("Swept free-fall collision lands on the desktop floor", FreeFallLandsOnDesktopFloor);
             Run("BodyChunkConnection projects to its target distance", ConnectionProjectsDistance);
             Run("Desktop floor collision prevents tunneling", DesktopFloorCollision);
-            Run("Dangle Fruit preserves the original three-bite edible contract",
+            Run("Blue Fruit preserves the original three-bite edible contract",
                 DangleFruitPreservesOriginalEdibleContract);
             Run("Eggbug Egg preserves its two-bite layered edible contract",
                 EggBugEggPreservesOriginalEdibleContract);
@@ -87,7 +87,7 @@ namespace RainWorldDesktopPet.Tests
                 FoodFallbackRendersWithoutAtlas);
             Run("Renderer color-resource caches remain bounded",
                 RendererColorResourceCachesRemainBounded);
-            Run("Food palettes preserve Dangle Fruit layers and normal Eggbug hue",
+            Run("Food palettes preserve Blue Fruit layers and normal Eggbug hue",
                 FoodPalettesMatchOriginalColorRules);
             Run("Food interaction seeks, reserves, and consumes through VirtualInput",
                 FoodInteractionUsesVirtualInputAndConsumes);
@@ -538,7 +538,7 @@ namespace RainWorldDesktopPet.Tests
             DesktopFood egg = new DesktopFood(DesktopFoodKind.EggBugEgg,
                 Vec2.Zero, 0.0);
             Near(DesktopFood.DangleFruitVisualReach, fruit.VisualReach, 0.000001,
-                "Dangle Fruit exposes its complete atlas reach");
+                "Blue Fruit exposes its complete atlas reach");
             True(fruit.VisualReach > fruit.Chunk.Radius,
                 "fruit bounds include pixels beyond its collision radius");
             Near(DesktopFood.EggBugEggVisualReach, egg.VisualReach, 0.000001,

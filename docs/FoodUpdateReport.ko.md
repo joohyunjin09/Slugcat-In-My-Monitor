@@ -1,18 +1,18 @@
 # 음식 업데이트 상세 보고서
 
 작성일: 2026-08-25
-대상 브랜치: `feature/food-update`
+대상 브랜치: `feature/food-update-pr`
 대상 fork: `Blueslime0216/Slugcat-In-My-Monitor`
 
 ## 1. 업데이트 결과
 
-이번 업데이트는 데스크톱 Slugcat에게 실제로 먹이를 주고, Slugcat이 먹이 쪽으로 이동해 집어 들어 베어 먹는 음식 시스템을 추가한다. 지원 아이템은 Rain World의 파란 열매 `DangleFruit`와 알벌레 알 `EggBugEgg`다.
+이번 업데이트는 데스크톱 Slugcat에게 실제로 먹이를 주고, Slugcat이 먹이 쪽으로 이동해 집어 들어 베어 먹는 음식 시스템을 추가한다. 지원 아이템은 Rain World의 푸른 열매(영문 `Blue Fruit`, 내부 클래스 `DangleFruit`)와 알벌레 알 `EggBugEgg`다.
 
 사용 절차는 다음과 같다.
 
 1. 시스템 트레이의 Slugcat 아이콘을 우클릭한다.
 2. `먹이 주기 · 슬러그캣 N` 메뉴를 연다.
-3. `파란 열매 주기` 또는 `알벌레 알 주기`를 선택한다.
+3. `푸른 열매 주기` 또는 `알벌레 알 주기`를 선택한다.
 4. 현재 선택된 Slugcat에서 무작위 방향과 거리의 상공에 먹이가 나타나 바닥으로 떨어진다.
 5. Slugcat은 포만감과 무작위 appetite 판정에 따라 접근해 먹거나, 관심을 보이지 않고 남겨 둔다.
 
@@ -101,7 +101,7 @@
 
 먹이는 현재 지지 표면 위에서 140–360 desktop pixels 떨어진 무작위 방향에 생성된다. 68%는 현재 바라보는 방향, 32%는 반대 방향이며, 바닥 위 45–120px 높이에서 실제 물리로 떨어진다. 지지 표면을 찾지 못하면 가장 가까운 monitor work area의 floor를 사용하고, 생성 위치는 표면 좌우 범위 안으로 clamp한다.
 
-접근 거리가 충분히 가까워지고 Slugcat이 grounded 상태이면 먹이를 집는다. 8 ticks 동안 들기 자세를 유지한 뒤 18 ticks 간격으로 bite한다. 파란 열매는 3회, 알벌레 알은 2회 뒤 1 food point를 얻는다.
+접근 거리가 충분히 가까워지고 Slugcat이 grounded 상태이면 먹이를 집는다. 8 ticks 동안 들기 자세를 유지한 뒤 18 ticks 간격으로 bite한다. 푸른 열매는 3회, 알벌레 알은 2회 뒤 1 food point를 얻는다.
 
 각 Slugcat은 0–3점의 세션 포만감을 가진다. 공복이면 첫 제안을 항상 수락하지만, 이후에는 포만감이 높을수록 수락 확률이 78%에서 12%까지 낮아진다. 이미 수락했지만 아직 먹지 않은 아이템도 예상 포만감에 합산하므로 여러 개를 빠르게 놓아도 전부 예약하지 않는다. 예상 포만감이 3점이면 반드시 거절한다. 거절한 먹이는 `Ignored` 상태로 화면과 물리에 남지만 AI target이 되지 않는다. 포만감 1점은 3600 ticks, 약 90초에 걸쳐 소화된다.
 
@@ -126,7 +126,7 @@
 
 음식을 위한 별도 DirectComposition surface를 생성하지 않는다. 각 음식은 소유 Slugcat의 기존 render batch에 포함되고, 해당 loop의 bounds만 필요한 만큼 union한다. 기존 최소 surface 크기가 384px이고 먹이가 가까운 곳에 생기므로 대부분의 경우 surface resize도 발생하지 않는다.
 
-렌더링은 로컬 atlas에 frame이 있으면 파란 열매의 두 레이어 또는 알벌레 알의 세 레이어를 사용한다. `FoodRenderPalette`가 원작의 레이어별 tint와 알벌레 hue 분포를 한곳에서 계산한다. 데스크톱에는 `RoomPalette`, `Room.Darkness`, `LightSourceExposure`가 없으므로 중립적인 고정 black/fog palette와 reference darkness `0.4`를 사용한다. 이 값은 사용자가 제공한 어두운 인게임 파란 열매와 바탕화면 위 가시성을 함께 맞추기 위한 desktop 기준값이다.
+렌더링은 로컬 atlas에 frame이 있으면 푸른 열매의 두 레이어 또는 알벌레 알의 세 레이어를 사용한다. `FoodRenderPalette`가 원작의 레이어별 tint와 알벌레 hue 분포를 한곳에서 계산한다. 데스크톱에는 `RoomPalette`, `Room.Darkness`, `LightSourceExposure`가 없으므로 중립적인 고정 black/fog palette와 reference darkness `0.4`를 사용한다. 이 값은 사용자가 제공한 어두운 인게임 푸른 열매와 바탕화면 위 가시성을 함께 맞추기 위한 desktop 기준값이다.
 
 알벌레 알의 꼬리는 별도 bitmap이나 물리 객체를 만들지 않고 renderer가 재사용하는 12개 꼭짓점 배열로 그린다. 색상 brush도 기존 `bodyBrushes` 캐시를 공유해 매 프레임 GC 할당을 만들지 않는다. 로컬 설치본이 예상과 달라 frame을 찾지 못할 경우 앱 전체를 중단하지 않고 작은 procedural fallback을 그린다. 정상 설치본에서는 자동 테스트가 모든 사용 frame과 `#rainWorld` 출처를 확인한다.
 
@@ -137,7 +137,7 @@
 트레이 우클릭 메뉴에 다음 항목을 추가했다.
 
 - `먹이 주기 · 슬러그캣 N`
-  - `파란 열매 주기`
+  - `푸른 열매 주기`
   - `알벌레 알 주기`
   - `포만감 0.0/3.0`
   - `선택한 슬러그캣의 먹이 치우기`
@@ -194,12 +194,12 @@
 - 일반 Eggbug hue 4,096개가 원작 `-0.15–0.10` 범위를 벗어나지 않는지 확인
 - 대표 Eggbug palette가 cyan liquid와 warm detail을 생성하는지 확인
 - 로컬 Rain World atlas를 실제 bitmap으로 렌더링해 deep blue, cyan, warm pixel 검출
-- 파란 열매 영역에 이전 pale sky-blue pixel이 남지 않는지 확인
+- 푸른 열매 영역에 이전 pale sky-blue pixel이 남지 않는지 확인
 - 140–360px 무작위 생성 범위와 바닥 위 낙하 시작
 - 다섯 번 연속 제안에서 섭취와 거절이 모두 발생하는지 확인
 - 최대 포만감 제한과 90초당 1점 소화
-- 파란 열매 몸체와 알벌레 알 꼬리를 모두 포함하는 composition 시각 반경
-- 알려지지 않은 food kind가 파란 열매로 조용히 처리되지 않고 명시적으로 실패하는지 확인
+- 푸른 열매 몸체와 알벌레 알 꼬리를 모두 포함하는 composition 시각 반경
+- 알려지지 않은 food kind가 푸른 열매로 조용히 처리되지 않고 명시적으로 실패하는지 확인
 - 음식 치우기 후 target, interaction countdown, accepted 상태가 남지 않는지 확인
 - 로컬 atlas 전체가 없어도 두 음식 fallback이 모두 보이는지 bitmap으로 확인
 - 1,100개 색상을 연속 요청해도 GDI 색상 resource cache가 상한을 지키는지 확인
@@ -211,7 +211,7 @@
 .\artifacts\Release\RainWorldDesktopPet.Tests.exe --food-preview .\artifacts\FoodPalettePreview.png
 ```
 
-두 번째 명령은 저장소에 에셋을 복사하지 않고 로컬 Rain World atlas에서 파란 열매 한 개와 서로 다른 hue의 알벌레 알 네 개를 렌더링하는 시각 검증용 명령이다. 최종 Release 빌드는 경고 0개, 오류 0개로 완료했고 기존 전체 회귀 테스트와 새 음식 테스트가 모두 통과했다. 실행 파일은 `artifacts/Release/SlugcatInMyMonitor.exe`에 생성된다. 네이티브 렌더러인 `SlugcatInMyMonitor.DirectComposition.dll`도 같은 폴더에 있어야 한다.
+두 번째 명령은 저장소에 에셋을 복사하지 않고 로컬 Rain World atlas에서 푸른 열매 한 개와 서로 다른 hue의 알벌레 알 네 개를 렌더링하는 시각 검증용 명령이다. 최종 Release 빌드는 경고 0개, 오류 0개로 완료했고 기존 전체 회귀 테스트와 새 음식 테스트가 모두 통과했다. 실행 파일은 `artifacts/Release/SlugcatInMyMonitor.exe`에 생성된다. 네이티브 렌더러인 `SlugcatInMyMonitor.DirectComposition.dll`도 같은 폴더에 있어야 한다.
 
 빌드 도중 기존 실행 파일이 실행 중이면 Windows가 산출물 교체를 막는다. 이 경우 트레이에서 앱을 종료한 뒤 다시 빌드해야 한다.
 
@@ -232,7 +232,7 @@
 
 각 커밋은 `origin/feature/food-update`에 순차적으로 push했다.
 
-신규 4종 실험은 사용자 검토 결과 채택하지 않아 두 revert 커밋으로 완전히 취소했다. 현재 PR의 파일 변경 결과에는 `SlimeMold`, `DandelionPeach`, `GlowWeed`, `Mushroom` 코드와 UI가 남아 있지 않으며, 지원 범위는 파란 열매와 알벌레 알 2종뿐이다.
+신규 4종 실험은 사용자 검토 결과 채택하지 않아 두 revert 커밋으로 완전히 취소했다. 현재 PR의 파일 변경 결과에는 `SlimeMold`, `DandelionPeach`, `GlowWeed`, `Mushroom` 코드와 UI가 남아 있지 않으며, 지원 범위는 푸른 열매와 알벌레 알 2종뿐이다.
 
 PR 안정화 시점에는 저장소 규칙에 따라 `main`이 아니라 최신 `develop`을 기준으로 동기화했다. `upstream/develop` 대비 뒤처진 커밋은 0개이며 Release 전체 테스트, `node --check tools/validate-dms-template.mjs`, 배포 ZIP 생성과 SHA-256 생성까지 확인했다.
 
@@ -260,7 +260,7 @@ PR 안정화 시점에는 저장소 규칙에 따라 `main`이 아니라 최신 
 
 ## 10. 알려진 제한과 다음 권장 작업
 
-- 파란 열매의 A/B 색상·순서 오류와 알벌레 알의 전체 hue 난수 오류는 `a26036c`에서 교정했다. 다만 데스크톱 앱에는 Rain World의 현재 방 정보가 없으므로 방마다 달라지는 `blackColor`, `fogColor`, darkness와 광원 노출을 실시간으로 재현하지는 않는다. 현재는 reference darkness `0.4`의 고정 중립 palette를 사용하므로 특정 방의 스크린샷과 픽셀 단위로 완전히 같지는 않을 수 있다.
+- 푸른 열매의 A/B 색상·순서 오류와 알벌레 알의 전체 hue 난수 오류는 `a26036c`에서 교정했다. 다만 데스크톱 앱에는 Rain World의 현재 방 정보가 없으므로 방마다 달라지는 `blackColor`, `fogColor`, darkness와 광원 노출을 실시간으로 재현하지는 않는다. 현재는 reference darkness `0.4`의 고정 중립 palette를 사용하므로 특정 방의 스크린샷과 픽셀 단위로 완전히 같지는 않을 수 있다.
 - 음식은 현재 Slugcat이 지지받는 같은 표면 또는 가까운 monitor floor에 생성하도록 최적화되어 있다. 사용자가 창을 급격히 옮겨 먹이가 다른 층으로 떨어지면 Slugcat이 장거리 pathfinding을 하지 못할 수 있으며, 30초 후 자동 제거된다.
 - 현재 들기 위치는 head 기반 mouth anchor다. 원작처럼 grasp별 손 animation을 완전히 재현하려면 `SlugcatGraphics`에 food hand target mode를 추가해야 한다.
 - bite event 이름은 남기지만 사운드는 재생하지 않는다. 프로젝트 전체 sound backend가 생길 때 event를 연결할 수 있다.

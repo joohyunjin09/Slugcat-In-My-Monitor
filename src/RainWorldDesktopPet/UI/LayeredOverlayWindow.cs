@@ -156,7 +156,7 @@ namespace RainWorldDesktopPet.UI
             activeSlugcatsMenu.DropDownItems.Add(new ToolStripSeparator());
             foodMenu = new ToolStripMenuItem(T("먹이 주기", "Feed"));
             feedDangleFruitItem = new ToolStripMenuItem(
-                T("파란 열매 주기", "Give Dangle Fruit"));
+                T("푸른 열매 주기", "Give Blue Fruit"));
             feedDangleFruitItem.Click += FeedDangleFruit;
             feedEggBugEggItem = new ToolStripMenuItem(
                 T("알벌레 알 주기", "Give Eggbug Egg"));
