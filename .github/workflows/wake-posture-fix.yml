@@ -1,0 +1,131 @@
+name: Wake posture movement fix
+
+on:
+  push:
+    branches:
+      - fix/wake-posture-on-move
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-test:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@v4
+        with:
+          ref: fix/wake-posture-on-move
+
+      - name: Fix rest posture wake transition
+        shell: pwsh
+        run: |
+          $path = 'src/RainWorldDesktopPet/Creature/OriginalSlugcatMovement.cs'
+          $text = [IO.File]::ReadAllText($path)
+          $old = @'
+            if (grounded && input.Posture != VirtualPosture.None)
+                state.Animation = input.Posture == VirtualPosture.Sleep
+                    ? AnimationIndex.Sleep : AnimationIndex.Sit;
+            else if (!grounded && state.Animation != AnimationIndex.Flip &&
+'@
+          $new = @'
+            // Sit/Sleep are stationary rest intents. A locomotion/action input must
+            // wake the Player instead of allowing the curled rest animation to be
+            // reapplied while the BodyChunks are already moving.
+            bool activeInput = input.X != 0 || input.Y != 0 || input.Jump ||
+                input.Pickup || input.Throw || input.DropThrough;
+            bool resting = input.Posture != VirtualPosture.None && !activeInput;
+            if (grounded && resting)
+                state.Animation = input.Posture == VirtualPosture.Sleep
+                    ? AnimationIndex.Sleep : AnimationIndex.Sit;
+            else if (grounded && activeInput &&
+                (state.Animation == AnimationIndex.Sleep ||
+                 state.Animation == AnimationIndex.Sit))
+            {
+                state.Standing = input.Y <= 0;
+                state.Animation = state.Standing
+                    ? AnimationIndex.StandUp : AnimationIndex.None;
+                state.AnimationFrame = 0;
+            }
+            else if (!grounded && state.Animation != AnimationIndex.Flip &&
+'@
+          if (-not $text.Contains($old)) { throw 'posture block not found' }
+          $text = $text.Replace($old, $new)
+          [IO.File]::WriteAllText($path, $text, [Text.UTF8Encoding]::new($false))
+
+          $testPath = 'tests/RainWorldDesktopPet.Tests/Program.cs'
+          $tests = [IO.File]::ReadAllText($testPath)
+          $runOld = '            Run("Sit and sleep flow through VirtualInput into movement", RestPosturesUseVirtualInput);'
+          $runNew = $runOld + [Environment]::NewLine + '            Run("Movement wakes a curled rest posture before locomotion", MovementWakesRestPosture);'
+          if (-not $tests.Contains($runOld)) { throw 'test registration anchor not found' }
+          $tests = $tests.Replace($runOld, $runNew)
+
+          $methodAnchor = @'
+        private static void StandForcesKeepUpperBodyUpright()
+'@
+          $method = @'
+        private static void MovementWakesRestPosture()
+        {
+            DesktopCollisionWorld world = new DesktopCollisionWorld(new WindowEnumerator());
+            world.Refresh(IntPtr.Zero);
+            Slugcat slugcat = new Slugcat(new Vec2(300.0, 300.0));
+
+            slugcat.BodyChunks[0].Position = new Vec2(292.0, 300.0);
+            slugcat.BodyChunks[1].Position = new Vec2(300.0, 300.0);
+            slugcat.BodyChunks[0].ContactFloor = true;
+            slugcat.BodyChunks[1].ContactFloor = true;
+            slugcat.State.BodyMode = BodyModeIndex.Crawl;
+            slugcat.State.Standing = false;
+            slugcat.Movement.ApplyInput(
+                new VirtualInput(0, 0, false, false, VirtualPosture.Sleep), world);
+            Equal((int)AnimationIndex.Sleep, (int)slugcat.State.Animation,
+                "precondition: curled sleep posture");
+
+            slugcat.BodyChunks[0].ContactFloor = true;
+            slugcat.BodyChunks[1].ContactFloor = true;
+            slugcat.Movement.ApplyInput(new VirtualInput(1, 0, false, false), world);
+            True(slugcat.State.Animation != AnimationIndex.Sleep &&
+                 slugcat.State.Animation != AnimationIndex.Sit,
+                "horizontal locomotion must clear stationary rest animation");
+            True(slugcat.State.Standing &&
+                 slugcat.State.Animation == AnimationIndex.StandUp,
+                "low sleeping body must enter StandUp before normal locomotion pose");
+
+            Slugcat combined = new Slugcat(new Vec2(300.0, 300.0));
+            combined.BodyChunks[0].Position = new Vec2(292.0, 300.0);
+            combined.BodyChunks[1].Position = new Vec2(300.0, 300.0);
+            combined.BodyChunks[0].ContactFloor = true;
+            combined.BodyChunks[1].ContactFloor = true;
+            combined.State.BodyMode = BodyModeIndex.Crawl;
+            combined.State.Animation = AnimationIndex.Sleep;
+            combined.State.Standing = false;
+            combined.Movement.ApplyInput(
+                new VirtualInput(1, 0, false, false, VirtualPosture.Sleep), world);
+            True(combined.State.Animation != AnimationIndex.Sleep &&
+                 combined.State.Animation != AnimationIndex.Sit,
+                "stale rest posture cannot override simultaneous movement");
+        }
+
+'@
+          if (-not $tests.Contains($methodAnchor)) { throw 'test method anchor not found' }
+          $tests = $tests.Replace($methodAnchor, $method + $methodAnchor)
+          [IO.File]::WriteAllText($testPath, $tests, [Text.UTF8Encoding]::new($false))
+
+      - name: Build Release and run tests
+        shell: pwsh
+        run: .\build.ps1 -Configuration Release
+
+      - name: Check DMS validator syntax
+        shell: pwsh
+        run: node --check tools/validate-dms-template.mjs
+
+      - name: Commit tested fix
+        shell: pwsh
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/wake-posture-fix.yml
+          git add src/RainWorldDesktopPet/Creature/OriginalSlugcatMovement.cs tests/RainWorldDesktopPet.Tests/Program.cs
+          git commit -m "Wake rest posture before movement"
+          git push origin HEAD:fix/wake-posture-on-move
