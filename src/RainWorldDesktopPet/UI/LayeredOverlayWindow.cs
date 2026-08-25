@@ -272,7 +272,7 @@ namespace RainWorldDesktopPet.UI
                 {
                     bool debug = gameLoops[i].DebugEnabled &&
                         ReferenceEquals(gameLoops[i], gameLoop);
-                    surfaceBoundsBuffer.Add(CalculateRenderBounds(poseBuffer[i], debug));
+                    surfaceBoundsBuffer.Add(CalculateRenderBounds(gameLoops[i], poseBuffer[i], debug));
                 }
                 IList<CompositionBatch> batches = compositionBatchPlanner.Plan(
                     surfaceBoundsBuffer, OverlaySizeQuantum);
@@ -443,10 +443,32 @@ namespace RainWorldDesktopPet.UI
             if (compositionHost != null) compositionHost.SetDesktopBounds(virtualDesktopBounds);
         }
 
-        private Rectangle CalculateRenderBounds(SlugcatPose pose, bool debug)
+        private Rectangle CalculateRenderBounds(GameLoop loop, SlugcatPose pose, bool debug)
         {
             if (debug) return virtualDesktopBounds;
             RectangleF content = pose.GraphicsBounds;
+            // DirectComposition owns only the planned surface rectangle.
+            // Include a Spearmaster needle and every live umbilical point,
+            // otherwise a valid far throw is drawn outside that rectangle.
+            double scale = pose.CharacterRenderScale;
+            for (int i = 0; i < loop.Slugcat.Spears.Count; i++)
+            {
+                DesktopSpear spear = loop.Slugcat.Spears[i];
+                Vec2 center = spear.Chunk.RenderPosition(pose.TimeStacker) * scale;
+                RectangleF spearBounds = new RectangleF((float)(center.X - 28.0),
+                    (float)(center.Y - 28.0), 56.0f, 56.0f);
+                content = RectangleF.Union(content, spearBounds);
+                if (!spear.HasUmbilical) continue;
+                Vec2[] points = spear.Umbilical;
+                for (int point = 0; point < points.Length; point++)
+                {
+                    Vec2 rendered = Vec2.Lerp(spear.LastUmbilical[point],
+                        points[point], pose.TimeStacker) * scale;
+                    content = RectangleF.Union(content, new RectangleF(
+                        (float)(rendered.X - 2.0), (float)(rendered.Y - 2.0),
+                        4.0f, 4.0f));
+                }
+            }
 
             int contentWidth = (int)Math.Ceiling(content.Width) + OverlayPadding * 2;
             int contentHeight = (int)Math.Ceiling(content.Height) + OverlayPadding * 2;

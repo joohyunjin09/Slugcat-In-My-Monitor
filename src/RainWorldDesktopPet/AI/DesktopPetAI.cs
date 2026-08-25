@@ -73,6 +73,9 @@ namespace RainWorldDesktopPet.AI
         private readonly double personalityEnergy;
         private readonly double personalityNervous;
         private readonly double personalityAggression;
+        private readonly double personalityBravery;
+        private readonly double personalityDominance;
+        private int attentionRetargetCountdown;
         private bool specialTransitionArmed;
         private long specialTransitionTargetSurfaceId;
         private bool originalAttentionInitialized;
@@ -102,10 +105,13 @@ namespace RainWorldDesktopPet.AI
             personalityEnergy = personalityRandom.NextDouble();
             personalityNervous = personalityRandom.NextDouble();
             personalityAggression = personalityRandom.NextDouble();
+            personalityBravery = personalityRandom.NextDouble();
+            personalityDominance = personalityRandom.NextDouble();
             fatigue = MathUtil.Lerp(0.30, 0.08, personalityEnergy);
             curiosity = MathUtil.Lerp(0.36, 0.86,
                 MathUtil.Clamp01((personalityEnergy + (1.0 - personalityNervous)) * 0.5));
             desiredDirection = random.Next(0, 2) == 0 ? -1 : 1;
+            attentionRetargetCountdown = 40 + random.Next(0, 80);
             // Avoid making every spawned Slugcat scan all desktop surfaces on
             // the same 40 Hz tick. The first still evaluates immediately.
             evaluationCountdown = evaluationPhase == 0 ? 0 : evaluationPhase + 1;
@@ -125,6 +131,8 @@ namespace RainWorldDesktopPet.AI
         public double PersonalityEnergy { get { return personalityEnergy; } }
         public double PersonalityNervous { get { return personalityNervous; } }
         public double PersonalityAggression { get { return personalityAggression; } }
+        public double PersonalityBravery { get { return personalityBravery; } }
+        public double PersonalityDominance { get { return personalityDominance; } }
 
         public VirtualInput Step(Slugcat slugcat, DesktopCollisionWorld world, MouseTracker mouse)
         {
@@ -182,7 +190,15 @@ namespace RainWorldDesktopPet.AI
                 // Prefer another window above or across a modest gap. Floors
                 // below remain a DropDown concern handled by the normal AI.
                 if (delta.Y > 50.0) continue;
-                double score = delta.Length + Math.Max(0.0, delta.Y) * 2.0;
+                // SlugNPCAI follows a selected MovementConnection. Do not
+                // make every desktop pet choose the same nearest platform:
+                // personality gives each cat a stable preference for route
+                // direction and for longer/safer transitions.
+                bool preferredDirection = Math.Sign(delta.X) == desiredDirection;
+                double score = delta.Length + Math.Max(0.0, delta.Y) *
+                    MathUtil.Lerp(2.4, 1.2, personalityBravery);
+                score += preferredDirection ? -12.0 * personalityDominance :
+                    24.0 * (1.0 - personalityDominance);
                 if (score >= bestScore) continue;
                 bestScore = score;
                 best = surface;
@@ -261,9 +277,14 @@ namespace RainWorldDesktopPet.AI
             // Standard desktop path jumps are planned inside the normal
             // 105-unit reach.  Artificer's extended 250-unit candidate range
             // is the only desktop equivalent that needs the original
-            // Jump+Pickup branch.
+            // Player.ClassMechanicsArtificer does not impose a spatial
+            // threshold. The desktop AI only asks for it when its planned
+            // route is a meaningful gap or ascent, rather than using a
+            // periodic airborne timer.
             return TransitionPlan.Mode == PlatformTransitionMode.ExplosiveJump &&
-                Math.Abs(TransitionPlan.HorizontalDistance) > 105.0;
+                TransitionPlan.IsValid &&
+                (Math.Abs(TransitionPlan.HorizontalDistance) >= 64.0 ||
+                 TransitionPlan.VerticalDistance <= -24.0);
         }
 
         private bool ProduceSpearmasterInput(Slugcat slugcat,
@@ -448,6 +469,11 @@ namespace RainWorldDesktopPet.AI
             context.BehaviorAgeSeconds = behaviorTicks * SimulationConstants.LogicStepSeconds;
             context.JumpReady = jumpCooldownTicks == 0;
             context.DropReady = dropCooldownTicks == 0;
+            context.PersonalityEnergy = personalityEnergy;
+            context.PersonalityNervous = personalityNervous;
+            context.PersonalityAggression = personalityAggression;
+            context.PersonalityBravery = personalityBravery;
+            context.PersonalityDominance = personalityDominance;
             double leftEdge = world.DistanceToEdge(slugcat.Center, -1, slugcat.PrimarySupportingSurfaceId);
             double rightEdge = world.DistanceToEdge(slugcat.Center, 1, slugcat.PrimarySupportingSurfaceId);
             context.SaferDirection = leftEdge >= rightEdge ? -1 : 1;
@@ -488,6 +514,14 @@ namespace RainWorldDesktopPet.AI
                 if (best == DesktopBehavior.Walk || best == DesktopBehavior.Explore)
                 {
                     desiredDirection = random.Next(0, 2) == 0 ? -1 : 1;
+                }
+                if (best == DesktopBehavior.Jump && TransitionPlan.IsValid &&
+                    Math.Abs(TransitionPlan.HorizontalDistance) > 0.001)
+                {
+                    // MovementConnection.direction is the source of NPC jump
+                    // input in the game DLL. A random stale direction here
+                    // was the cause of mirrored, repeated left/right jumps.
+                    desiredDirection = TransitionPlan.HorizontalDistance < 0.0 ? -1 : 1;
                 }
                 if (best == DesktopBehavior.Jump) jumpCooldownTicks = 240;
                 if (best == DesktopBehavior.DropDown) dropCooldownTicks = 400;
@@ -552,12 +586,13 @@ namespace RainWorldDesktopPet.AI
                 originalAttentionTarget = slugcat.Center +
                     new Vec2(slugcat.State.Facing * 90.0, 45.0);
             }
-            else if (behaviorTicks % 80 == 1)
+            else if (--attentionRetargetCountdown <= 0)
             {
                 double x = (random.NextDouble() * 2.0 - 1.0) * 130.0;
                 double y = (random.NextDouble() * 2.0 - 1.0) * 70.0;
                 originalAttentionKind = AttentionKind.RandomPoint;
                 originalAttentionTarget = slugcat.Center + new Vec2(x, y);
+                attentionRetargetCountdown = 40 + random.Next(0, 160);
             }
 
             MouseAttentionActive = slugcat.State.Conscious && !slugcat.State.Dead &&

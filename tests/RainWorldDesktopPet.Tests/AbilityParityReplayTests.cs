@@ -251,8 +251,33 @@ namespace RainWorldDesktopPet.Tests
             DesktopPetAI second = new DesktopPetAI(1002, 2);
             True(Math.Abs(first.PersonalityEnergy - second.PersonalityEnergy) > 0.000001 ||
                 Math.Abs(first.PersonalityNervous - second.PersonalityNervous) > 0.000001 ||
-                Math.Abs(first.PersonalityAggression - second.PersonalityAggression) > 0.000001,
+                Math.Abs(first.PersonalityAggression - second.PersonalityAggression) > 0.000001 ||
+                Math.Abs(first.PersonalityBravery - second.PersonalityBravery) > 0.000001 ||
+                Math.Abs(first.PersonalityDominance - second.PersonalityDominance) > 0.000001,
                 "distinct SlugNPC seeds retain distinct behavior personalities");
+            UtilityContext cautious = new UtilityContext
+            {
+                Grounded = true,
+                TransitionAvailable = true,
+                JumpReady = true,
+                Curiosity = 0.75,
+                PersonalityEnergy = 0.15,
+                PersonalityBravery = 0.05,
+                PersonalityDominance = 0.05
+            };
+            UtilityContext bold = new UtilityContext
+            {
+                Grounded = true,
+                TransitionAvailable = true,
+                JumpReady = true,
+                Curiosity = 0.75,
+                PersonalityEnergy = 0.95,
+                PersonalityBravery = 0.95,
+                PersonalityDominance = 0.95
+            };
+            True(UtilityEvaluator.Score(DesktopBehavior.Jump, bold, 0.0) >
+                UtilityEvaluator.Score(DesktopBehavior.Jump, cautious, 0.0),
+                "SlugNPC bravery and energy alter route-transition utility");
         }
 
         private static void ArtificerEffectLifecycleReplay()
@@ -413,6 +438,17 @@ namespace RainWorldDesktopPet.Tests
                 "Spear.Update cancels half of PhysicalObject .9 gravity");
             Near(beforePositionY + spear.Chunk.Velocity.Y, spear.Chunk.Position.Y,
                 0.00001, "needle integrates the post-friction velocity");
+            spear.DisconnectNeedle();
+            True(!spear.NeedleHasConnection && spear.HasUmbilical,
+                "Spear_NeedleDisconnect leaves the original breaking umbilical alive");
+            for (int tick = 0; tick < 8; tick++)
+                slugcat.Step(VirtualInput.Neutral, world, Vec2.Zero, Vec2.Zero);
+            True(spear.HasUmbilical,
+                "umbilical survives several frames after the needle disconnects");
+            for (int tick = 0; tick < 430; tick++)
+                slugcat.Step(VirtualInput.Neutral, world, Vec2.Zero, Vec2.Zero);
+            True(!spear.HasUmbilical,
+                "all original 150..200 tick umbilical segments eventually expire");
             for (int i = 0; i < 5; i++) graphics.Step(attention, world);
             Equal(0, ability.ThrowFollowTicks,
                 "throwing hand follows the released spear for exactly five graphics ticks");

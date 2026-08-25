@@ -1657,17 +1657,24 @@ namespace RainWorldDesktopPet.Graphics
                 {
                     Vec2[] current = spear.Umbilical;
                     Vec2[] previousFrame = spear.LastUmbilical;
-                    Vec2 previous = Vec2.Lerp(previousFrame[0], current[0], interpolation);
-                    using (Pen umbilical = CreateRoundPen(
-                        LerpColor(pose.VisualBodyColor, Color.White, 0.35), 0.65f))
+                    double[] lives = spear.UmbilicalLife;
+                    for (int segment = 1; segment < current.Length; segment++)
                     {
-                        for (int segment = 1; segment < current.Length; segment++)
-                        {
-                            Vec2 next = Vec2.Lerp(previousFrame[segment],
-                                current[segment], interpolation);
+                        // Spear.Umbilical fades one short mesh section at a
+                        // time after NeedleDisconnect; do not collapse the
+                        // entire tether on the impact frame.
+                        double life = Math.Min(lives[segment - 1], lives[segment]);
+                        double opacity = MathUtil.InverseLerp(0.0, 0.3, life);
+                        if (opacity <= 0.0) continue;
+                        Color color = LerpColor(pose.VisualBodyColor, Color.White, 0.35);
+                        color = Color.FromArgb((int)Math.Round(255.0 * opacity), color);
+                        Vec2 previous = Vec2.Lerp(previousFrame[segment - 1],
+                            current[segment - 1], interpolation);
+                        Vec2 next = Vec2.Lerp(previousFrame[segment],
+                            current[segment], interpolation);
+                        using (Pen umbilical = CreateRoundPen(color,
+                            (float)(0.65 * opacity)))
                             graphics.DrawLine(umbilical, previous.ToPointF(), next.ToPointF());
-                            previous = next;
-                        }
                     }
                 }
 

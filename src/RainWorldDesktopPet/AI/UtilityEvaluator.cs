@@ -19,6 +19,13 @@ namespace RainWorldDesktopPet.AI
         public bool JumpReady;
         public bool DropReady;
         public bool TransitionAvailable;
+        // A neutral personality keeps standalone utility probes and callers
+        // that do not own an AbstractCreature equivalent backward-compatible.
+        public double PersonalityEnergy = 0.5;
+        public double PersonalityNervous = 0.5;
+        public double PersonalityAggression = 0.5;
+        public double PersonalityBravery = 0.5;
+        public double PersonalityDominance = 0.5;
     }
 
     public static class UtilityEvaluator
@@ -29,37 +36,49 @@ namespace RainWorldDesktopPet.AI
             switch (behavior)
             {
                 case DesktopBehavior.Idle:
-                    score = 0.32 + context.Stillness * 0.16;
+                    score = 0.22 + context.Stillness * 0.16 +
+                        (1.0 - context.PersonalityEnergy) * 0.24;
                     break;
                 case DesktopBehavior.Walk:
-                    score = context.Grounded ? 0.34 + context.Curiosity * 0.22 : 0.02;
+                    score = context.Grounded ? 0.24 + context.Curiosity * 0.22 +
+                        context.PersonalityEnergy * 0.16 : 0.02;
                     break;
                 case DesktopBehavior.Explore:
-                    score = context.Grounded ? 0.18 + context.Curiosity * 0.72 : 0.01;
+                    score = context.Grounded ? 0.12 + context.Curiosity * 0.54 +
+                        context.PersonalityBravery * 0.26 +
+                        context.PersonalityDominance * 0.12 : 0.01;
                     break;
                 case DesktopBehavior.Sit:
-                    score = context.Grounded ? 0.1 + context.Fatigue * 0.65 + context.Stillness * 0.18 : 0.0;
+                    score = context.Grounded ? 0.08 + context.Fatigue * 0.65 +
+                        context.Stillness * 0.18 +
+                        (1.0 - context.PersonalityEnergy) * 0.18 : 0.0;
                     break;
                 case DesktopBehavior.Sleep:
-                    score = context.Grounded ? Math.Max(0.0, context.Fatigue - 0.58) * 1.9 : 0.0;
+                    score = context.Grounded ? Math.Max(0.0, context.Fatigue -
+                        MathUtil.Lerp(0.68, 0.48, 1.0 - context.PersonalityEnergy)) *
+                        1.9 : 0.0;
                     break;
                 case DesktopBehavior.LookAround:
-                    score = 0.17 + context.Curiosity * 0.34 + context.Stillness * 0.12;
+                    score = 0.12 + context.Curiosity * 0.30 + context.Stillness * 0.12 +
+                        context.PersonalityNervous * 0.18;
                     break;
                 case DesktopBehavior.FollowMouse:
                     score = context.MouseDistance > 90.0 && context.MouseDistance < 650.0
-                        ? 0.15 + context.Curiosity * 0.48 + MathUtil.InverseLerp(650.0, 140.0, context.MouseDistance) * 0.25
+                        ? 0.12 + context.Curiosity * 0.40 + context.PersonalityAggression *
+                            0.18 + MathUtil.InverseLerp(650.0, 140.0, context.MouseDistance) * 0.25
                         : 0.02;
                     break;
                 case DesktopBehavior.AvoidMouse:
                     score = context.MouseDistance < 105.0
-                        ? 0.72 + MathUtil.InverseLerp(105.0, 20.0, context.MouseDistance) * 0.5 + MathUtil.Clamp01(context.MouseSpeed / 1400.0) * 0.25
+                        ? 0.62 + context.PersonalityNervous * 0.30 +
+                            MathUtil.InverseLerp(105.0, 20.0, context.MouseDistance) * 0.5 + MathUtil.Clamp01(context.MouseSpeed / 1400.0) * 0.25
                         : 0.0;
                     break;
                 case DesktopBehavior.Jump:
                     score = context.Grounded && context.TransitionAvailable &&
                             context.JumpReady && context.Curiosity > 0.5
-                        ? 0.72 + context.Curiosity * 0.42
+                        ? 0.52 + context.Curiosity * 0.34 + context.PersonalityBravery *
+                            0.34 + context.PersonalityEnergy * 0.16
                         : 0.0;
                     break;
                 case DesktopBehavior.ClimbWindow:
@@ -68,7 +87,8 @@ namespace RainWorldDesktopPet.AI
                 case DesktopBehavior.DropDown:
                     score = context.Grounded && context.OnWindow && context.DropReady &&
                             context.EdgeDistance < 24.0 && context.Curiosity > 0.72
-                        ? 1.15
+                        ? 0.74 + context.PersonalityBravery * 0.38 +
+                            context.PersonalityDominance * 0.16
                         : 0.0;
                     break;
                 case DesktopBehavior.BalanceNearEdge:
