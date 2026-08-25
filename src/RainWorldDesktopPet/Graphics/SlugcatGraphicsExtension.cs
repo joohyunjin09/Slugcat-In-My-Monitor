@@ -359,11 +359,9 @@ namespace RainWorldDesktopPet.Graphics
                 if (direction.Normalized.Y < -0.35) direction *= -1.0;
                 spear.Rotation = VecToDegrees(direction);
                 spear.ScaleX = 1.0;
-                // Keep the white BioSpear marker at its normal extraction
-                // scale.  spearProg still controls its visibility and the
-                // actual needle-creation timing, but it must not stretch the
-                // marker while the player holds Pickup.
-                spear.ScaleY = -0.5;
+                // TailSpeckles renders the white BioSpear emerging from the
+                // selected slot; retain the original progress-driven length.
+                spear.ScaleY = -spearProgress * 0.5;
                 spear.AnchorX = 0.5;
                 spear.AnchorY = 0.0;
                 spear.Visible = true;

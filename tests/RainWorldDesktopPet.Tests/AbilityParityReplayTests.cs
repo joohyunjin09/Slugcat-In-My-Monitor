@@ -75,7 +75,7 @@ namespace RainWorldDesktopPet.Tests
                 ArtificerEffectLifecycleReplay);
             run("Spearmaster extraction creates the needle on original progress tick",
                 SpearmasterExtractionReplay);
-            run("Spearmaster extraction marker keeps a fixed scale",
+            run("Spearmaster tail marker stays fixed while BioSpear emerges",
                 SpearmasterTailGrowthReplay);
             run("Spearmaster neutral gate freezes creation while Pickup stays held",
                 SpearmasterNeutralGateReplay);
@@ -517,8 +517,8 @@ namespace RainWorldDesktopPet.Tests
                 "growing needle starts at selected speckle x");
             Near(selected.RenderPosition.Y, growing.RenderPosition.Y, 0.000001,
                 "growing needle starts at selected speckle y");
-            Near(-0.5, growing.ScaleY, 0.000001,
-                "white BioSpear extraction marker retains its fixed scale");
+            Near(-ability.SpearProgress * 0.5, growing.ScaleY, 0.000001,
+                "white BioSpear retains TailSpeckles spearProg movement");
             Near(1.0, selected.ScaleY, 0.000001,
                 "selected tinyStar retains its base scale during extraction");
 
