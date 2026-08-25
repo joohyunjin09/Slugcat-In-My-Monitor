@@ -19,16 +19,12 @@ Slugcat은 모니터와 실제 창의 경계를 바닥이나 벽처럼 이용하
 
 ![여러 Slugcat이 바탕화면을 돌아다니는 모습](docs/media/readme/example-preview.gif)
 
-
-
 > [!IMPORTANT]
 > **Rain World를 구매하여 PC에 설치한 사용자만 정상적으로 사용할 수 있습니다.**
 >
 > 이 프로그램은 Slugcat 기본 외형과 스킨을 자체적으로 제공하지 않고, 사용자의 로컬 Rain World 설치 폴더에서 원본 atlas와 설치된 모드 정보를 읽습니다.
 >
 > 유효한 `RainWorld.exe`와 `RainWorld_Data` 폴더를 찾지 못하면 프로그램이 시작되지 않으며, 게임 파일이 없거나 호환되지 않으면 외형이 정상적으로 표시되지 않을 수 있습니다.
-
-
 
 Rain World, Steam 또는 Unity를 동시에 실행할 필요는 없습니다. 게임 실행 파일이나 DLL을 불러오는 방식이 아니라 필요한 자산을 로컬 설치본에서 읽기 전용으로 사용하며, Rain World 및 커뮤니티 스킨 자산은 저장소와 배포 파일에 포함하지 않습니다.
 
@@ -208,7 +204,7 @@ DMS 스킨이 목록에 나타나려면 다음 조건을 모두 확인하세요.
 Release 빌드와 전체 테스트는 다음 명령으로 실행합니다.
 
 ```powershell
-.\build.ps1 -Configuration Release
+.uild.ps1 -Configuration Release
 ```
 
 DirectComposition 브리지는 Windows SDK의 Direct3D 11, DXGI, DirectComposition 라이브러리를 사용합니다.
@@ -466,7 +462,7 @@ The build script downloads the `.NET Framework 4.8` reference assemblies when ne
 Run a Release build and the full test suite with:
 
 ```powershell
-.\build.ps1 -Configuration Release
+.uild.ps1 -Configuration Release
 ```
 
 The DirectComposition bridge uses the Windows SDK's Direct3D 11, DXGI, and DirectComposition libraries.
