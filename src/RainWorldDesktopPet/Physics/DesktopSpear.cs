@@ -29,6 +29,7 @@ namespace RainWorldDesktopPet.Physics
         private static int nextAudioLoopId;
         private Vec2 thrownPosition;
         private int stillTicks;
+        private bool spinning;
         private Vec2[] umbilical;
         private Vec2[] lastUmbilical;
         private Vec2[] umbilicalVelocity;
@@ -62,6 +63,7 @@ namespace RainWorldDesktopPet.Physics
         public Vec2 LastRotation { get; private set; }
         public bool InFrontOfPlayer { get; private set; }
         public double RotationSpeed { get; private set; }
+        public bool IsSpinning { get { return spinning; } }
         public int NeedleType { get; private set; }
         public bool IsSpearmasterNeedle { get; private set; }
         public bool NeedleHasConnection { get; private set; }
@@ -168,7 +170,7 @@ namespace RainWorldDesktopPet.Physics
             {
                 ChangeMode(DesktopSpearMode.Free);
                 Chunk.Velocity *= -0.5;
-                RotationSpeed = RandomRotationSpeed();
+                SetRandomSpin();
                 LastImpactSound = "Spear_Bounce_Off_Creauture_Shell";
                 return true;
             }
@@ -190,6 +192,10 @@ namespace RainWorldDesktopPet.Physics
             LastImpactSound = null;
             ImpactSparkCount = 0;
             if (!NeedleHasConnection && NeedleFade > 0) NeedleFade--;
+            // Weapon.Update snapshots draw state before mode-specific physics.
+            // This must happen for Free as well as held/stuck spears so a
+            // stationary rotation never keeps interpolating from an old spin.
+            LastRotation = Rotation;
             if (Mode != DesktopSpearMode.Thrown && Mode != DesktopSpearMode.Free)
             {
                 FollowStuckSurface(world);
@@ -199,7 +205,6 @@ namespace RainWorldDesktopPet.Physics
 
             Age++;
             Chunk.BeginTick();
-            LastRotation = Rotation;
             Chunk.Integrate(Mode == DesktopSpearMode.Thrown
                 ? ThrownGravity : Gravity, AirFriction);
             world.Resolve(Chunk, world.CurrentSnapshot, 0, SurfaceFriction, Bounce);
@@ -227,7 +232,7 @@ namespace RainWorldDesktopPet.Physics
                         // Weapon.HitWall: the collision resolver already applied
                         // Spear.bounce=.4 and surfaceFriction=.4 exactly once.
                         ChangeMode(DesktopSpearMode.Free);
-                        RotationSpeed = RandomRotationSpeed();
+                        SetRandomSpin();
                         LastImpactSound = "Spear_Bounce_Off_Wall";
                         ImpactSparkCount = 7;
                     }
@@ -243,30 +248,34 @@ namespace RainWorldDesktopPet.Physics
                 if (Chunk.ContactFloor)
                 {
                     ChangeMode(DesktopSpearMode.Free);
-                    RotationSpeed = RandomRotationSpeed();
+                    SetRandomSpin();
                 }
             }
 
             if (Mode == DesktopSpearMode.Free)
             {
-                RotateFreeSpear();
-                bool restingOnGround = Chunk.ContactFloor &&
-                    Chunk.Velocity.LengthSquared < 0.01;
-                stillTicks = restingOnGround ? stillTicks + 1 : 0;
-                // Spear.Update settles a spinning spear immediately on a
-                // floor contact, or after twenty near-still ticks. Preserve
-                // its original -50..50 degree resting spread instead of
-                // retaining the last airborne rotation.
-                if (Chunk.ContactFloor || stillTicks > 20)
+                if (spinning)
                 {
-                    ChangeMode(DesktopSpearMode.StuckInGround);
-                    RotationSpeed = 0.0;
-                    Rotation = CalculateOriginalGroundRestDirection(random.NextDouble());
-                    Chunk.Velocity = Vec2.Zero;
-                    StuckSurfaceId = Chunk.SupportingSurfaceId;
-                    StuckSurfaceKind = Chunk.SupportingSurfaceKind;
-                    LastImpactSound = "Spear_Stick_In_Ground";
-                    return true;
+                    RotateFreeSpear();
+                    bool nearlyStill = Vec2.Distance(Chunk.LastPosition,
+                        Chunk.Position) < 4.0 * Gravity;
+                    stillTicks = nearlyStill ? stillTicks + 1 : 0;
+                    // Spear.Update retains Mode.Free after this transition.
+                    // It stops spin, applies the original diagonal rest angle,
+                    // and lets normal floor collision keep the spear at rest.
+                    if (Chunk.ContactFloor || stillTicks > 20)
+                    {
+                        spinning = false;
+                        RotationSpeed = 0.0;
+                        Rotation = CalculateOriginalGroundRestDirection(random.NextDouble());
+                        Chunk.Velocity = Vec2.Zero;
+                        LastImpactSound = "Spear_Stick_In_Ground";
+                        return true;
+                    }
+                }
+                else if (Vec2.Distance(Chunk.LastPosition, Chunk.Position) >= 6.0)
+                {
+                    SetRandomSpin();
                 }
             }
             return false;
@@ -392,8 +401,6 @@ namespace RainWorldDesktopPet.Physics
 
         private void RotateFreeSpear()
         {
-            if (Math.Abs(RotationSpeed) < 0.000001)
-                RotationSpeed = RandomRotationSpeed();
             double radians = RotationSpeed * Math.PI / 180.0;
             double cosine = Math.Cos(radians);
             double sine = Math.Sin(radians);
@@ -403,9 +410,14 @@ namespace RainWorldDesktopPet.Physics
 
         private double RandomRotationSpeed()
         {
-            double speed = MathUtil.Lerp(-100.0, 100.0, random.NextDouble());
-            if (Math.Abs(speed) < 10.0) speed = speed < 0.0 ? -10.0 : 10.0;
-            return speed;
+            double direction = random.NextDouble() < 0.5 ? -1.0 : 1.0;
+            return direction * MathUtil.Lerp(50.0, 150.0, random.NextDouble());
+        }
+
+        private void SetRandomSpin()
+        {
+            RotationSpeed = RandomRotationSpeed();
+            spinning = true;
         }
 
         public static Vec2 CalculateOriginalGroundRestDirection(double randomValue)
@@ -421,6 +433,7 @@ namespace RainWorldDesktopPet.Physics
         {
             Mode = mode;
             stillTicks = 0;
+            if (mode != DesktopSpearMode.Free) spinning = false;
         }
     }
 }

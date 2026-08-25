@@ -81,7 +81,7 @@ namespace RainWorldDesktopPet.Tests
                 SpearmasterNeutralGateReplay);
             run("Spearmaster throw uses ThrowObject velocity and needle gravity",
                 SpearmasterThrowReplay);
-            run("Grounded spear keeps the original diagonal resting spread",
+            run("Grounded free spear keeps the original diagonal resting spread",
                 SpearGroundRestDirectionReplay);
             run("Thrown floor contact enters diagonal spear rest",
                 ThrownSpearFloorRestReplay);
@@ -484,10 +484,21 @@ namespace RainWorldDesktopPet.Tests
             spear.Throw(new Vec2(20.0, 5.0), Vec2.Right);
             spear.Step(world);
 
-            Equal((int)DesktopSpearMode.StuckInGround, (int)spear.Mode,
-                "unaligned thrown floor contact leaves Thrown and settles through Free");
+            Equal((int)DesktopSpearMode.Free, (int)spear.Mode,
+                "unaligned thrown floor contact remains in original Free mode");
             True(Math.Abs(spear.Rotation.Y) > 0.1,
                 "ground-rest spear cannot retain a horizontal airborne rotation");
+            Vec2 restDirection = spear.Rotation;
+            spear.Step(world);
+            Near(restDirection.X, spear.LastRotation.X, 0.000001,
+                "stationary free spear snapshots its settled rotation");
+            Near(restDirection.Y, spear.LastRotation.Y, 0.000001,
+                "settled rotation no longer interpolates from the airborne spin");
+            Near(restDirection.X, spear.Rotation.X, 0.000001,
+                "free ground-rest direction remains stable");
+            Near(restDirection.Y, spear.Rotation.Y, 0.000001,
+                "free ground-rest direction remains stable");
+            True(!spear.IsSpinning, "ground-rest Free spear clears spinning state");
         }
 
         private static void SpearmasterTailGrowthReplay()
