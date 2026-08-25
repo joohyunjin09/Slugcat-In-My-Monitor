@@ -884,19 +884,60 @@ namespace RainWorldDesktopPet.AI
                 saintTransitionFreestyle = false;
                 saintAwaitingJumpRelease = false;
                 saintAttachedTicks++;
-                if (saintAttachedTicks >= saintAttachDurationTicks &&
-                    saint.CanJumpReleaseAttachedTongue)
+
+                bool contactRight = slugcat.BodyChunks[0].ContactRight ||
+                    slugcat.BodyChunks[1].ContactRight;
+                bool contactLeft = slugcat.BodyChunks[0].ContactLeft ||
+                    slugcat.BodyChunks[1].ContactLeft;
+                bool contactFloor = slugcat.BodyChunks[0].ContactFloor ||
+                    slugcat.BodyChunks[1].ContactFloor;
+                int escapeDirection = contactRight && !contactLeft ? -1 :
+                    (contactLeft && !contactRight ? 1 :
+                        (Math.Abs(slugcat.Center.X - saint.TonguePosition.X) > 8.0
+                            ? (slugcat.Center.X < saint.TonguePosition.X ? -1 : 1)
+                            : desiredDirection));
+
+                if (saintAttachedTicks >= saintAttachDurationTicks)
                 {
-                    saintAttachedTicks = 0;
-                    saintAttachDurationTicks = 45 + random.Next(0, 56);
                     Behavior = DesktopBehavior.TongueSwing;
-                    // The original tongue release is a fresh jump edge.
-                    input = new VirtualInput(desiredDirection, 0, true, false);
+                    if (saint.CanJumpReleaseAttachedTongue && !slugcat.LastInput.Jump)
+                    {
+                        saintAttachedTicks = 0;
+                        saintAttachDurationTicks = 45 + random.Next(0, 56);
+                        // The original tongue release is a fresh jump edge after
+                        // Saint has completely left the floor/wall contact.
+                        input = new VirtualInput(escapeDirection, 0, true, false);
+                        return true;
+                    }
+
+                    // Do not wait forever for CanJumpReleaseAttachedTongue to become
+                    // true. If Saint is still touching the floor or a wall, first use
+                    // the normal Player jump/wall-jump path to leave that surface.
+                    // AbilityController sees LaunchedThisTick and therefore does not
+                    // consume this first jump as a tongue release.
+                    if (slugcat.LastInput.Jump)
+                    {
+                        input = new VirtualInput(escapeDirection, 0, false, false);
+                        return true;
+                    }
+                    if (context.Grounded || contactFloor || contactLeft || contactRight)
+                    {
+                        input = new VirtualInput(escapeDirection, 0, true, false);
+                        return true;
+                    }
+
+                    // Airborne launch grace / CanJump is still expiring. Keep the
+                    // button released so the eventual release is a fresh jump edge.
+                    input = new VirtualInput(escapeDirection, 0, false, false);
                     return true;
                 }
 
                 bool anchorAbove = saint.TonguePosition.Y < slugcat.Center.Y - 12.0;
-                input = new VirtualInput(desiredDirection, anchorAbove ? -1 : 0,
+                bool anchorBelow = saint.TonguePosition.Y > slugcat.Center.Y + 12.0;
+                // Pull toward an overhead anchor, but give a floor-side anchor slack
+                // instead of pinning Saint down against the same surface.
+                int ropeLengthInput = anchorAbove ? -1 : (anchorBelow ? 1 : 0);
+                input = new VirtualInput(desiredDirection, ropeLengthInput,
                     false, false);
                 return true;
             }
