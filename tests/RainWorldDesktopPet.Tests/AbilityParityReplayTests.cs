@@ -75,6 +75,8 @@ namespace RainWorldDesktopPet.Tests
                 AutonomousAiRoutesDiversify);
             run("Autonomous exploration chooses interior destinations before reversing",
                 AutonomousExplorationAvoidsScreenEdgeOscillation);
+            run("Artificer and Saint AI use traversal abilities on long routes",
+                AutonomousSpecialistsUseTraversalAbilities);
             run("Artificer effects retain original smoke and light lifecycles",
                 ArtificerEffectLifecycleReplay);
             run("Spearmaster extraction creates the needle on original progress tick",
@@ -410,6 +412,85 @@ namespace RainWorldDesktopPet.Tests
             }
             True(interiorTurns > 0,
                 "seeded exploration reaches at least one independently chosen interior destination");
+        }
+
+        private static void AutonomousSpecialistsUseTraversalAbilities()
+        {
+            MonitorInfo monitor = new MonitorInfo("SPECIALISTS",
+                new Rectangle(0, 0, 1200, 1000),
+                new Rectangle(0, 0, 1200, 1000), true);
+            DesktopWindowSnapshot platform = new DesktopWindowSnapshot
+            {
+                Handle = new IntPtr(8341),
+                Bounds = new Rectangle(690, 840, 230, 80),
+                Title = "Traversal target",
+                ClassName = "Replay"
+            };
+            DesktopCollisionWorld world = CreateWorld(monitor,
+                new[] { platform });
+            double floorY = FindFloorY(world);
+            DesktopSurface floor = null;
+            for (int i = 0; i < world.Surfaces.Count; i++)
+            {
+                if (world.Surfaces[i].Kind == DesktopSurfaceKind.MonitorFloor)
+                {
+                    floor = world.Surfaces[i];
+                    break;
+                }
+            }
+            True(floor != null, "specialist replay has a source floor");
+
+            Slugcat artificer = CreateTraversalSlugcat(SlugcatId.Artificer,
+                floor, floorY);
+            DesktopPetAI artificerAi = new DesktopPetAI(6021);
+            MouseTracker mouse = new MouseTracker();
+            bool artificerUsedAbility = false;
+            for (int tick = 0; tick < 180; tick++)
+            {
+                VirtualInput input = artificerAi.Step(artificer, world, mouse, null);
+                artificer.Step(input, world, mouse.Position, mouse.Velocity);
+                ArtificerAbilityController ability =
+                    (ArtificerAbilityController)artificer.AbilityController;
+                if (ability.ExplosiveJumpCounter > 0)
+                {
+                    artificerUsedAbility = true;
+                    break;
+                }
+            }
+            True(artificerUsedAbility,
+                "Artificer AI uses the original explosive jump for a long route");
+
+            Slugcat saint = CreateTraversalSlugcat(SlugcatId.Saint, floor, floorY);
+            DesktopPetAI saintAi = new DesktopPetAI(6021);
+            bool saintUsedAbility = false;
+            for (int tick = 0; tick < 180; tick++)
+            {
+                VirtualInput input = saintAi.Step(saint, world, mouse, null);
+                saint.Step(input, world, mouse.Position, mouse.Velocity);
+                SaintAbilityController ability =
+                    (SaintAbilityController)saint.AbilityController;
+                if (ability.Mode != SaintTongueMode.Retracted)
+                {
+                    saintUsedAbility = true;
+                    break;
+                }
+            }
+            True(saintUsedAbility,
+                "Saint AI shoots the original tongue for a long route");
+        }
+
+        private static Slugcat CreateTraversalSlugcat(SlugcatId id,
+            DesktopSurface floor, double floorY)
+        {
+            Slugcat slugcat = new Slugcat(new Vec2(
+                DesktopWorldTransform.ToSimulationLength(600.0),
+                floorY - SimulationConstants.HipsChunkRadius - 0.5), id);
+            slugcat.State.Grounded = true;
+            for (int i = 0; i < slugcat.BodyChunks.Length; i++)
+                slugcat.BodyChunks[i].ContactFloor = true;
+            slugcat.BodyChunks[1].SupportingSurfaceId = floor.Id;
+            slugcat.BodyChunks[1].SupportingSurfaceKind = floor.Kind;
+            return slugcat;
         }
 
         private static void ArtificerEffectLifecycleReplay()

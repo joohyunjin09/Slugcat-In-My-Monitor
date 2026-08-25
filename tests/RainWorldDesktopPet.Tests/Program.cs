@@ -79,6 +79,7 @@ namespace RainWorldDesktopPet.Tests
             Run("Rain World locator validates an explicit installation", LocatorValidatesExplicitPath);
             Run("Required autonomous behavior states are present", RequiredBehaviorsExist);
             Run("Jump and DropDown utility states are reachable", UtilityActionsAreReachable);
+            Run("Obstacle contact makes an original jump attempt reachable", ObstacleJumpIsReachable);
             Run("Mouse locomotion requires explicit click attention", MouseLocomotionRequiresAttention);
             Run("Wall contact reaches gravity-driven WallClimb through VirtualInput", WallContactReachesClimbMovement);
             Run("WallClimb hands use alternating wall targets", WallClimbHandsTargetTheWall);
@@ -1128,6 +1129,24 @@ namespace RainWorldDesktopPet.Tests
             context.MouseDistance = 50.0;
             True(UtilityEvaluator.Score(DesktopBehavior.AvoidMouse, context, 0.0) > 0.0,
                 "near clicked mouse can select AvoidMouse");
+        }
+
+        private static void ObstacleJumpIsReachable()
+        {
+            UtilityContext obstacle = new UtilityContext
+            {
+                Grounded = true,
+                Curiosity = 1.0,
+                JumpReady = true,
+                ObstacleAhead = true,
+                ObstacleDirection = 1,
+                TransitionAvailable = false
+            };
+            True(UtilityEvaluator.Score(DesktopBehavior.Jump, obstacle, 0.0) > 0.0,
+                "a blocking wall enables a Player.Jump attempt without a platform route");
+            obstacle.JumpReady = false;
+            Near(0.0, UtilityEvaluator.Score(DesktopBehavior.Jump, obstacle, 0.0),
+                0.000001, "obstacle jump still respects the original jump cooldown");
         }
 
         private static void WallContactReachesClimbMovement()

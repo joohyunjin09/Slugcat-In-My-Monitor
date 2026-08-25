@@ -67,6 +67,9 @@ namespace RainWorldDesktopPet.AI
         private long explorationSurfaceId;
         private double explorationTargetX;
         private int explorationTargetTicks;
+        private int obstacleJumpAttemptTicks;
+        private int obstacleJumpDirection;
+        private bool obstacleJumpWasAirborne;
         private double fatigue = 0.18;
         private double curiosity = 0.65;
         private int jumpCooldownTicks;
@@ -88,6 +91,9 @@ namespace RainWorldDesktopPet.AI
         private int attentionRetargetCountdown;
         private bool specialTransitionArmed;
         private long specialTransitionTargetSurfaceId;
+        private bool saintTransitionArmed;
+        private bool saintAwaitingJumpRelease;
+        private int saintAttachedTicks;
         private bool originalAttentionInitialized;
         private AttentionKind originalAttentionKind;
         private Vec2 originalAttentionTarget;
@@ -169,6 +175,7 @@ namespace RainWorldDesktopPet.AI
             UtilityContext context = BuildContext(slugcat, world, mouse);
             context.MouseAttentionActive = IsMouseAttentionActive(slugcat,
                 mouseAttention);
+            UpdateObstacleResponse(slugcat, world, context);
             LastContext = context;
             if (--evaluationCountdown <= 0)
             {
@@ -267,6 +274,12 @@ namespace RainWorldDesktopPet.AI
             }
             ResetSpearmasterState();
 
+            SaintAbilityController saint =
+                slugcat.AbilityController as SaintAbilityController;
+            if (saint != null)
+                return ProduceSaintInput(slugcat, saint, context, out input);
+            ResetSaintTransition();
+
             ArtificerAbilityController artificer =
                 slugcat.AbilityController as ArtificerAbilityController;
             if (artificer == null)
@@ -305,6 +318,65 @@ namespace RainWorldDesktopPet.AI
             return false;
         }
 
+        private bool ProduceSaintInput(Slugcat slugcat,
+            SaintAbilityController saint, UtilityContext context,
+            out VirtualInput input)
+        {
+            input = VirtualInput.Neutral;
+            if (saint.Mode == SaintTongueMode.AttachedToTerrain)
+            {
+                saintTransitionArmed = false;
+                saintAwaitingJumpRelease = false;
+                saintAttachedTicks++;
+                if (saintAttachedTicks >= 80)
+                {
+                    saintAttachedTicks = 0;
+                    Behavior = DesktopBehavior.TongueSwing;
+                    // The original tongue release is a fresh jump edge.
+                    input = new VirtualInput(desiredDirection, 0, true, false);
+                    return true;
+                }
+
+                bool anchorAbove = saint.TonguePosition.Y < slugcat.Center.Y - 12.0;
+                input = new VirtualInput(desiredDirection, anchorAbove ? -1 : 0,
+                    false, false);
+                return true;
+            }
+            saintAttachedTicks = 0;
+            if (saint.Mode != SaintTongueMode.Retracted) return false;
+
+            if (context.Grounded && Behavior == DesktopBehavior.Jump &&
+                behaviorTicks <= 8 && RequiresTongueTransition())
+            {
+                saintTransitionArmed = true;
+                saintAwaitingJumpRelease = false;
+                return false;
+            }
+            if (!saintTransitionArmed) return false;
+            if (context.Grounded || !slugcat.State.Conscious)
+            {
+                if (context.Grounded) ResetSaintTransition();
+                return false;
+            }
+
+            // SaintTongueCheck needs a new jump edge after Player.Jump's
+            // airborne grace. First release the held launch input, then wait
+            // for CanJump to reach the same state the game DLL checks.
+            if (!saintAwaitingJumpRelease || slugcat.LastInput.Jump ||
+                slugcat.State.CanJump > 0)
+            {
+                saintAwaitingJumpRelease = true;
+                input = new VirtualInput(desiredDirection, 0, false, false);
+                return true;
+            }
+
+            saintTransitionArmed = false;
+            saintAwaitingJumpRelease = false;
+            Behavior = DesktopBehavior.TongueSwing;
+            input = new VirtualInput(desiredDirection, 0, true, false);
+            return true;
+        }
+
         private bool RequiresExplosiveTransition()
         {
             // Standard desktop path jumps are planned inside the normal
@@ -318,6 +390,21 @@ namespace RainWorldDesktopPet.AI
                 TransitionPlan.IsValid &&
                 (Math.Abs(TransitionPlan.HorizontalDistance) >= 64.0 ||
                  TransitionPlan.VerticalDistance <= -24.0);
+        }
+
+        private bool RequiresTongueTransition()
+        {
+            return TransitionPlan.Mode == PlatformTransitionMode.TongueSwing &&
+                TransitionPlan.IsValid &&
+                (Math.Abs(TransitionPlan.HorizontalDistance) >= 54.0 ||
+                 TransitionPlan.VerticalDistance <= -25.0);
+        }
+
+        private void ResetSaintTransition()
+        {
+            saintTransitionArmed = false;
+            saintAwaitingJumpRelease = false;
+            saintAttachedTicks = 0;
         }
 
         private bool ProduceSpearmasterInput(Slugcat slugcat,
@@ -529,6 +616,10 @@ namespace RainWorldDesktopPet.AI
                 wallContactGraceTicks--;
             }
             context.WallContact = wallContactGraceTicks > 0;
+            context.ObstacleDirection = contactRight ? 1 : (contactLeft ? -1 : 0);
+            context.ObstacleAhead = context.Grounded &&
+                context.ObstacleDirection != 0 &&
+                context.ObstacleDirection == desiredDirection;
             context.OnWindow = slugcat.PrimarySupportingSurfaceId > 0;
             context.MouseDistance = Vec2.Distance(slugcat.Center, mouse.Position);
             context.MouseSpeed = mouse.Velocity.Length;
@@ -595,6 +686,15 @@ namespace RainWorldDesktopPet.AI
                 }
                 if (best == DesktopBehavior.Jump)
                 {
+                    if (context.ObstacleAhead)
+                    {
+                        // Keep one original Player.Jump attempt in flight.
+                        // If the same wall still blocks the landing, the
+                        // response below chooses a new interior destination.
+                        obstacleJumpAttemptTicks = 48;
+                        obstacleJumpDirection = context.ObstacleDirection;
+                        obstacleJumpWasAirborne = false;
+                    }
                     jumpCooldownTicks = 240;
                     RememberTransition(TransitionPlan);
                 }
@@ -679,8 +779,61 @@ namespace RainWorldDesktopPet.AI
             desiredDirection = explorationTargetX < centerX ? -1 : 1;
         }
 
+        private void UpdateObstacleResponse(Slugcat slugcat,
+            DesktopCollisionWorld world, UtilityContext context)
+        {
+            if (obstacleJumpAttemptTicks <= 0) return;
+            obstacleJumpAttemptTicks--;
+            if (!context.Grounded)
+            {
+                obstacleJumpWasAirborne = true;
+                return;
+            }
+            if (!context.ObstacleAhead)
+            {
+                obstacleJumpAttemptTicks = 0;
+                return;
+            }
+            if (!obstacleJumpWasAirborne && obstacleJumpAttemptTicks > 0) return;
+
+            // The jump did not clear its blocking wall. SlugNPCAI abandons a
+            // failed connection and evaluates another destination rather
+            // than continuing to run into the same collision.
+            SelectObstacleBypass(slugcat, world, obstacleJumpDirection);
+            obstacleJumpAttemptTicks = 0;
+            obstacleJumpWasAirborne = false;
+            Behavior = DesktopBehavior.Explore;
+            behaviorTicks = 0;
+        }
+
+        private void SelectObstacleBypass(Slugcat slugcat,
+            DesktopCollisionWorld world, int obstacleDirection)
+        {
+            DesktopSurface surface;
+            if (!world.TryGetSurface(slugcat.PrimarySupportingSurfaceId,
+                slugcat.PrimarySupportingSurfaceKind, out surface) ||
+                !surface.IsHorizontal)
+                return;
+
+            double width = surface.Right - surface.Left;
+            double margin = Math.Min(80.0, width * 0.18);
+            if (margin < 12.0) margin = 12.0;
+            double left = surface.Left + margin;
+            double right = surface.Right - margin;
+            if (right <= left) return;
+
+            explorationSurfaceId = surface.Id;
+            explorationTargetX = obstacleDirection > 0 ? left : right;
+            explorationTargetTicks = 160 + random.Next(0, 161);
+            desiredDirection = obstacleDirection > 0 ? -1 : 1;
+        }
+
         private VirtualInput ProduceInput(Slugcat slugcat, MouseTracker mouse, UtilityContext context)
         {
+            if (obstacleJumpAttemptTicks > 0 && context.ObstacleAhead &&
+                Behavior != DesktopBehavior.Jump)
+                return VirtualInput.Neutral;
+
             int towardMouse = mouse.Position.X < slugcat.Center.X ? -1 : 1;
             switch (Behavior)
             {

@@ -7,6 +7,8 @@ namespace RainWorldDesktopPet.AI
     {
         public bool Grounded;
         public bool WallContact;
+        public bool ObstacleAhead;
+        public int ObstacleDirection;
         public bool OnWindow;
         public double MouseDistance;
         public double MouseSpeed;
@@ -85,10 +87,12 @@ namespace RainWorldDesktopPet.AI
                         : 0.0;
                     break;
                 case DesktopBehavior.Jump:
-                    score = context.Grounded && context.TransitionAvailable &&
-                            context.JumpReady && context.Curiosity > 0.5
+                    score = context.Grounded && context.JumpReady &&
+                            context.Curiosity > 0.5 &&
+                            (context.TransitionAvailable || context.ObstacleAhead)
                         ? 0.52 + context.Curiosity * 0.34 + context.PersonalityBravery *
-                            0.34 + context.PersonalityEnergy * 0.16
+                            0.34 + context.PersonalityEnergy * 0.16 +
+                            (context.ObstacleAhead ? 0.14 : 0.0)
                         : 0.0;
                     break;
                 case DesktopBehavior.ClimbWindow:
