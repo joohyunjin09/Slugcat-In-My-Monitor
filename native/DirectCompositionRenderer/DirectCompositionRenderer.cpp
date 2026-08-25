@@ -92,24 +92,29 @@ float4 PSMain(PixelInput input) : SV_TARGET { float2 p=input.uv*2-1;
     // while the major noise layers remain screen-axis aligned like vanilla.
     float dist=saturate(1-length(p));
     const float rain=.5; const float tau=6.28318530718;
+    // The original samples dense _NoiseTex/_NoiseTex2 textures. Procedural
+    // value noise uses one lattice cell per coordinate unit, so give it a
+    // texture-like sampling density instead of letting a few huge cells span
+    // the entire desktop and merge the smoke into rounded blobs.
+    const float noiseTexelDensity=64.0;
     // SpriteRenderer adds (Lifetime % 97) * .113 to the smoke seed.
     // Remove that integer lifetime component here so one particle keeps the
     // same procedural identity for its entire life.
     float stableSeed=frac(input.seed/.113);
     stableSeed=floor(stableSeed*1024+.5)/1024;
-    float h=sin((1.77*rain+Noise(float2(
-        textCoord.x*5.2+stableSeed*7,
-        rain*.1+textCoord.y*2.6+stableSeed*13))*3)*tau)*.5+.5;
-    h*=sin((3.5*rain+Noise(float2(
-        textCoord.x*12.2+stableSeed*19,
-        rain*.25+textCoord.y*6.6+stableSeed*3))*3)*tau)*.5+.5;
+    float h=sin((1.77*rain+Noise(
+        float2(textCoord.x*5.2,rain*.1+textCoord.y*2.6)*noiseTexelDensity+
+        stableSeed*float2(7,13))*3)*tau)*.5+.5;
+    h*=sin((3.5*rain+Noise(
+        float2(textCoord.x*12.2,rain*.25+textCoord.y*6.6)*noiseTexelDensity+
+        stableSeed*float2(19,3))*3)*tau)*.5+.5;
     // Vanilla keeps one local-UV noise layer, so rotation still adds a small
     // amount of organic variation without rotating the entire smoke mass.
-    h*=.5+.5*sin((Noise(input.uv+stableSeed*float2(11,17))+
-        rain)*tau*3);
+    h*=.5+.5*sin((Noise(input.uv*noiseTexelDensity+
+        stableSeed*float2(11,17))+rain)*tau*3);
     h=lerp(h*dist,lerp(h,1,lerp(.3,.8,input.color.a)),dist);
-    h-=Noise(float2(textCoord.x*15.2+stableSeed*5,
-        rain*.1+textCoord.y*7.6+stableSeed*23))*
+    h-=Noise(float2(textCoord.x*15.2,rain*.1+textCoord.y*7.6)*
+        noiseTexelDensity+stableSeed*float2(5,23))*
         lerp(.7,.3,input.color.a);
     float cutoff=h*input.color.a;
     clip(cutoff-.35);
