@@ -34,9 +34,11 @@ jobs:
 
           Replace-One '\? 195\.0 : \(slugcat\.AbilityController is ArtificerAbilityController \? 250\.0 : 105\.0\);' '? 220.0 : (slugcat.AbilityController is ArtificerAbilityController ? 250.0 : 105.0);' 'Saint traversal range'
           Replace-One '0\.34, 0\.72, 0\.32, 0\.22, 0\.90, 0\.62, 0\.88, 0\.18, 0\.64, 0\.94, 0\.72, 0\.86, 0\.18, 0\.62\);' '0.34, 0.72, 0.32, 0.22, 0.90, 0.62, 0.88, 0.18, 0.64, 0.94, 0.72, 0.86, 0.18, 0.82);' 'Saint special-use profile'
-          Replace-One 'Math\.Abs\(TransitionPlan\.HorizontalDistance\) >= 42\.0 \|\|\r?\n\s+TransitionPlan\.VerticalDistance <= -20\.0' 'Math.Abs(TransitionPlan.HorizontalDistance) >= 28.0 ||`r`n                 TransitionPlan.VerticalDistance <= -12.0' 'Saint planned tongue threshold'
+          $plannedReplacement = 'Math.Abs(TransitionPlan.HorizontalDistance) >= 28.0 ||' + [Environment]::NewLine + '                 TransitionPlan.VerticalDistance <= -12.0'
+          Replace-One 'Math\.Abs\(TransitionPlan\.HorizontalDistance\) >= 42\.0 \|\|\r?\n\s+TransitionPlan\.VerticalDistance <= -20\.0' $plannedReplacement 'Saint planned tongue threshold'
           Replace-One 'saintFreestyleCooldownTicks = SecondsToTicks\(SampleCentered\(1\.6, 4\.0\)\);' 'saintFreestyleCooldownTicks = SecondsToTicks(SampleCentered(0.9, 2.2));' 'Saint freestyle cooldown'
-          Replace-One 'return MathUtil\.Clamp01\(0\.12 \+ curiosity \* 0\.10 \+\r?\n\s+playfulness \* 0\.07 \+ traitSpecialUse \* 0\.09 \+\r?\n\s+\(mood == AIMood\.Curious \? 0\.05 : 0\.0\)\);' 'return MathUtil.Clamp01(0.28 + curiosity * 0.16 +`r`n                playfulness * 0.10 + traitSpecialUse * 0.18 +`r`n                (mood == AIMood.Curious ? 0.08 : 0.0));' 'Saint freestyle chance'
+          $chanceReplacement = 'return MathUtil.Clamp01(0.28 + curiosity * 0.16 +' + [Environment]::NewLine + '                playfulness * 0.10 + traitSpecialUse * 0.18 +' + [Environment]::NewLine + '                (mood == AIMood.Curious ? 0.08 : 0.0));'
+          Replace-One 'return MathUtil\.Clamp01\(0\.12 \+ curiosity \* 0\.10 \+\r?\n\s+playfulness \* 0\.07 \+ traitSpecialUse \* 0\.09 \+\r?\n\s+\(mood == AIMood\.Curious \? 0\.05 : 0\.0\)\);' $chanceReplacement 'Saint freestyle chance'
 
           [IO.File]::WriteAllText($path, $text, [Text.UTF8Encoding]::new($false))
 
