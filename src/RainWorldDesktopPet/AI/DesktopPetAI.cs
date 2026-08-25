@@ -163,6 +163,8 @@ namespace RainWorldDesktopPet.AI
             curiosity = MathUtil.Clamp01(curiosity + CuriosityDelta(Behavior));
 
             UtilityContext context = BuildContext(slugcat, world, mouse);
+            context.MouseAttentionActive = IsMouseAttentionActive(slugcat,
+                mouseAttention);
             LastContext = context;
             if (--evaluationCountdown <= 0)
             {
@@ -638,9 +640,13 @@ namespace RainWorldDesktopPet.AI
                     }
                     return new VirtualInput(desiredDirection, 0, false, false);
                 case DesktopBehavior.FollowMouse:
-                    return new VirtualInput(towardMouse, 0, context.Grounded && mouse.Position.Y < slugcat.Center.Y - 80.0, false);
+                    if (!context.MouseAttentionActive) return VirtualInput.Neutral;
+                    return new VirtualInput(towardMouse, 0, context.Grounded &&
+                        mouse.Position.Y < slugcat.Center.Y - 80.0, false);
                 case DesktopBehavior.AvoidMouse:
-                    return new VirtualInput(-towardMouse, 0, context.Grounded && context.MouseDistance < 55.0, false);
+                    if (!context.MouseAttentionActive) return VirtualInput.Neutral;
+                    return new VirtualInput(-towardMouse, 0, context.Grounded &&
+                        context.MouseDistance < 55.0, false);
                 case DesktopBehavior.Jump:
                     return new VirtualInput(desiredDirection, 0, behaviorTicks <= 8, false);
                 case DesktopBehavior.ClimbWindow:
@@ -692,13 +698,19 @@ namespace RainWorldDesktopPet.AI
                 attentionRetargetCountdown = 40 + random.Next(0, 160);
             }
 
-            MouseAttentionActive = slugcat.State.Conscious && !slugcat.State.Dead &&
-                slugcat.State.StunCounter < 1 &&
-                mouseAttention != null && mouseAttention.IsActive;
+            MouseAttentionActive = IsMouseAttentionActive(slugcat, mouseAttention);
             if (MouseAttentionActive)
                 Attention.SetTarget(AttentionKind.Mouse, mouse.Position);
             else
                 Attention.SetTarget(originalAttentionKind, originalAttentionTarget);
+        }
+
+        private static bool IsMouseAttentionActive(Slugcat slugcat,
+            MouseAttentionState mouseAttention)
+        {
+            return slugcat.State.Conscious && !slugcat.State.Dead &&
+                slugcat.State.StunCounter < 1 && mouseAttention != null &&
+                mouseAttention.IsActive;
         }
 
         private static int MinimumTicks(DesktopBehavior behavior)

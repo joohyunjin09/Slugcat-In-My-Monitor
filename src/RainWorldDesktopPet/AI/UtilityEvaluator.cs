@@ -16,6 +16,10 @@ namespace RainWorldDesktopPet.AI
         public double BehaviorAgeSeconds;
         public double Stillness;
         public int SaferDirection;
+        // Mouse locomotion is an explicit interaction.  Passive cursor
+        // proximity must not make every autonomous Slugcat converge on the
+        // same screen coordinate.
+        public bool MouseAttentionActive;
         public bool JumpReady;
         public bool DropReady;
         public bool RestReady = true;
@@ -68,13 +72,14 @@ namespace RainWorldDesktopPet.AI
                         context.PersonalityNervous * 0.18;
                     break;
                 case DesktopBehavior.FollowMouse:
-                    score = context.MouseDistance > 90.0 && context.MouseDistance < 650.0
+                    score = context.MouseAttentionActive &&
+                        context.MouseDistance > 90.0 && context.MouseDistance < 650.0
                         ? 0.12 + context.Curiosity * 0.40 + context.PersonalityAggression *
                             0.18 + MathUtil.InverseLerp(650.0, 140.0, context.MouseDistance) * 0.25
-                        : 0.02;
+                        : 0.0;
                     break;
                 case DesktopBehavior.AvoidMouse:
-                    score = context.MouseDistance < 105.0
+                    score = context.MouseAttentionActive && context.MouseDistance < 105.0
                         ? 0.62 + context.PersonalityNervous * 0.30 +
                             MathUtil.InverseLerp(105.0, 20.0, context.MouseDistance) * 0.5 + MathUtil.Clamp01(context.MouseSpeed / 1400.0) * 0.25
                         : 0.0;

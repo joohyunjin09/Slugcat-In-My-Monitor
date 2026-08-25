@@ -79,6 +79,7 @@ namespace RainWorldDesktopPet.Tests
             Run("Rain World locator validates an explicit installation", LocatorValidatesExplicitPath);
             Run("Required autonomous behavior states are present", RequiredBehaviorsExist);
             Run("Jump and DropDown utility states are reachable", UtilityActionsAreReachable);
+            Run("Mouse locomotion requires explicit click attention", MouseLocomotionRequiresAttention);
             Run("Wall contact reaches gravity-driven WallClimb through VirtualInput", WallContactReachesClimbMovement);
             Run("WallClimb hands use alternating wall targets", WallClimbHandsTargetTheWall);
             Run("Sleep curl pulls both hands to the original target", SleepCurlHandsShareOriginalTarget);
@@ -1101,6 +1102,32 @@ namespace RainWorldDesktopPet.Tests
                 "Jump cooldown gate");
             Near(0.0, UtilityEvaluator.Score(DesktopBehavior.DropDown, drop, 0.0), 0.000001,
                 "DropDown cooldown gate");
+        }
+
+        private static void MouseLocomotionRequiresAttention()
+        {
+            UtilityContext context = new UtilityContext
+            {
+                Grounded = true,
+                MouseDistance = 180.0,
+                Curiosity = 0.8,
+                PersonalityAggression = 0.8,
+                PersonalityNervous = 0.8
+            };
+            Near(0.0, UtilityEvaluator.Score(DesktopBehavior.FollowMouse, context, 0.0),
+                0.000001, "passive cursor proximity cannot select FollowMouse");
+
+            context.MouseDistance = 50.0;
+            Near(0.0, UtilityEvaluator.Score(DesktopBehavior.AvoidMouse, context, 0.0),
+                0.000001, "passive cursor proximity cannot select AvoidMouse");
+
+            context.MouseAttentionActive = true;
+            context.MouseDistance = 180.0;
+            True(UtilityEvaluator.Score(DesktopBehavior.FollowMouse, context, 0.0) > 0.0,
+                "near clicked mouse can select FollowMouse");
+            context.MouseDistance = 50.0;
+            True(UtilityEvaluator.Score(DesktopBehavior.AvoidMouse, context, 0.0) > 0.0,
+                "near clicked mouse can select AvoidMouse");
         }
 
         private static void WallContactReachesClimbMovement()
