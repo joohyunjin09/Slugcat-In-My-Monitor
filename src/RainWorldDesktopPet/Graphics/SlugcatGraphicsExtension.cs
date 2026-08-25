@@ -326,18 +326,14 @@ namespace RainWorldDesktopPet.Graphics
                     {
                         if (row == selectedRow && line == selectedLine)
                         {
-                            part.ScaleX *= 1.0 + spearProgress * 2.0;
-                            part.ScaleY *= 1.0 + spearProgress * 2.0;
+                            // TailSpeckles.DrawSprites enlarges its selected
+                            // tinyStar while a needle is extracted.  The
+                            // desktop sprite is visibly a white marker rather
+                            // than a subtle tail speckle, so retain its base
+                            // scale while preserving the original slot,
+                            // placement, tint and progress timing.
                             selectedSpine = spine;
                             selectedPosition = part.RenderPosition;
-                        }
-                        else if ((row == selectedRow + 1 && line == selectedLine) ||
-                            (row == selectedRow - 1 && line == selectedLine) ||
-                            (row == selectedRow && line == selectedLine + 1) ||
-                            (row == selectedRow && line == selectedLine - 1))
-                        {
-                            part.ScaleX *= 1.0 + spearProgress;
-                            part.ScaleY *= 1.0 + spearProgress;
                         }
                     }
                     part.AnchorX = 0.5;
@@ -363,6 +359,8 @@ namespace RainWorldDesktopPet.Graphics
                 if (direction.Normalized.Y < -0.35) direction *= -1.0;
                 spear.Rotation = VecToDegrees(direction);
                 spear.ScaleX = 1.0;
+                // TailSpeckles renders the white BioSpear emerging from the
+                // selected slot; retain the original progress-driven length.
                 spear.ScaleY = -spearProgress * 0.5;
                 spear.AnchorX = 0.5;
                 spear.AnchorY = 0.0;

@@ -40,16 +40,40 @@
 
 지형 충돌은 시간 debounce로 막지 않는다.
 
-1. `Thrown`의 투척 방향 최초 접촉만 검사한다.
-2. speed 10 이상이며 throw 지점에서 140 미만이거나 33% stick 판정을 통과하면 `StuckInWall` + `Spear_Stick_In_Wall`이다.
-3. 실패하면 `Free` + `Spear_Bounce_Off_Wall` + 7 Spark다.
-4. 이미 `Free`인 접촉은 bounce sound를 다시 만들지 않는다.
-5. `Free`가 바닥에서 20 tick 정지하면 `StuckInGround` + `Spear_Stick_In_Ground`다.
+1. `Thrown` 상태에서는 투척 방향과 정렬된 최초 지형 접촉만 wall-stick 후보로 검사한다.
+2. impact speed가 10 이상이며 throw 지점에서 140 미만이거나 33% stick 판정을 통과하면 `StuckInWall` + `Spear_Stick_In_Wall`이다.
+3. wall-stick 판정에 실패하면 `Free`로 전환하고 원본 범위의 회전을 시작하며 `Spear_Bounce_Off_Wall` + 7 Spark를 발생시킨다.
+4. 수평 투척 등에서 바닥 접촉이 투척 방향과 정렬되지 않은 경우에는 `StuckInWall`로 남지 않고 `Free`로 전환한다.
+5. `Free` 상태의 창은 별도의 `StuckInGround` mode를 사용하지 않는다. 원작 `Weapon.Mode`와 같이 `Free` 상태를 유지한 채 회전을 멈추고 원본의 지면 정착 각도 범위 `-50..50° + 180°`를 데스크톱 Y-down 좌표계로 변환하여 대각선 방향으로 놓인다.
+6. 지면 정착 시 `Spear_Stick_In_Ground`를 한 번 발생시키며, 이후 정지한 `Free` 상태의 창은 같은 충돌음을 반복해서 생성하지 않는다.
+7. 던져진 Spearmaster needle은 15초 동안 유지되며 마지막 0.5초 동안 자연스럽게 fade한 뒤 제거된다.
 
-비행 loop는 `Thrown`에서 `Spear_Thrown_Through_Air_LOOP`, `Free`에서 `Spear_Spinning_Through_Air_LOOP`이며 mode 전이에서 실제 audio loop를 시작/정지한다. release는 `Slugcat_Throw_Spear`다.
+connected needle의 `Spear.Umbilical`은 투척 시 10-19개의 segment로 생성된다. 각 segment는 원작과 같이 life 2에서 시작하고 150-200 tick 범위의 개별 decay를 가진다. needle이 disconnect되어도 umbilical 전체를 즉시 제거하지 않고 각 segment의 life가 소진될 때까지 끊어지는 형태로 남는다.
+
+비행 loop는 `Thrown`에서 `Spear_Thrown_Through_Air_LOOP`, 회전 중인 `Free`에서 `Spear_Spinning_Through_Air_LOOP`을 사용한다. mode와 속도 상태가 바뀌면 해당 loop도 종료된다. release sound는 `Slugcat_Throw_Spear`다.
 
 ## AI와 검증
 
-자율 행동은 `Idle`, `Moving`, `PreparingSpear`, `PullingSpear`, `HoldingSpear`, `Aiming`, `Throwing`, `Recovering` 상태를 사용한다. 타깃이 없으면 창을 든 채 유지하고, 유효 거리 밖이면 이동한 뒤 충분한 aim/recovery 시간을 거친다.
+Spearmaster의 자율 행동은 `Idle`, `Moving`, `PreparingSpear`, `PullingSpear`, `HoldingSpear`, `Aiming`, `Throwing`, `Recovering` 상태를 사용한다.
 
-Release replay는 effect 수명/개수, needle flag/damage/umbilical, throw/flight SoundID, AI 전 상태, targetless hold, 장거리 wall bounce 뒤 반복 sound가 없음을 검증한다.
+AI는 일정 시간이 지나면 확률 gate에 막히지 않고 반드시 명시적인 needle extraction sequence에 진입한다. 생성된 창은 즉시 던지지 않고 `HoldingSpear` 상태로 유지한다.
+
+마우스 click-attention으로 유효한 타깃이 들어오면 원작의 방향 정렬 과정을 따라 `Aiming -> Throwing`으로 전환할 수 있다. 타깃 거리는 약 50-550 범위에서 유효하며, AI는 먼저 타깃 방향으로 몸을 돌린 뒤 다음 정렬된 update에서 throw input을 발생시킨다.
+
+마우스 타깃이 없는 경우에도 창을 영구적으로 들고 있지는 않는다. 각 Spearmaster 개체는 `HoldingSpear` 진입 시 독립적인 자율 투척 cooldown을 가지며, cooldown이 끝나면 현재 facing을 중심으로 로컬 타깃을 생성하여 동일한 `Aiming -> Throwing` sequence를 수행한다. 따라서 여러 Spearmaster가 동시에 존재해도 동일한 시점에 창을 뽑거나 던지도록 강제되지 않는다.
+
+투척 후에는 짧은 `Recovering` 상태를 거쳐 다시 `Idle`로 돌아가며, 다음 spear extraction까지의 대기 시간은 개체별로 달라진다.
+
+Release replay는 다음을 검증한다.
+
+- Artificer effect의 생성 개수와 수명
+- needle flag, damage bonus, umbilical 생성 및 disconnect 후 decay
+- throw/flight SoundID와 지형 충돌 sound
+- Spearmaster extraction의 원본 progress timing
+- tail marker와 `BioSpear` 성장 표현
+- 투척 속도, 중력, 반동과 5-tick hand follow-through
+- 던져진 needle의 15초 lifespan과 마지막 0.5초 fade
+- `Free` spear의 원본 대각선 지면 정착 각도
+- `Idle -> Moving -> PreparingSpear -> PullingSpear -> HoldingSpear -> Aiming -> Throwing -> Recovering` 상태 전이
+- 마우스 타깃이 없는 상태에서도 cooldown 이후 자율 투척이 발생하는지
+- 장거리 wall bounce 후 동일 충돌 sound가 반복되지 않는지

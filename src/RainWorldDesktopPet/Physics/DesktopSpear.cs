@@ -5,15 +5,14 @@ using RainWorldDesktopPet.Desktop;
 
 namespace RainWorldDesktopPet.Physics
 {
-    // Weapon.Mode plus Spear's two terrain-resting outcomes. A mode transition,
-    // rather than a sound timer, owns every one-shot collision sound.
+    // Rain World's Weapon.Mode has no ground-stuck state: Spear leaves a
+    // floor-resting weapon in Free mode after it stops spinning.
     public enum DesktopSpearMode
     {
         Held,
         Thrown,
         Free,
         StuckInWall,
-        StuckInGround,
         StuckInCreature
     }
 
@@ -29,10 +28,14 @@ namespace RainWorldDesktopPet.Physics
         private static int nextAudioLoopId;
         private Vec2 thrownPosition;
         private int stillTicks;
+        private int despawnAfterTicks = -1;
+        private int despawnFadeTicks;
+        private bool spinning;
         private Vec2[] umbilical;
         private Vec2[] lastUmbilical;
         private Vec2[] umbilicalVelocity;
-        private double umbilicalSegmentLength;
+        private double[] umbilicalLife;
+        private double[] umbilicalLifeDecay;
 
         public DesktopSpear(Vec2 position)
             : this(position, 0)
@@ -61,6 +64,7 @@ namespace RainWorldDesktopPet.Physics
         public Vec2 LastRotation { get; private set; }
         public bool InFrontOfPlayer { get; private set; }
         public double RotationSpeed { get; private set; }
+        public bool IsSpinning { get { return spinning; } }
         public int NeedleType { get; private set; }
         public bool IsSpearmasterNeedle { get; private set; }
         public bool NeedleHasConnection { get; private set; }
@@ -71,6 +75,21 @@ namespace RainWorldDesktopPet.Physics
         public long StuckSurfaceId { get; private set; }
         public DesktopSurfaceKind StuckSurfaceKind { get; private set; }
         public int Age { get; private set; }
+        public int DespawnAfterTicks { get { return despawnAfterTicks; } }
+        public bool IsExpired
+        {
+            get { return despawnAfterTicks >= 0 && Age >= despawnAfterTicks; }
+        }
+        public double Opacity
+        {
+            get
+            {
+                if (despawnAfterTicks < 0 || despawnFadeTicks <= 0 ||
+                    Age <= despawnAfterTicks - despawnFadeTicks) return 1.0;
+                return MathUtil.Clamp01((despawnAfterTicks - Age) /
+                    (double)despawnFadeTicks);
+            }
+        }
         public string LastImpactSound { get; private set; }
         public string AudioLoopKey { get; private set; }
         public int ImpactSparkCount { get; private set; }
@@ -92,10 +111,11 @@ namespace RainWorldDesktopPet.Physics
         }
         public bool HasUmbilical
         {
-            get { return umbilical != null && NeedleHasConnection; }
+            get { return umbilical != null; }
         }
         public Vec2[] Umbilical { get { return umbilical; } }
         public Vec2[] LastUmbilical { get { return lastUmbilical; } }
+        public double[] UmbilicalLife { get { return umbilicalLife; } }
 
         public void SetCreationVelocity(Vec2 velocity)
         {
@@ -147,6 +167,12 @@ namespace RainWorldDesktopPet.Physics
             InFrontOfPlayer = true;
         }
 
+        public void SetDespawnAfterTicks(int ticks, int fadeTicks)
+        {
+            despawnAfterTicks = Math.Max(0, ticks);
+            despawnFadeTicks = MathUtil.Clamp(fadeTicks, 0, despawnAfterTicks);
+        }
+
         public void SetOverlap(bool inFront)
         {
             InFrontOfPlayer = inFront;
@@ -157,9 +183,6 @@ namespace RainWorldDesktopPet.Physics
             if (!NeedleHasConnection) return;
             NeedleHasConnection = false;
             NeedleFade = NeedleFadeMaximum;
-            umbilical = null;
-            lastUmbilical = null;
-            umbilicalVelocity = null;
         }
 
         public bool HitCreature(bool sticks, bool shell)
@@ -169,7 +192,7 @@ namespace RainWorldDesktopPet.Physics
             {
                 ChangeMode(DesktopSpearMode.Free);
                 Chunk.Velocity *= -0.5;
-                RotationSpeed = RandomRotationSpeed();
+                SetRandomSpin();
                 LastImpactSound = "Spear_Bounce_Off_Creauture_Shell";
                 return true;
             }
@@ -191,6 +214,19 @@ namespace RainWorldDesktopPet.Physics
             LastImpactSound = null;
             ImpactSparkCount = 0;
             if (!NeedleHasConnection && NeedleFade > 0) NeedleFade--;
+            if (Mode != DesktopSpearMode.Held)
+            {
+                Age++;
+                if (IsExpired)
+                {
+                    ClearUmbilical();
+                    return false;
+                }
+            }
+            // Weapon.Update snapshots draw state before mode-specific physics.
+            // This must happen for Free as well as held/stuck spears so a
+            // stationary rotation never keeps interpolating from an old spin.
+            LastRotation = Rotation;
             if (Mode != DesktopSpearMode.Thrown && Mode != DesktopSpearMode.Free)
             {
                 FollowStuckSurface(world);
@@ -198,9 +234,7 @@ namespace RainWorldDesktopPet.Physics
                 return false;
             }
 
-            Age++;
             Chunk.BeginTick();
-            LastRotation = Rotation;
             Chunk.Integrate(Mode == DesktopSpearMode.Thrown
                 ? ThrownGravity : Gravity, AirFriction);
             world.Resolve(Chunk, world.CurrentSnapshot, 0, SurfaceFriction, Bounce);
@@ -228,32 +262,50 @@ namespace RainWorldDesktopPet.Physics
                         // Weapon.HitWall: the collision resolver already applied
                         // Spear.bounce=.4 and surfaceFriction=.4 exactly once.
                         ChangeMode(DesktopSpearMode.Free);
-                        RotationSpeed = RandomRotationSpeed();
+                        SetRandomSpin();
                         LastImpactSound = "Spear_Bounce_Off_Wall";
                         ImpactSparkCount = 7;
                     }
                     return true;
                 }
+
+                // Spear.Update only remains thrown when the terrain contact
+                // is aligned with throwDir and becomes a wall stick.  A floor
+                // contact from a horizontal throw is not aligned, so Weapon
+                // physics drops it into Free; Spear's spinning branch then
+                // chooses its diagonal ground-rest rotation.  Keeping it
+                // thrown skipped that branch and left the sprite horizontal.
+                if (Chunk.ContactFloor)
+                {
+                    ChangeMode(DesktopSpearMode.Free);
+                    SetRandomSpin();
+                }
             }
 
             if (Mode == DesktopSpearMode.Free)
             {
-                RotateFreeSpear();
-                bool restingOnGround = Chunk.ContactFloor &&
-                    Chunk.Velocity.LengthSquared < 0.01;
-                stillTicks = restingOnGround ? stillTicks + 1 : 0;
-                if (stillTicks > 20)
+                if (spinning)
                 {
-                    ChangeMode(DesktopSpearMode.StuckInGround);
-                    RotationSpeed = 0.0;
-                    double angle = (MathUtil.Lerp(-50.0, 50.0,
-                        random.NextDouble()) + 180.0) * Math.PI / 180.0;
-                    Rotation = new Vec2(Math.Cos(angle), Math.Sin(angle));
-                    Chunk.Velocity = Vec2.Zero;
-                    StuckSurfaceId = Chunk.SupportingSurfaceId;
-                    StuckSurfaceKind = Chunk.SupportingSurfaceKind;
-                    LastImpactSound = "Spear_Stick_In_Ground";
-                    return true;
+                    RotateFreeSpear();
+                    bool nearlyStill = Vec2.Distance(Chunk.LastPosition,
+                        Chunk.Position) < 4.0 * Gravity;
+                    stillTicks = nearlyStill ? stillTicks + 1 : 0;
+                    // Spear.Update retains Mode.Free after this transition.
+                    // It stops spin, applies the original diagonal rest angle,
+                    // and lets normal floor collision keep the spear at rest.
+                    if (Chunk.ContactFloor || stillTicks > 20)
+                    {
+                        spinning = false;
+                        RotationSpeed = 0.0;
+                        Rotation = CalculateOriginalGroundRestDirection(random.NextDouble());
+                        Chunk.Velocity = Vec2.Zero;
+                        LastImpactSound = "Spear_Stick_In_Ground";
+                        return true;
+                    }
+                }
+                else if (Vec2.Distance(Chunk.LastPosition, Chunk.Position) >= 6.0)
+                {
+                    SetRandomSpin();
                 }
             }
             return false;
@@ -272,8 +324,7 @@ namespace RainWorldDesktopPet.Physics
 
         private void FollowStuckSurface(DesktopCollisionWorld world)
         {
-            if ((Mode != DesktopSpearMode.StuckInWall &&
-                Mode != DesktopSpearMode.StuckInGround) || StuckSurfaceId == 0)
+            if (Mode != DesktopSpearMode.StuckInWall || StuckSurfaceId == 0)
                 return;
             DesktopSurface surface;
             if (!world.TryGetSurface(StuckSurfaceId, StuckSurfaceKind, out surface))
@@ -290,65 +341,100 @@ namespace RainWorldDesktopPet.Physics
 
         private void CreateUmbilical()
         {
+            // Spear.Umbilical is a one-shot cosmetic object in the original.
+            // The connection is not a taut rope: every segment starts with
+            // life 2 and separately decays over 150..200 ticks, leaving a
+            // visibly breaking trail after the needle detaches.
             int count = random.Next(10, 20);
             umbilical = new Vec2[count];
             lastUmbilical = new Vec2[count];
             umbilicalVelocity = new Vec2[count];
-            umbilicalSegmentLength = Math.Max(2.0,
-                Vec2.Distance(ConnectionAnchor, Chunk.Position) / (count - 1));
+            umbilicalLife = new double[count];
+            umbilicalLifeDecay = new double[count];
             for (int i = 0; i < count; i++)
             {
-                umbilical[i] = Vec2.Lerp(ConnectionAnchor, Chunk.Position,
-                    i / (double)(count - 1));
+                Vec2 randomOffset = RandomUnit() * random.NextDouble();
+                umbilical[i] = ConnectionAnchor + randomOffset;
                 lastUmbilical[i] = umbilical[i];
+                umbilicalVelocity[i] = Chunk.Velocity *
+                    (0.3 * random.NextDouble()) + RandomUnit() *
+                    (1.5 * random.NextDouble());
+                umbilicalLife[i] = 2.0;
+                umbilicalLifeDecay[i] = MathUtil.Lerp(150.0, 200.0,
+                    Math.Pow(random.NextDouble(), 0.3));
             }
         }
 
         private void StepUmbilical()
         {
-            if (!HasUmbilical) return;
+            if (umbilical == null) return;
             int last = umbilical.Length - 1;
+            bool anyAlive = false;
             for (int i = 0; i <= last; i++)
             {
                 lastUmbilical[i] = umbilical[i];
-                if (i == 0 || i == last) continue;
-                umbilicalVelocity[i].Y += 0.35;
-                umbilicalVelocity[i] *= 0.98;
+                double life = LifeOfUmbilicalSegment(i);
+                umbilicalVelocity[i] *= MathUtil.Lerp(0.99, 0.8,
+                    MathUtil.Clamp01((umbilicalVelocity[i].Length - 1.0) / 29.0));
+                // Rain World's world Y axis points up; desktop Y points down.
+                umbilicalVelocity[i].Y += MathUtil.Lerp(0.1, 0.6, life);
                 umbilical[i] += umbilicalVelocity[i];
-            }
-            umbilical[0] = ConnectionAnchor;
-            umbilical[last] = Chunk.Position;
-            for (int pass = 0; pass < 3; pass++)
-            {
-                for (int i = 0; i < last; i++)
+                if (i > 0 && Vec2.Distance(umbilical[i], umbilical[i - 1]) > 6.0)
                 {
-                    Vec2 delta = umbilical[i + 1] - umbilical[i];
-                    double distance = delta.Length;
-                    if (distance <= umbilicalSegmentLength || distance <= 0.000001)
-                        continue;
-                    Vec2 correction = delta.Normalized *
-                        (distance - umbilicalSegmentLength);
-                    if (i == 0)
-                        umbilical[i + 1] -= correction;
-                    else if (i + 1 == last)
-                        umbilical[i] += correction;
-                    else
-                    {
-                        umbilical[i] += correction * 0.5;
-                        umbilical[i + 1] -= correction * 0.5;
-                    }
+                    Vec2 correction = MathUtil.Direction(umbilical[i],
+                        umbilical[i - 1]) * (Vec2.Distance(umbilical[i],
+                        umbilical[i - 1]) - 6.0);
+                    umbilical[i] += correction * 0.15;
+                    umbilicalVelocity[i] += correction * 0.25;
+                    umbilical[i - 1] -= correction * 0.15;
+                    umbilicalVelocity[i - 1] -= correction * 0.25;
                 }
-                umbilical[0] = ConnectionAnchor;
-                umbilical[last] = Chunk.Position;
+                if (i > 1 && LifeOfUmbilicalSegment(i - 1) > 0.0)
+                {
+                    Vec2 pull = MathUtil.Direction(umbilical[i], umbilical[i - 2]);
+                    umbilicalVelocity[i] += pull * 0.6;
+                    umbilicalVelocity[i - 2] -= pull * 0.6;
+                }
+                umbilicalLife[i] -= 1.0 / umbilicalLifeDecay[i];
+                if (umbilicalLife[i] > 0.0) anyAlive = true;
             }
-            for (int i = 1; i < last; i++)
-                umbilicalVelocity[i] = umbilical[i] - lastUmbilical[i];
+            if (LifeOfUmbilicalSegment(0) > 0.0)
+            {
+                umbilical[0] = ConnectionAnchor;
+                umbilicalVelocity[0] = Vec2.Zero;
+            }
+            if (LifeOfUmbilicalSegment(last) > 0.0)
+            {
+                umbilical[last] = Chunk.Position - Rotation * 25.0;
+                umbilicalVelocity[last] = Vec2.Zero;
+            }
+            if (anyAlive) return;
+            ClearUmbilical();
+        }
+
+        private void ClearUmbilical()
+        {
+            umbilical = null;
+            lastUmbilical = null;
+            umbilicalVelocity = null;
+            umbilicalLife = null;
+            umbilicalLifeDecay = null;
+        }
+
+        private double LifeOfUmbilicalSegment(int index)
+        {
+            if (index <= 0) return umbilicalLife[0];
+            return Math.Min(umbilicalLife[index], umbilicalLife[index - 1]);
+        }
+
+        private Vec2 RandomUnit()
+        {
+            double angle = random.NextDouble() * Math.PI * 2.0;
+            return new Vec2(Math.Cos(angle), Math.Sin(angle));
         }
 
         private void RotateFreeSpear()
         {
-            if (Math.Abs(RotationSpeed) < 0.000001)
-                RotationSpeed = RandomRotationSpeed();
             double radians = RotationSpeed * Math.PI / 180.0;
             double cosine = Math.Cos(radians);
             double sine = Math.Sin(radians);
@@ -358,15 +444,31 @@ namespace RainWorldDesktopPet.Physics
 
         private double RandomRotationSpeed()
         {
-            double speed = MathUtil.Lerp(-100.0, 100.0, random.NextDouble());
-            if (Math.Abs(speed) < 10.0) speed = speed < 0.0 ? -10.0 : 10.0;
-            return speed;
+            double direction = random.NextDouble() < 0.5 ? -1.0 : 1.0;
+            return direction * MathUtil.Lerp(50.0, 150.0, random.NextDouble());
+        }
+
+        private void SetRandomSpin()
+        {
+            RotationSpeed = RandomRotationSpeed();
+            spinning = true;
+        }
+
+        public static Vec2 CalculateOriginalGroundRestDirection(double randomValue)
+        {
+            double angle = (MathUtil.Lerp(-50.0, 50.0, randomValue) + 180.0) *
+                Math.PI / 180.0;
+            // RWCustom.Custom.DegToVec uses (sin(angle), cos(angle)), with
+            // zero degrees pointing up in its y-up world. Reflect only its
+            // y component for the desktop's y-down coordinate system.
+            return new Vec2(Math.Sin(angle), -Math.Cos(angle));
         }
 
         private void ChangeMode(DesktopSpearMode mode)
         {
             Mode = mode;
             stillTicks = 0;
+            if (mode != DesktopSpearMode.Free) spinning = false;
         }
     }
 }
