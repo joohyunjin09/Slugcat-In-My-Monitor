@@ -76,14 +76,21 @@ float4 PSMain(PixelInput input) : SV_TARGET { float2 p=input.uv*2-1;
         return float4(input.color.rgb*alpha,alpha); }
     float dist=saturate(1-length(p)); float2 stableUv=input.uv;
     const float rain=.5; const float tau=6.28318530718;
+    // SpriteRenderer adds (Lifetime % 97) * .113 to the smoke seed.
+    // Remove that integer lifetime component here so one particle keeps the
+    // same procedural mask for its entire life instead of re-rolling noise
+    // every simulation tick. Quantization prevents float roundoff from
+    // occasionally crossing frac() boundaries.
+    float stableSeed=frac(input.seed/.113);
+    stableSeed=floor(stableSeed*1024+.5)/1024;
     float h=sin((1.77*rain+Noise(stableUv*5.2+
-        input.seed*float2(7,13))*3)*tau)*.5+.5;
+        stableSeed*float2(7,13))*3)*tau)*.5+.5;
     h*=sin((3.5*rain+Noise(stableUv*12.2+
-        input.seed*float2(19,3))*3)*tau)*.5+.5;
-    h*=.5+.5*sin((Noise(stableUv+input.seed*float2(11,17))+
+        stableSeed*float2(19,3))*3)*tau)*.5+.5;
+    h*=.5+.5*sin((Noise(stableUv+stableSeed*float2(11,17))+
         rain)*tau*3);
     h=lerp(h*dist,lerp(h,1,lerp(.3,.8,input.color.a)),dist);
-    h-=Noise(stableUv*15.2+input.seed*float2(5,23))*
+    h-=Noise(stableUv*15.2+stableSeed*float2(5,23))*
         lerp(.7,.3,input.color.a);
     float cutoff=h*input.color.a;
     float edge=max(fwidth(cutoff)*1.5,.008);
