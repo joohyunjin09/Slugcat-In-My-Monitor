@@ -723,9 +723,9 @@ namespace RainWorldDesktopPet.AI
                     if (context.ExplorationJumpAvailable)
                     {
                         explorationJumpRequested = false;
-                        // Keep free hops occasional, but let a curious pet consider another
-                        // one after it has had time to resume its normal traversal.
-                        explorationJumpCooldownTicks = 120;
+                        // Resume ordinary traversal briefly before the next exploration
+                        // decision can schedule another hop.
+                        explorationJumpCooldownTicks = 60;
                     }
                     jumpCooldownTicks = JumpCooldownFor(slugcat);
                     RememberTransition(TransitionPlan);
@@ -808,10 +808,10 @@ namespace RainWorldDesktopPet.AI
             if (explorationJumpCooldownTicks == 0)
             {
                 // This intent is only considered from a safe, interior portion of a
-                // supporting surface (see BuildContext).  Make exploration visibly
-                // more expressive without turning edge navigation into random jumps.
-                double hopChance = 0.18 + (personalityEnergy +
-                    personalityBravery + PersonalityCuriosity()) * 0.13;
+                // supporting surface (see BuildContext).  Let an exploratory slugcat
+                // jump often while retaining the same edge and obstacle safety gates.
+                double hopChance = 0.40 + (personalityEnergy +
+                    personalityBravery + PersonalityCuriosity()) * 0.15;
                 explorationJumpRequested = random.NextDouble() < hopChance;
             }
             else explorationJumpRequested = false;
