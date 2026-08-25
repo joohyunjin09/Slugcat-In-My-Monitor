@@ -233,6 +233,18 @@ namespace RainWorldDesktopPet.Physics
                     }
                     return true;
                 }
+
+                // Spear.Update only remains thrown when the terrain contact
+                // is aligned with throwDir and becomes a wall stick.  A floor
+                // contact from a horizontal throw is not aligned, so Weapon
+                // physics drops it into Free; Spear's spinning branch then
+                // chooses its diagonal ground-rest rotation.  Keeping it
+                // thrown skipped that branch and left the sprite horizontal.
+                if (Chunk.ContactFloor)
+                {
+                    ChangeMode(DesktopSpearMode.Free);
+                    RotationSpeed = RandomRotationSpeed();
+                }
             }
 
             if (Mode == DesktopSpearMode.Free)

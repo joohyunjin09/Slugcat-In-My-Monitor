@@ -75,7 +75,7 @@ namespace RainWorldDesktopPet.Tests
                 ArtificerEffectLifecycleReplay);
             run("Spearmaster extraction creates the needle on original progress tick",
                 SpearmasterExtractionReplay);
-            run("Spearmaster needle grows from the selected tail speckle",
+            run("Spearmaster extraction marker keeps a fixed scale",
                 SpearmasterTailGrowthReplay);
             run("Spearmaster neutral gate freezes creation while Pickup stays held",
                 SpearmasterNeutralGateReplay);
@@ -83,6 +83,8 @@ namespace RainWorldDesktopPet.Tests
                 SpearmasterThrowReplay);
             run("Grounded spear keeps the original diagonal resting spread",
                 SpearGroundRestDirectionReplay);
+            run("Thrown floor contact enters diagonal spear rest",
+                ThrownSpearFloorRestReplay);
             run("Spearmaster AI holds without a target and traverses explicit action states",
                 SpearmasterAiActionStateReplay);
             run("Rivulet replay uses stats-driven ground jump and shared air control",
@@ -473,6 +475,21 @@ namespace RainWorldDesktopPet.Tests
                 "original +50 degree ground rest keeps the opposite diagonal");
         }
 
+        private static void ThrownSpearFloorRestReplay()
+        {
+            DesktopCollisionWorld world;
+            CreateFloorSlugcat(SlugcatId.White, out world);
+            double floor = FindFloorY(world);
+            DesktopSpear spear = new DesktopSpear(new Vec2(250.0, floor - 6.0));
+            spear.Throw(new Vec2(20.0, 5.0), Vec2.Right);
+            spear.Step(world);
+
+            Equal((int)DesktopSpearMode.StuckInGround, (int)spear.Mode,
+                "unaligned thrown floor contact leaves Thrown and settles through Free");
+            True(Math.Abs(spear.Rotation.Y) > 0.1,
+                "ground-rest spear cannot retain a horizontal airborne rotation");
+        }
+
         private static void SpearmasterTailGrowthReplay()
         {
             DesktopCollisionWorld world = CreateAirWorld();
@@ -500,8 +517,10 @@ namespace RainWorldDesktopPet.Tests
                 "growing needle starts at selected speckle x");
             Near(selected.RenderPosition.Y, growing.RenderPosition.Y, 0.000001,
                 "growing needle starts at selected speckle y");
-            Near(-ability.SpearProgress * 0.5, growing.ScaleY, 0.000001,
-                "BioSpear growth scale follows TailSpeckles spearProg");
+            Near(-0.5, growing.ScaleY, 0.000001,
+                "white BioSpear extraction marker retains its fixed scale");
+            Near(1.0, selected.ScaleY, 0.000001,
+                "selected tinyStar retains its base scale during extraction");
 
             for (int i = 20; i < 79; i++)
             {
