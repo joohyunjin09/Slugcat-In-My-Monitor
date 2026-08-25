@@ -47,46 +47,118 @@ namespace RainWorldDesktopPet.RainWorld
 
     public sealed class RainWorldAtlasSet : IDisposable
     {
-        private readonly List<RainWorldAtlas> atlases = new List<RainWorldAtlas>();
-        private readonly Dictionary<string, AtlasSprite> sprites = new Dictionary<string, AtlasSprite>(StringComparer.OrdinalIgnoreCase);
+        private sealed class SharedAtlasStorage
+        {
+            public readonly List<RainWorldAtlas> Atlases = new List<RainWorldAtlas>();
+            public readonly Dictionary<string, AtlasSprite> Sprites =
+                new Dictionary<string, AtlasSprite>(StringComparer.OrdinalIgnoreCase);
+            private int references = 1;
+            private bool disposed;
+
+            public void AddReference()
+            {
+                lock (this)
+                {
+                    if (disposed) throw new ObjectDisposedException("RainWorldAtlasSet");
+                    references++;
+                }
+            }
+
+            public void Release()
+            {
+                RainWorldAtlas[] release = null;
+                lock (this)
+                {
+                    if (references <= 0) return;
+                    references--;
+                    if (references != 0) return;
+                    disposed = true;
+                    release = Atlases.ToArray();
+                    Atlases.Clear();
+                    Sprites.Clear();
+                }
+                for (int i = 0; i < release.Length; i++) release[i].Dispose();
+            }
+
+            public void Add(RainWorldAtlas atlas)
+            {
+                if (atlas == null) throw new ArgumentNullException("atlas");
+                lock (this)
+                {
+                    if (disposed) throw new ObjectDisposedException("RainWorldAtlasSet");
+                    Atlases.Add(atlas);
+                    foreach (KeyValuePair<string, AtlasElement> item in atlas.Elements)
+                    {
+                        AtlasSprite sprite = new AtlasSprite { Atlas = atlas, Element = item.Value };
+                        Sprites[item.Key] = sprite;
+                        if (item.Key.EndsWith(".png", StringComparison.OrdinalIgnoreCase))
+                            Sprites[item.Key.Substring(0, item.Key.Length - 4)] = sprite;
+                    }
+                }
+            }
+        }
+
+        private readonly SharedAtlasStorage shared;
         private readonly Dictionary<string, RainWorldAtlas> overrideAtlases =
             new Dictionary<string, RainWorldAtlas>(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, List<string>> overrideNames =
             new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, AtlasSprite> overrides =
             new Dictionary<string, AtlasSprite>(StringComparer.OrdinalIgnoreCase);
+        private bool disposed;
 
-        public int AtlasCount { get { return atlases.Count; } }
+        public RainWorldAtlasSet()
+        {
+            shared = new SharedAtlasStorage();
+        }
+
+        private RainWorldAtlasSet(SharedAtlasStorage shared)
+        {
+            this.shared = shared;
+            shared.AddReference();
+        }
+
+        public int AtlasCount { get { return shared.Atlases.Count; } }
+
+        public RainWorldAtlasSet CreateSharedView()
+        {
+            if (disposed) throw new ObjectDisposedException("RainWorldAtlasSet");
+            return new RainWorldAtlasSet(shared);
+        }
 
         public void Add(RainWorldAtlas atlas)
         {
-            atlases.Add(atlas);
-            foreach (KeyValuePair<string, AtlasElement> item in atlas.Elements)
-            {
-                AtlasSprite sprite = new AtlasSprite();
-                sprite.Atlas = atlas;
-                sprite.Element = item.Value;
-                sprites[item.Key] = sprite;
-                if (item.Key.EndsWith(".png", StringComparison.OrdinalIgnoreCase))
-                {
-                    sprites[item.Key.Substring(0, item.Key.Length - 4)] = sprite;
-                }
-            }
+            if (disposed) throw new ObjectDisposedException("RainWorldAtlasSet");
+            shared.Add(atlas);
         }
 
         public bool TryGet(string name, out AtlasSprite sprite)
         {
-            return overrides.TryGetValue(name, out sprite) || overrides.TryGetValue(name + ".png", out sprite) ||
-                sprites.TryGetValue(name, out sprite) || sprites.TryGetValue(name + ".png", out sprite);
+            if (disposed)
+            {
+                sprite = null;
+                return false;
+            }
+            return overrides.TryGetValue(name, out sprite) ||
+                overrides.TryGetValue(name + ".png", out sprite) ||
+                shared.Sprites.TryGetValue(name, out sprite) ||
+                shared.Sprites.TryGetValue(name + ".png", out sprite);
         }
 
         public bool TryGetBase(string name, out AtlasSprite sprite)
         {
-            return sprites.TryGetValue(name, out sprite) || sprites.TryGetValue(name + ".png", out sprite);
+            if (disposed)
+            {
+                sprite = null;
+                return false;
+            }
+            return shared.Sprites.TryGetValue(name, out sprite) ||
+                shared.Sprites.TryGetValue(name + ".png", out sprite);
         }
 
         public void SetPartOverride(string part, RainWorldAtlas atlas)
         {
+            if (disposed) throw new ObjectDisposedException("RainWorldAtlasSet");
             if (string.IsNullOrWhiteSpace(part)) throw new ArgumentNullException("part");
             ClearPartOverride(part);
             if (atlas == null) return;
@@ -108,6 +180,7 @@ namespace RainWorldDesktopPet.RainWorld
 
         public void ClearPartOverride(string part)
         {
+            if (disposed) return;
             List<string> names;
             if (overrideNames.TryGetValue(part, out names))
             {
@@ -140,13 +213,13 @@ namespace RainWorldDesktopPet.RainWorld
 
         public void Dispose()
         {
-            for (int i = 0; i < atlases.Count; i++) atlases[i].Dispose();
-            atlases.Clear();
-            sprites.Clear();
+            if (disposed) return;
+            disposed = true;
             foreach (RainWorldAtlas atlas in overrideAtlases.Values) atlas.Dispose();
             overrideAtlases.Clear();
             overrideNames.Clear();
             overrides.Clear();
+            shared.Release();
         }
     }
 
