@@ -278,7 +278,7 @@ namespace RainWorldDesktopPet.AI
         private static readonly CharacterAIProfile RivuletAI = new CharacterAIProfile(
             0.94, 0.80, 0.88, 0.86, 0.55, 0.78, 0.18, 0.86, 0.22, 0.38, 0.24, 0.72, 0.62, 0.40);
         private static readonly CharacterAIProfile SaintAI = new CharacterAIProfile(
-            0.34, 0.72, 0.32, 0.22, 0.90, 0.62, 0.88, 0.18, 0.64, 0.94, 0.72, 0.86, 0.18, 0.62);
+            0.34, 0.72, 0.32, 0.22, 0.90, 0.62, 0.88, 0.18, 0.64, 0.94, 0.72, 0.86, 0.18, 0.82);
 
         public DesktopPetAI(int seed)
             : this(seed, 0)
@@ -730,7 +730,7 @@ namespace RainWorldDesktopPet.AI
             TransitionPlan.Clear();
             Vec2 center = slugcat.Center;
             double maximumRange = slugcat.AbilityController is SaintAbilityController
-                ? 195.0 : (slugcat.AbilityController is ArtificerAbilityController ? 250.0 : 105.0);
+                ? 220.0 : (slugcat.AbilityController is ArtificerAbilityController ? 250.0 : 105.0);
             DesktopSurface best = null;
             Vec2 bestPoint = Vec2.Zero;
             double bestScore = double.MaxValue;
@@ -911,7 +911,7 @@ namespace RainWorldDesktopPet.AI
                     saintTransitionFreestyle = freestyle;
                     saintAwaitingJumpRelease = false;
                     if (freestyle)
-                        saintFreestyleCooldownTicks = SecondsToTicks(SampleCentered(1.6, 4.0));
+                        saintFreestyleCooldownTicks = SecondsToTicks(SampleCentered(0.9, 2.2));
                     return false;
                 }
             }
@@ -970,8 +970,8 @@ namespace RainWorldDesktopPet.AI
         {
             return TransitionPlan.Mode == PlatformTransitionMode.TongueSwing &&
                 TransitionPlan.IsValid &&
-                (Math.Abs(TransitionPlan.HorizontalDistance) >= 42.0 ||
-                 TransitionPlan.VerticalDistance <= -20.0);
+                (Math.Abs(TransitionPlan.HorizontalDistance) >= 28.0 ||
+                 TransitionPlan.VerticalDistance <= -12.0);
         }
 
         private bool IsSpecialTraversalAvailable(Slugcat slugcat)
@@ -1005,9 +1005,9 @@ namespace RainWorldDesktopPet.AI
 
         private double SaintFreestyleChance()
         {
-            return MathUtil.Clamp01(0.12 + curiosity * 0.10 +
-                playfulness * 0.07 + traitSpecialUse * 0.09 +
-                (mood == AIMood.Curious ? 0.05 : 0.0));
+            return MathUtil.Clamp01(0.28 + curiosity * 0.16 +
+                playfulness * 0.10 + traitSpecialUse * 0.18 +
+                (mood == AIMood.Curious ? 0.08 : 0.0));
         }
 
         private void ResetArtificerTransition()
