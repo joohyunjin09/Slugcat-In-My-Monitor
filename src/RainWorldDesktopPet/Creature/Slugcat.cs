@@ -482,7 +482,7 @@ namespace RainWorldDesktopPet.Creature
                 effects[i].Step(world);
                 if (!effects[i].IsAlive) effects.RemoveAt(i);
             }
-            for (int i = 0; i < spears.Count; i++)
+            for (int i = spears.Count - 1; i >= 0; i--)
             {
                 if (spears[i].Step(world))
                 {
@@ -497,6 +497,7 @@ namespace RainWorldDesktopPet.Creature
                             spearImpactRandom));
                     }
                 }
+                if (spears[i].IsExpired) spears.RemoveAt(i);
             }
         }
 

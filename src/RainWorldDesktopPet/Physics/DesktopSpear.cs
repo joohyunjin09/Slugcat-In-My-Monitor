@@ -28,6 +28,8 @@ namespace RainWorldDesktopPet.Physics
         private static int nextAudioLoopId;
         private Vec2 thrownPosition;
         private int stillTicks;
+        private int despawnAfterTicks = -1;
+        private int despawnFadeTicks;
         private bool spinning;
         private Vec2[] umbilical;
         private Vec2[] lastUmbilical;
@@ -73,6 +75,21 @@ namespace RainWorldDesktopPet.Physics
         public long StuckSurfaceId { get; private set; }
         public DesktopSurfaceKind StuckSurfaceKind { get; private set; }
         public int Age { get; private set; }
+        public int DespawnAfterTicks { get { return despawnAfterTicks; } }
+        public bool IsExpired
+        {
+            get { return despawnAfterTicks >= 0 && Age >= despawnAfterTicks; }
+        }
+        public double Opacity
+        {
+            get
+            {
+                if (despawnAfterTicks < 0 || despawnFadeTicks <= 0 ||
+                    Age <= despawnAfterTicks - despawnFadeTicks) return 1.0;
+                return MathUtil.Clamp01((despawnAfterTicks - Age) /
+                    (double)despawnFadeTicks);
+            }
+        }
         public string LastImpactSound { get; private set; }
         public string AudioLoopKey { get; private set; }
         public int ImpactSparkCount { get; private set; }
@@ -150,6 +167,12 @@ namespace RainWorldDesktopPet.Physics
             InFrontOfPlayer = true;
         }
 
+        public void SetDespawnAfterTicks(int ticks, int fadeTicks)
+        {
+            despawnAfterTicks = Math.Max(0, ticks);
+            despawnFadeTicks = MathUtil.Clamp(fadeTicks, 0, despawnAfterTicks);
+        }
+
         public void SetOverlap(bool inFront)
         {
             InFrontOfPlayer = inFront;
@@ -191,6 +214,15 @@ namespace RainWorldDesktopPet.Physics
             LastImpactSound = null;
             ImpactSparkCount = 0;
             if (!NeedleHasConnection && NeedleFade > 0) NeedleFade--;
+            if (Mode != DesktopSpearMode.Held)
+            {
+                Age++;
+                if (IsExpired)
+                {
+                    ClearUmbilical();
+                    return false;
+                }
+            }
             // Weapon.Update snapshots draw state before mode-specific physics.
             // This must happen for Free as well as held/stuck spears so a
             // stationary rotation never keeps interpolating from an old spin.
@@ -202,7 +234,6 @@ namespace RainWorldDesktopPet.Physics
                 return false;
             }
 
-            Age++;
             Chunk.BeginTick();
             Chunk.Integrate(Mode == DesktopSpearMode.Thrown
                 ? ThrownGravity : Gravity, AirFriction);
@@ -378,6 +409,11 @@ namespace RainWorldDesktopPet.Physics
                 umbilicalVelocity[last] = Vec2.Zero;
             }
             if (anyAlive) return;
+            ClearUmbilical();
+        }
+
+        private void ClearUmbilical()
+        {
             umbilical = null;
             lastUmbilical = null;
             umbilicalVelocity = null;

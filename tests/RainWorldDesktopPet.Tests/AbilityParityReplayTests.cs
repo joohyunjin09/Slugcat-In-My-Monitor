@@ -81,6 +81,8 @@ namespace RainWorldDesktopPet.Tests
                 SpearmasterNeutralGateReplay);
             run("Spearmaster throw uses ThrowObject velocity and needle gravity",
                 SpearmasterThrowReplay);
+            run("Spearmaster thrown spear fades then expires after five seconds",
+                SpearmasterThrownSpearExpiryReplay);
             run("Grounded free spear keeps the original diagonal resting spread",
                 SpearGroundRestDirectionReplay);
             run("Thrown floor contact enters diagonal spear rest",
@@ -463,6 +465,37 @@ namespace RainWorldDesktopPet.Tests
             for (int i = 0; i < 5; i++) graphics.Step(attention, world);
             Equal(0, ability.ThrowFollowTicks,
                 "throwing hand follows the released spear for exactly five graphics ticks");
+        }
+
+        private static void SpearmasterThrownSpearExpiryReplay()
+        {
+            DesktopCollisionWorld world = CreateAirWorld();
+            Slugcat slugcat = CreateAirSlugcat(SlugcatId.SpearMaster);
+            List<VirtualInput> extraction = new List<VirtualInput>();
+            for (int i = 0; i < 80; i++)
+                extraction.Add(new VirtualInput(0, 0, false, true));
+            AbilityInputReplay.Run(slugcat, world, extraction);
+            SpearmasterAbilityController ability =
+                (SpearmasterAbilityController)slugcat.AbilityController;
+            DesktopSpear spear = ability.HeldSpear;
+            slugcat.Step(new VirtualInput(0, 0, false, false, true,
+                VirtualPosture.None, false), world, Vec2.Zero, Vec2.Zero);
+            Equal(200, spear.DespawnAfterTicks,
+                "Spearmaster throw schedules the five-second lifespan");
+
+            for (int tick = 0; tick < 180; tick++)
+                slugcat.Step(VirtualInput.Neutral, world, Vec2.Zero, Vec2.Zero);
+            Near(1.0, spear.Opacity, 0.000001,
+                "needle remains opaque before its final half-second fade");
+            for (int tick = 0; tick < 19; tick++)
+                slugcat.Step(VirtualInput.Neutral, world, Vec2.Zero, Vec2.Zero);
+            True(spear.Opacity > 0.0 && spear.Opacity < 1.0,
+                "needle fades naturally during its final half second");
+            True(slugcat.Spears.Contains(spear),
+                "needle exists until the full five-second lifespan elapses");
+            slugcat.Step(VirtualInput.Neutral, world, Vec2.Zero, Vec2.Zero);
+            True(!slugcat.Spears.Contains(spear),
+                "needle is removed on its five-second expiry tick");
         }
 
         private static void SpearGroundRestDirectionReplay()

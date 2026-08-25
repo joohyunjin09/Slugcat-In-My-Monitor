@@ -1655,6 +1655,8 @@ namespace RainWorldDesktopPet.Graphics
             {
                 DesktopSpear spear = slugcat.Spears[i];
                 if (spear.InFrontOfPlayer != inFront) continue;
+                double spearOpacity = spear.Opacity;
+                if (spearOpacity <= 0.0) continue;
                 Vec2 center = spear.Chunk.RenderPosition(interpolation);
                 Vec2 direction = MathUtil.SlerpDirection(
                     spear.LastRotation, spear.Rotation, interpolation);
@@ -1669,7 +1671,8 @@ namespace RainWorldDesktopPet.Graphics
                         // time after NeedleDisconnect; do not collapse the
                         // entire tether on the impact frame.
                         double life = Math.Min(lives[segment - 1], lives[segment]);
-                        double opacity = MathUtil.InverseLerp(0.0, 0.3, life);
+                        double opacity = MathUtil.InverseLerp(0.0, 0.3, life) *
+                            spearOpacity;
                         if (opacity <= 0.0) continue;
                         Color color = ResolveOriginalUmbilicalColor(segment,
                             current.Length, life, lives[segment - 1]);
@@ -1687,6 +1690,8 @@ namespace RainWorldDesktopPet.Graphics
                 Color needleColor = spear.NeedleHasConnection
                     ? Color.White
                     : LerpColor(OutlineColor, Color.White, spear.NeedleFadeFraction);
+                needleColor = Color.FromArgb((int)Math.Round(
+                    needleColor.A * spearOpacity), needleColor);
                 string element = "BioSpear" + (spear.NeedleType + 1);
                 AtlasSprite atlasSpear;
                 if (atlas != null && atlas.TryGet(element, out atlasSpear))
