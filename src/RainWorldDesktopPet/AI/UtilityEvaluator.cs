@@ -201,10 +201,13 @@ namespace RainWorldDesktopPet.AI
                             context.Playfulness * 0.27 + context.Confidence * 0.10 +
                             context.TraitPlayfulness * 0.20 + context.TraitImpulsiveness * 0.08 +
                             (context.ObstacleAhead ? 0.24 : 0.0) +
-                            (context.TransitionAvailable ? 0.20 : 0.0) +
+                            (context.TransitionAvailable
+                                ? 0.20 + context.PersonalityBravery * 0.10 +
+                                    context.PersonalityEnergy * 0.06
+                                : 0.0) +
                             (context.ExplorationJumpAvailable ? 0.14 : 0.0) +
                             (context.FreeJumpOpportunity ? 0.10 : 0.0) +
-                            (context.SpecialTraversalAvailable ? 0.13 : 0.0) +
+                            (context.SpecialTraversalAvailable ? 0.36 : 0.0) +
                             MoodWeight(context.Mood, AIMood.Playful, 0.20) +
                             MoodWeight(context.Mood, AIMood.Energetic, 0.12)
                         : 0.0;
