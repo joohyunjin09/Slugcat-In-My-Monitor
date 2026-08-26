@@ -50,6 +50,9 @@ namespace RainWorldDesktopPet.Graphics
         private readonly Vec2[] tailMeshVertices = new Vec2[15];
         private readonly PointF[] tailMeshPoints = new PointF[15];
         private readonly PointF[] tailTrianglePoints = new PointF[3];
+        // GPU solid tails are submitted as one exterior path so Direct2D does
+        // not antialias the shared edges of the original 13 triangles.
+        private readonly PointF[] tailOutlinePoints = new PointF[15];
         private readonly PointF[] tailRasterDestinationPoints = new PointF[3];
         private readonly PointF[] tailTextureCoordinates = new PointF[15];
         private readonly PointF[] tailTextureSourceTriangle = new PointF[3];
@@ -501,18 +504,24 @@ namespace RainWorldDesktopPet.Graphics
                 dmsTailSkin.DefaultTail.Color.A > 0
                 ? dmsTailSkin.DefaultTail.Color : bodyColor;
 
-            // The normal GPU path can submit the original triangle mesh
-            // directly. Only a textured DMS tail still needs the tiny dynamic
-            // raster used to warp its atlas UVs.
+            // Direct2D antialiases each independently submitted polygon edge.
+            // Sending the original 13 triangles one-by-one therefore exposes
+            // their shared internal edges as visible seams. The solid tail has
+            // no UV data to preserve, so submit the exact mesh exterior once.
+            // Textured DMS tails keep the original per-triangle UV raster path.
             if (graphics is GpuSpriteCanvas && !textured)
             {
-                for (int i = 0; i < TailTriangles.GetLength(0); i++)
-                {
-                    for (int j = 0; j < 3; j++)
-                        tailTrianglePoints[j] = tailMeshPoints[TailTriangles[i, j]];
-                    graphics.FillPolygon(tailColor, tailTrianglePoints);
-                }
-                pose.TailRenderMode = "GPU-OriginalTriangleMesh";
+                int outlineIndex = 0;
+                for (int i = 0; i < TailLeftEdge.Length; i++)
+                    tailOutlinePoints[outlineIndex++] =
+                        tailMeshPoints[TailLeftEdge[i]];
+                // Vertex 14 is the shared tip and is already present above.
+                for (int i = TailRightEdge.Length - 2; i >= 0; i--)
+                    tailOutlinePoints[outlineIndex++] =
+                        tailMeshPoints[TailRightEdge[i]];
+
+                graphics.FillPolygon(tailColor, tailOutlinePoints);
+                pose.TailRenderMode = "GPU-OriginalTailSilhouette";
             }
             else if (rasterWidth <= TailRasterSize && rasterHeight <= TailRasterSize)
             {

@@ -365,6 +365,9 @@ float4 PSMain(PixelInput input) : SV_TARGET { float2 p=input.uv*2-1;
             if (FAILED(hr)) return hr;
             ComPtr<ID2D1GeometrySink> sink;
             if (FAILED(hr=path->Open(&sink))) return hr;
+            // Match GDI FillMode.Winding for concave/self-overlapping sprite
+            // silhouettes instead of Direct2D's default alternate fill rule.
+            if (closed) sink->SetFillMode(D2D1_FILL_MODE_WINDING);
             const GpuPoint* first=points+command.PointOffset;
             sink->BeginFigure(D2D1::Point2F(first->X,first->Y),closed?
                 D2D1_FIGURE_BEGIN_FILLED:D2D1_FIGURE_BEGIN_HOLLOW);
