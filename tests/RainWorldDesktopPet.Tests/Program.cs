@@ -81,6 +81,14 @@ namespace RainWorldDesktopPet.Tests
                 EggBugEggPreservesOriginalEdibleContract);
             Run("Food visual bounds include fruit body and Eggbug tail",
                 FoodVisualBoundsIncludeProceduralParts);
+            Run("Blue Fruit and Eggbug Egg settle on flat desktop floors",
+                FoodItemsSettleOnFlatFloor);
+            Run("Food airborne and grounded rotation follows the local item DLLs",
+                FoodRotationMatchesOriginalItemRules);
+            Run("Eggbug Egg tail follows its original five-segment animation",
+                EggBugEggTailMatchesOriginalProceduralAnimation);
+            Run("Blue Fruit and Eggbug Egg can be repositioned with the mouse",
+                FoodItemsSupportMouseDragging);
             Run("Food manager clear resets every interaction flag",
                 FoodClearResetsInteractionState);
             Run("Food fallback remains visible without a local atlas",
@@ -91,6 +99,8 @@ namespace RainWorldDesktopPet.Tests
                 FoodPalettesMatchOriginalColorRules);
             Run("Food interaction seeks, reserves, and consumes through VirtualInput",
                 FoodInteractionUsesVirtualInputAndConsumes);
+            Run("Food bite animation matches PlayerGraphics BiteFly cadence",
+                FoodBiteAnimationMatchesOriginalCadence);
             Run("Food offers use a farther randomized drop distance",
                 FoodSpawnUsesFarRandomizedDrop);
             Run("Fullness prevents five consecutive guaranteed meals",
@@ -531,6 +541,88 @@ namespace RainWorldDesktopPet.Tests
                 "the second bite consumes the egg");
         }
 
+        private static void FoodBiteAnimationMatchesOriginalCadence()
+        {
+            DesktopCollisionWorld world = new DesktopCollisionWorld(new WindowEnumerator());
+            world.Refresh(IntPtr.Zero);
+            Slugcat slugcat = new Slugcat(new Vec2(100.0, 100.0));
+            slugcat.State.Grounded = true;
+            SlugcatGraphics graphics = new SlugcatGraphics(slugcat);
+            DesktopFoodManager manager = new DesktopFoodManager(4401);
+            AttentionSystem attention = new AttentionSystem();
+            VirtualInput input;
+
+            True(manager.TryAddDangleFruit(slugcat.Center + new Vec2(8.0, 0.0)),
+                "a reachable fruit can be offered for animation replay");
+            True(manager.TryProduceInput(slugcat, graphics, attention, out input) &&
+                manager.Target.State == DesktopFoodState.Held,
+                "the replay starts with the original held grasp");
+
+            graphics.Step(attention, world);
+            manager.StepInteraction(slugcat, graphics);
+            Equal(0, manager.TotalBites,
+                "pickup gets one separate frame before BiteEdibleObject");
+            True(graphics.Arms[0].Mode == LimbMode.HuntRelativePosition,
+                "Player.FreeHand chooses grasp zero for the edible");
+            Near(-20.0, graphics.Arms[0].RelativeHuntPosition.X, 0.000001,
+                "held edible starts at SlugcatHand's eatCounter 40 x target");
+            Near(12.0, graphics.Arms[0].RelativeHuntPosition.Y, 0.000001,
+                "held edible starts below its raised bite position");
+
+            for (int tick = 0; tick < 20; tick++)
+            {
+                graphics.Step(attention, world);
+                manager.StepInteraction(slugcat, graphics);
+                Equal(0, manager.TotalBites,
+                    "the hand raises before the first bite");
+            }
+            Near(-16.8, graphics.Arms[0].RelativeHuntPosition.X, 0.000001,
+                "eatCounter 20 reaches the original raised hand x target");
+            Near(4.4, graphics.Arms[0].RelativeHuntPosition.Y, 0.000001,
+                "eatCounter 20 reaches the original raised hand y target");
+
+            slugcat.State.Facing = -slugcat.State.Facing;
+            for (int tick = 20; tick < 40; tick++)
+            {
+                graphics.Step(attention, world);
+                manager.StepInteraction(slugcat, graphics);
+                Equal(0, manager.TotalBites,
+                    "the initial eatCounter completes without an early bite");
+            }
+            Near(0.0, Vec2.Distance(manager.Target.Chunk.Position,
+                graphics.Arms[0].End.Position), 0.000001,
+                "the edible follows the same grasp while it is being raised");
+
+            graphics.Step(attention, world);
+            manager.StepInteraction(slugcat, graphics);
+            Equal(1, manager.TotalBites,
+                "the first bite follows the complete 40-tick raise");
+            Near(0.0, Vec2.Distance(manager.Target.Chunk.Position,
+                slugcat.BodyChunks[0].Position), 0.000001,
+                "BitByPlayer snaps the edible to mainBodyChunk for one frame");
+            True(graphics.BuildPose(1.0, attention).Blink,
+                "BiteFly closes the original face on the bite frame");
+
+            for (int tick = 0; tick < 14; tick++)
+            {
+                graphics.Step(attention, world);
+                manager.StepInteraction(slugcat, graphics);
+                Equal(1, manager.TotalBites,
+                    "no extra mouth-phase bite occurs before tick fifteen");
+            }
+            Near(0.0, Vec2.Distance(manager.Target.Chunk.Position,
+                graphics.Arms[0].End.Position), 0.000001,
+                "between bites the edible follows its stable grasp hand");
+
+            graphics.Step(attention, world);
+            manager.StepInteraction(slugcat, graphics);
+            Equal(2, manager.TotalBites,
+                "Player.GrabUpdate repeats BiteEdibleObject after fifteen ticks");
+            Near(0.0, Vec2.Distance(manager.Target.Chunk.Position,
+                slugcat.BodyChunks[0].Position), 0.000001,
+                "the second bite is another single-frame body snap");
+        }
+
         private static void FoodVisualBoundsIncludeProceduralParts()
         {
             DesktopFood fruit = new DesktopFood(DesktopFoodKind.DangleFruit,
@@ -558,6 +650,265 @@ namespace RainWorldDesktopPet.Tests
             }
             True(rejectedUnknownKind,
                 "unknown food kinds fail explicitly instead of becoming fruit");
+        }
+
+        private static void FoodItemsSettleOnFlatFloor()
+        {
+            MonitorInfo monitor = new MonitorInfo("FOOD-FLOOR",
+                new Rectangle(0, 0, 1920, 1080),
+                new Rectangle(0, 0, 1920, 1040), true);
+            DesktopCollisionWorld world = CreateSyntheticWorld(
+                new[] { monitor }, new DesktopWindowSnapshot[0]);
+            double floor = DesktopWorldTransform.ToSimulationLength(monitor.FloorY);
+            DesktopFoodKind[] kinds =
+                { DesktopFoodKind.DangleFruit, DesktopFoodKind.EggBugEgg };
+
+            for (int item = 0; item < kinds.Length; item++)
+            {
+                DesktopFood food = new DesktopFood(kinds[item],
+                    new Vec2(300.0 + item * 100.0, floor -
+                        (kinds[item] == DesktopFoodKind.DangleFruit
+                            ? DesktopFood.DangleFruitRadius
+                            : DesktopFood.EggBugEggRadius)));
+                double startX = food.Chunk.Position.X;
+                food.SetCreationVelocity(new Vec2(0.75, 0.0));
+
+                for (int tick = 0; tick < 40; tick++)
+                    food.StepPhysics(world);
+
+                True(food.Chunk.ContactFloor,
+                    kinds[item] + " remains supported by the desktop floor");
+                True(Math.Abs(food.Chunk.Velocity.X) < 0.001,
+                    kinds[item] + " reaches the original visually still speed");
+                Near(floor - food.Chunk.Radius, food.Chunk.Position.Y, 0.000001,
+                    kinds[item] + " rests at its collision radius above the floor");
+                True(food.Chunk.Position.X - startX < 4.0,
+                    kinds[item] + " does not slide across the continuous floor");
+            }
+        }
+
+        private static void FoodRotationMatchesOriginalItemRules()
+        {
+            MonitorInfo airMonitor = new MonitorInfo("FOOD-AIR-ROTATION",
+                new Rectangle(0, 0, 1920, 4000),
+                new Rectangle(0, 0, 1920, 4000), true);
+            DesktopCollisionWorld airWorld = CreateSyntheticWorld(
+                new[] { airMonitor }, new DesktopWindowSnapshot[0]);
+            DesktopFoodKind[] kinds =
+                { DesktopFoodKind.DangleFruit, DesktopFoodKind.EggBugEgg };
+
+            for (int item = 0; item < kinds.Length; item++)
+            {
+                DesktopFood food = new DesktopFood(kinds[item],
+                    new Vec2(200.0 + item * 100.0, 100.0), 0.13, Vec2.Up);
+                food.SetCreationVelocity(new Vec2(8.0, 3.0));
+                for (int tick = 0; tick < 8; tick++) food.StepPhysics(airWorld);
+                Near(0.0, Vec2.Distance(Vec2.Up, food.Rotation), 0.000001,
+                    kinds[item] + " does not point its sprite along airborne velocity");
+            }
+
+            MonitorInfo floorMonitor = new MonitorInfo("FOOD-GROUND-ROTATION",
+                new Rectangle(0, 0, 1920, 1080),
+                new Rectangle(0, 0, 1920, 1040), true);
+            DesktopCollisionWorld floorWorld = CreateSyntheticWorld(
+                new[] { floorMonitor }, new DesktopWindowSnapshot[0]);
+            double floor = DesktopWorldTransform.ToSimulationLength(floorMonitor.FloorY);
+            for (int item = 0; item < kinds.Length; item++)
+            {
+                double radius = kinds[item] == DesktopFoodKind.DangleFruit
+                    ? DesktopFood.DangleFruitRadius : DesktopFood.EggBugEggRadius;
+                DesktopFood food = new DesktopFood(kinds[item],
+                    new Vec2(300.0 + item * 100.0, floor - radius),
+                    0.13, Vec2.Up);
+                food.SetCreationVelocity(new Vec2(2.0, 0.0));
+                food.StepPhysics(floorWorld);
+
+                double collisionVelocity = 2.0 * 0.999;
+                double turn = kinds[item] == DesktopFoodKind.DangleFruit
+                    ? 0.1 * collisionVelocity
+                    : 0.8 * (0.12 * collisionVelocity);
+                Vec2 expectedRotation = (Vec2.Up +
+                    Vec2.Up.Perpendicular * turn).Normalized;
+                Near(0.0, Vec2.Distance(expectedRotation, food.Rotation),
+                    0.000001, kinds[item] + " uses its original ground rotation equation");
+                Near(collisionVelocity * 0.8, food.Chunk.Velocity.X, 0.000001,
+                    kinds[item] + " applies its original object-level floor damping");
+            }
+
+            DesktopFood held = new DesktopFood(DesktopFoodKind.DangleFruit,
+                new Vec2(100.0, 100.0), 0.13, Vec2.Right);
+            True(held.Claim() && held.PickUp(held.Chunk.Position),
+                "fruit can enter the held-orientation replay");
+            held.HoldAt(new Vec2(120.0, 100.0), new Vec2(100.0, 100.0));
+            Near(0.0, Vec2.Distance(Vec2.Up, held.Rotation), 0.000001,
+                "held food uses the original item-to-grabber perpendicular orientation");
+        }
+
+        private static void EggBugEggTailMatchesOriginalProceduralAnimation()
+        {
+            MonitorInfo monitor = new MonitorInfo("EGG-TAIL",
+                new Rectangle(0, 0, 1920, 4000),
+                new Rectangle(0, 0, 1920, 4000), true);
+            DesktopCollisionWorld world = CreateSyntheticWorld(
+                new[] { monitor }, new DesktopWindowSnapshot[0]);
+            Vec2 start = new Vec2(200.0, 100.0);
+            DesktopFood egg = new DesktopFood(DesktopFoodKind.EggBugEgg,
+                start, 0.2, Vec2.Right);
+            Equal(5, DesktopFood.EggBugEggTailSegmentCount,
+                "EggBugEgg uses the DLL's five procedural segments");
+            True(egg.HasVisibleEggTail,
+                "the intact egg exposes its procedural tail mesh");
+
+            Vec2[] expectedPositions =
+                new Vec2[DesktopFood.EggBugEggTailSegmentCount];
+            Vec2[] expectedLastPositions =
+                new Vec2[DesktopFood.EggBugEggTailSegmentCount];
+            Vec2[] expectedVelocities =
+                new Vec2[DesktopFood.EggBugEggTailSegmentCount];
+            for (int i = 0; i < expectedPositions.Length; i++)
+            {
+                expectedPositions[i] = start + Vec2.Right * i;
+                expectedLastPositions[i] = expectedPositions[i];
+                Near(0.0, Vec2.Distance(expectedPositions[i],
+                    egg.EggTailPosition(i, 1.0)), 0.000001,
+                    "tail reset position " + i);
+            }
+
+            egg.StepPhysics(world);
+            StepExpectedEggTail(expectedPositions, expectedLastPositions,
+                expectedVelocities, egg.Chunk.Position, egg.Rotation);
+            for (int i = 0; i < expectedPositions.Length; i++)
+            {
+                Near(0.0, Vec2.Distance(expectedLastPositions[i],
+                    egg.EggTailPosition(i, 0.0)), 0.000001,
+                    "tail previous position follows DLL segment " + i);
+                Near(0.0, Vec2.Distance(expectedPositions[i],
+                    egg.EggTailPosition(i, 1.0)), 0.000001,
+                    "tail current position follows DLL segment " + i);
+                Near(0.0, Vec2.Distance(expectedVelocities[i],
+                    egg.EggTailVelocity(i)), 0.000001,
+                    "tail velocity follows DLL segment " + i);
+            }
+
+            True(egg.Claim() && egg.PickUp(egg.Chunk.Position) &&
+                egg.BeginBiting() && egg.Bite(),
+                "egg can replay its first bite for tail visibility");
+            True(!egg.HasVisibleEggTail,
+                "the original tail mesh disappears after the first bite");
+        }
+
+        private static void StepExpectedEggTail(Vec2[] positions,
+            Vec2[] lastPositions, Vec2[] velocities, Vec2 bodyPosition,
+            Vec2 rotation)
+        {
+            for (int i = 0; i < positions.Length; i++)
+            {
+                double value = i / (double)(positions.Length - 1);
+                lastPositions[i] = positions[i];
+                positions[i] += velocities[i];
+                velocities[i] *= 0.995;
+                velocities[i].Y += 0.9 *
+                    MathUtil.InverseLerp(0.5, 1.0, value);
+                velocities[i] += rotation * (5.0 *
+                    MathUtil.InverseLerp(0.5, 0.0, value));
+                if (i > 1)
+                {
+                    Vec2 separation = MathUtil.Direction(
+                        positions[i - 2], positions[i]);
+                    velocities[i] += separation;
+                    velocities[i - 2] -= separation;
+                }
+                ConnectExpectedEggTail(positions, velocities, i,
+                    bodyPosition, rotation);
+            }
+            for (int i = positions.Length - 1; i >= 0; i--)
+                ConnectExpectedEggTail(positions, velocities, i,
+                    bodyPosition, rotation);
+            for (int i = 0; i < positions.Length; i++)
+                ConnectExpectedEggTail(positions, velocities, i,
+                    bodyPosition, rotation);
+        }
+
+        private static void ConnectExpectedEggTail(Vec2[] positions,
+            Vec2[] velocities, int index, Vec2 bodyPosition, Vec2 rotation)
+        {
+            if (index == 0)
+            {
+                Vec2 target = bodyPosition + rotation * (7.0 * 1.15);
+                Vec2 direction = MathUtil.Direction(positions[index], target);
+                double distance = Vec2.Distance(positions[index], target);
+                Vec2 correction = direction * (2.0 - distance);
+                positions[index] -= correction;
+                velocities[index] -= correction;
+                return;
+            }
+            Vec2 towardPrevious = MathUtil.Direction(positions[index],
+                positions[index - 1]);
+            double distanceToPrevious = Vec2.Distance(positions[index],
+                positions[index - 1]);
+            Vec2 sharedCorrection = towardPrevious *
+                ((2.0 - distanceToPrevious) * 0.5);
+            positions[index] -= sharedCorrection;
+            velocities[index] -= sharedCorrection;
+            positions[index - 1] += sharedCorrection;
+            velocities[index - 1] += sharedCorrection;
+        }
+
+        private static void FoodItemsSupportMouseDragging()
+        {
+            MonitorInfo monitor = new MonitorInfo("FOOD-DRAG",
+                new Rectangle(0, 0, 1920, 1080),
+                new Rectangle(0, 0, 1920, 1040), true);
+            DesktopCollisionWorld world = CreateSyntheticWorld(
+                new[] { monitor }, new DesktopWindowSnapshot[0]);
+            DesktopFoodKind[] kinds =
+                { DesktopFoodKind.DangleFruit, DesktopFoodKind.EggBugEgg };
+
+            for (int item = 0; item < kinds.Length; item++)
+            {
+                DesktopFoodManager manager = new DesktopFoodManager(7100 + item);
+                Vec2 start = new Vec2(120.0 + item * 80.0, 140.0);
+                bool added = kinds[item] == DesktopFoodKind.DangleFruit
+                    ? manager.TryAddDangleFruit(start)
+                    : manager.TryAddEggBugEgg(start);
+                True(added, kinds[item] + " can be prepared for pointer dragging");
+                DesktopFood food = manager.Foods[0];
+                DesktopFoodState expectedReleaseState;
+                if (item == 0)
+                {
+                    True(food.Claim(), "fruit can preserve its accepted state while dragged");
+                    expectedReleaseState = DesktopFoodState.Claimed;
+                }
+                else
+                {
+                    True(food.Ignore(), "egg can preserve its ignored state while dragged");
+                    expectedReleaseState = DesktopFoodState.Ignored;
+                }
+
+                Vec2 press = start + new Vec2(3.0, 2.0);
+                True(manager.HitTest(press),
+                    kinds[item] + " visual bounds respond to the pointer");
+                True(manager.TryBeginDrag(press),
+                    kinds[item] + " starts a mouse drag");
+                True(manager.IsDragging &&
+                    food.State == DesktopFoodState.Dragged && !food.IsPhysical,
+                    kinds[item] + " becomes kinematic while held by the pointer");
+
+                Vec2 pointer = new Vec2(420.0, 260.0 + item * 40.0);
+                manager.MoveDraggedFood(pointer);
+                Vec2 expectedPosition = pointer + (start - press);
+                for (int tick = 0; tick < 5; tick++) manager.StepPhysics(world);
+                Near(0.0, Vec2.Distance(expectedPosition, food.Chunk.Position),
+                    0.000001, kinds[item] + " follows the cursor without gravity drift");
+
+                Vec2 releaseVelocity = new Vec2(4.0, -2.0);
+                True(manager.EndDrag(releaseVelocity),
+                    kinds[item] + " completes its mouse drag");
+                True(!manager.IsDragging && food.State == expectedReleaseState,
+                    kinds[item] + " restores its pre-drag appetite state");
+                Near(0.0, Vec2.Distance(releaseVelocity, food.Chunk.Velocity),
+                    0.000001, kinds[item] + " inherits the pointer release velocity");
+            }
         }
 
         private static void FoodClearResetsInteractionState()

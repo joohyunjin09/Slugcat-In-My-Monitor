@@ -554,7 +554,7 @@ namespace RainWorldDesktopPet.UI
         private void PollDragInput()
         {
             // A press consumed by WH_MOUSE_LL is intentionally absent from the
-            // normal Windows button state. While the hook owns a Slugcat drag,
+            // normal Windows button state. While the hook owns a pet-object drag,
             // only its matching WM_LBUTTONUP may end that drag.
             if (mouseCaptured) return;
             bool currentlyDown = (NativeMethods.GetAsyncKeyState(NativeMethods.VK_LBUTTON) & 0x8000) != 0;
@@ -568,7 +568,7 @@ namespace RainWorldDesktopPet.UI
                 mouseHookCallback, NativeMethods.GetModuleHandle(null), 0);
             if (mouseHook == IntPtr.Zero)
                 throw new Win32Exception(Marshal.GetLastWin32Error(),
-                    "Unable to install the Slugcat mouse input hook.");
+                    "Unable to install the desktop pet mouse input hook.");
         }
 
         private void UninstallMouseHook()
@@ -632,7 +632,7 @@ namespace RainWorldDesktopPet.UI
                             (NativeMethods.LowLevelMouseHookData)Marshal.PtrToStructure(data,
                                 typeof(NativeMethods.LowLevelMouseHookData));
                         Vec2 point = new Vec2(hookData.Point.X, hookData.Point.Y);
-                        GameLoop hit = FindSlugcatAt(point);
+                        GameLoop hit = FindDraggableAt(point);
                         if (hit != null && BeginGrab(hit, point)) return new IntPtr(1);
                     }
                     else if (mouseMessage == NativeMethods.WM_LBUTTONUP && mouseCaptured)
@@ -716,7 +716,7 @@ namespace RainWorldDesktopPet.UI
             if (grabbed != null) grabbed.EndGrab();
         }
 
-        private GameLoop FindSlugcatAt(Vec2 point)
+        private GameLoop FindDraggableAt(Vec2 point)
         {
             for (int i = gameLoops.Count - 1; i >= 0; i--)
                 if (gameLoops[i].HitTest(point)) return gameLoops[i];

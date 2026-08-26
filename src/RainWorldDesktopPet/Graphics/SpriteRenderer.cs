@@ -55,7 +55,7 @@ namespace RainWorldDesktopPet.Graphics
         private readonly PointF[] tailTextureDestinationTriangle = new PointF[3];
         private readonly PointF[] abilityQuad = new PointF[4];
         private readonly PointF[] abilityTriangle = new PointF[3];
-        private readonly PointF[] eggTailPoints = new PointF[12];
+        private readonly PointF[] eggTailQuad = new PointF[4];
         private readonly Bitmap tailRaster;
         private readonly System.Drawing.Graphics tailRasterGraphics;
         private readonly Bitmap flatLightShaderMask;
@@ -1130,7 +1130,8 @@ namespace RainWorldDesktopPet.Graphics
                 DesktopFood candidate = foods[i];
                 if (!candidate.IsActive) continue;
                 bool held = candidate.State == DesktopFoodState.Held ||
-                    candidate.State == DesktopFoodState.Biting;
+                    candidate.State == DesktopFoodState.Biting ||
+                    candidate.State == DesktopFoodState.Dragged;
                 if (held != heldLayer) continue;
                 hasFoodInLayer = true;
                 break;
@@ -1155,7 +1156,8 @@ namespace RainWorldDesktopPet.Graphics
                     DesktopFood food = foods[i];
                     if (!food.IsActive) continue;
                     bool held = food.State == DesktopFoodState.Held ||
-                        food.State == DesktopFoodState.Biting;
+                        food.State == DesktopFoodState.Biting ||
+                        food.State == DesktopFoodState.Dragged;
                     if (held != heldLayer) continue;
 
                     Vec2 center = food.Chunk.RenderPosition(interpolation);
@@ -1164,7 +1166,8 @@ namespace RainWorldDesktopPet.Graphics
                     double angle = AimScreen(Vec2.Zero, direction);
                     if (food.Kind == DesktopFoodKind.EggBugEgg)
                     {
-                        DrawEggBugEgg(graphics, food, center, direction, angle);
+                        DrawEggBugEgg(graphics, food, center, direction, angle,
+                            interpolation);
                         continue;
                     }
                     AtlasSprite ignored;
@@ -1195,7 +1198,7 @@ namespace RainWorldDesktopPet.Graphics
         }
 
         private void DrawEggBugEgg(System.Drawing.Graphics graphics, DesktopFood food,
-            Vec2 center, Vec2 direction, double angle)
+            Vec2 center, Vec2 direction, double angle, double interpolation)
         {
             const double swellFactor = 1.15;
             center -= direction * (3.0 * swellFactor);
@@ -1210,8 +1213,9 @@ namespace RainWorldDesktopPet.Graphics
                 atlas.TryGet(food.DetailElement, out ignored);
             FoodLayerPalette palette = FoodRenderPalette.EggBugEgg(food.VisualHue);
 
-            DrawEggBugTail(graphics, food, center, direction, swellFactor,
-                palette.BaseColor);
+            if (food.HasVisibleEggTail)
+                DrawEggBugTail(graphics, food, center, direction, swellFactor,
+                    interpolation, palette.BaseColor);
 
             if (hasShell)
                 DrawElement(graphics, food.FrontElement, center, angle,
@@ -1234,26 +1238,39 @@ namespace RainWorldDesktopPet.Graphics
 
         private void DrawEggBugTail(System.Drawing.Graphics graphics,
             DesktopFood food, Vec2 center, Vec2 direction, double swellFactor,
-            Color color)
+            double interpolation, Color color)
         {
             if (direction.LengthSquared < 0.000001) direction = Vec2.Down;
             else direction = direction.Normalized;
-            Vec2 perpendicular = new Vec2(-direction.Y, direction.X);
-            const int pointCount = 6;
-            for (int i = 0; i < pointCount; i++)
+            Vec2 previous = center + direction * (5.0 * swellFactor);
+            double previousWidth = 1.0;
+            for (int i = 0; i < DesktopFood.EggBugEggTailSegmentCount; i++)
             {
-                double progress = i / (double)(pointCount - 1);
-                double distance = (9.5 + i * 2.0) * swellFactor;
-                double bend = Math.Sin((food.AgeTicks + i * 4.0) * 0.08) *
-                    progress * 0.75 * swellFactor;
-                Vec2 point = center + direction * distance + perpendicular * bend;
-                double halfWidth = MathUtil.Lerp(1.15, 0.12, progress) *
-                    swellFactor;
-                eggTailPoints[i] = (point + perpendicular * halfWidth).ToPointF();
-                eggTailPoints[eggTailPoints.Length - 1 - i] =
-                    (point - perpendicular * halfWidth).ToPointF();
+                double progress = i /
+                    (double)(DesktopFood.EggBugEggTailSegmentCount - 1);
+                Vec2 point = food.EggTailPosition(i, interpolation);
+                Vec2 segmentDirection = point - previous;
+                if (segmentDirection.LengthSquared < 0.000001)
+                    segmentDirection = direction;
+                else
+                    segmentDirection = segmentDirection.Normalized;
+                Vec2 perpendicular = segmentDirection.Perpendicular;
+                double width = MathUtil.Lerp(1.0, 0.5,
+                    Math.Pow(progress, 0.25));
+                double endInset = Vec2.Distance(point, previous) / 5.0;
+                double rootWidth = i == 0
+                    ? width : (width + previousWidth) * 0.5;
+                Vec2 root = previous + (i == 0
+                    ? Vec2.Zero : segmentDirection * endInset);
+                Vec2 end = point - segmentDirection * endInset;
+                eggTailQuad[0] = (root - perpendicular * rootWidth).ToPointF();
+                eggTailQuad[1] = (root + perpendicular * rootWidth).ToPointF();
+                eggTailQuad[2] = (end + perpendicular * width).ToPointF();
+                eggTailQuad[3] = (end - perpendicular * width).ToPointF();
+                graphics.FillPolygon(GetBodyBrush(color), eggTailQuad);
+                previous = point;
+                previousWidth = width;
             }
-            graphics.FillPolygon(GetBodyBrush(color), eggTailPoints);
         }
 
         private void FillCachedCircle(System.Drawing.Graphics graphics,
