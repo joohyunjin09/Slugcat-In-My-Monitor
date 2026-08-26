@@ -73,6 +73,8 @@
     <Compile Include="Desktop\MonitorManager.cs" />
     <Compile Include="Desktop\MouseTracker.cs" />
     <Compile Include="Desktop\MouseAttentionState.cs" />
+    <Compile Include="Desktop\LowLevelMouseInputHook.cs" />
+    <Compile Include="Desktop\MouseHookHitSnapshot.cs" />
     <Compile Include="Desktop\NativeMethods.cs" />
     <Compile Include="Desktop\WindowEnumerator.cs" />
     <Compile Include="Graphics\BodyPart.cs" />

@@ -120,6 +120,8 @@ namespace RainWorldDesktopPet.Tests
             Run("Dragging passes through window walls", DraggingPassesThroughWindowWalls);
             Run("Slugcat dragging blocks desktop pointer interactions",
                 SlugcatDraggingBlocksDesktopInteractions);
+            Run("Mouse hook hit snapshots preserve click-through and topmost order",
+                MouseHookHitSnapshotsPreserveInputRules);
             Run("AI produces VirtualInput without moving physics directly", AiDoesNotMoveCreature);
             Run("Futile atlas metadata parses frame geometry", AtlasMetadataParses);
             Run("DMS part atlas overrides and restores original sprites", DmsPartAtlasOverrideRestoresBase);
@@ -1767,6 +1769,32 @@ namespace RainWorldDesktopPet.Tests
             True(!LayeredOverlayWindow.ShouldSuppressLeftButton(
                     NativeMethods.WM_LBUTTONDOWN, false, false),
                 "a click outside every Slugcat must reach the underlying application");
+        }
+
+        private static void MouseHookHitSnapshotsPreserveInputRules()
+        {
+            object lowerSlugcat = new object();
+            object upperSlugcat = new object();
+            MouseHookHitCircle[] circles =
+            {
+                new MouseHookHitCircle(new Vec2(100.0, 100.0), 30.0),
+                new MouseHookHitCircle(new Vec2(40.0, 40.0), 10.0),
+                new MouseHookHitCircle(new Vec2(110.0, 100.0), 20.0)
+            };
+            MouseHookHitSnapshot snapshot = new MouseHookHitSnapshot(new[]
+            {
+                new MouseHookHitTarget(lowerSlugcat, 0, 2),
+                new MouseHookHitTarget(upperSlugcat, 2, 1)
+            }, circles);
+
+            True(ReferenceEquals(upperSlugcat,
+                    snapshot.HitTest(new Vec2(105.0, 100.0))),
+                "the last rendered Slugcat should own an overlapping click");
+            True(ReferenceEquals(lowerSlugcat,
+                    snapshot.HitTest(new Vec2(40.0, 50.0))),
+                "hit circles should include their exact boundary");
+            True(snapshot.HitTest(new Vec2(400.0, 400.0)) == null,
+                "a click outside immutable pet bounds must remain click-through");
         }
 
         private static void AiDoesNotMoveCreature()
