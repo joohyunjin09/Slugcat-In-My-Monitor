@@ -161,10 +161,10 @@ namespace RainWorldDesktopPet.UI
             feedEggBugEggItem = new ToolStripMenuItem(
                 T("알벌레 알 주기", "Give Eggbug Egg"));
             feedEggBugEggItem.Click += FeedEggBugEgg;
-            fullnessStatusItem = new ToolStripMenuItem();
-            fullnessStatusItem.Enabled = false;
+            fullnessStatusItem = new ToolStripMenuItem(
+                T("슬러그캣 포만감", "Slugcat Fullness"));
             clearFoodsItem = new ToolStripMenuItem(
-                T("선택한 슬러그캣의 먹이 치우기", "Clear Selected Slugcat's Food"));
+                T("먹이 치우기", "Clear Food"));
             clearFoodsItem.Click += ClearSelectedFoods;
             foodMenu.DropDownItems.Add(feedDangleFruitItem);
             foodMenu.DropDownItems.Add(feedEggBugEggItem);
@@ -408,8 +408,7 @@ namespace RainWorldDesktopPet.UI
                 Program.LogException(exception);
                 retryRenderItem.Enabled = true;
                 RefreshSettingsWindow();
-                trayIcon.ShowBalloonTip(5000,
-                    T("슬러그캣 렌더링 재시도 실패", "Slugcat Rendering Retry Failed"),
+                trayIcon.ShowBalloonTip(5000, T("슬러그캣 렌더링 재시도 실패", "Slugcat Rendering Retry Failed"),
                     exception.Message, ToolTipIcon.Error);
             }
         }
@@ -764,21 +763,31 @@ namespace RainWorldDesktopPet.UI
 
         private void RefreshFoodMenu(object sender, EventArgs e)
         {
-            int selectedIndex = gameLoop == null ? -1 : gameLoops.IndexOf(gameLoop);
             int activeFoods = CountActiveFoods();
-            foodMenu.Text = selectedIndex < 0
-                ? T("먹이 주기", "Feed")
-                : T("먹이 주기 · 슬러그캣 ", "Feed · Slugcat ") + (selectedIndex + 1);
+            foodMenu.Text = T("먹이 주기", "Feed");
             feedDangleFruitItem.Enabled = gameLoop != null &&
                 activeFoods < MaximumFoods &&
                 gameLoop.Foods.Foods.Count < DesktopFoodManager.MaximumActiveFoods;
             feedEggBugEggItem.Enabled = feedDangleFruitItem.Enabled;
-            fullnessStatusItem.Text = gameLoop == null
-                ? T("포만감 -", "Fullness -")
-                : T("포만감 ", "Fullness ") +
-                    gameLoop.Foods.Fullness.ToString("0.0") + "/" +
-                    DesktopFoodManager.MaximumFullness.ToString("0.0");
-            clearFoodsItem.Enabled = gameLoop != null && gameLoop.Foods.Foods.Count > 0;
+
+            // Food is shared, but hunger belongs to each Slugcat. Show every
+            // active pet's name and fullness so the user can see who will seek
+            // the next available food.
+            fullnessStatusItem.DropDownItems.Clear();
+            for (int i = 0; i < gameLoops.Count; i++)
+            {
+                GameLoop loop = gameLoops[i];
+                ToolStripMenuItem statusItem = new ToolStripMenuItem(
+                    T("슬러그캣 ", "Slugcat ") + (i + 1) + " · " +
+                    SlugcatProfiles.SelectionLabel(loop.SelectedSlugcat.Id) + " · " +
+                    T("포만감 ", "Fullness ") +
+                    loop.Foods.Fullness.ToString("0.0") + "/" +
+                    DesktopFoodManager.MaximumFullness.ToString("0.0"));
+                statusItem.Enabled = false;
+                fullnessStatusItem.DropDownItems.Add(statusItem);
+            }
+            fullnessStatusItem.Enabled = gameLoops.Count > 0;
+            clearFoodsItem.Enabled = activeFoods > 0;
         }
 
         private void FeedDangleFruit(object sender, EventArgs e)
