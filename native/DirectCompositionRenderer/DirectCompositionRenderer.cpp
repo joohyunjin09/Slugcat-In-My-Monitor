@@ -86,30 +86,11 @@ PixelInput VSMain(VertexInput input) { PixelInput output;
     output.position=float4(input.position,0,1); output.uv=input.uv;
     output.color=input.color; output.seed=input.seed;
     output.pixelInfo=input.pixelInfo; return output; }
-float Hash21(float2 p) {
-    p=frac(p*float2(123.34,345.45));
-    p+=dot(p,p+34.345);
-    return frac(p.x*p.y);
-}
-float ValueNoise(float2 p) {
-    float2 cell=floor(p), f=frac(p);
-    f=f*f*(3.0-2.0*f);
-    float a=Hash21(cell);
-    float b=Hash21(cell+float2(1,0));
-    float c=Hash21(cell+float2(0,1));
-    float d=Hash21(cell+float2(1,1));
-    return lerp(lerp(a,b,f.x),lerp(c,d,f.x),f.y);
-}
-float FractalNoise(float2 p) {
-    float value=0.0;
-    float amplitude=0.55;
-    [unroll] for (int octave=0; octave<4; ++octave) {
-        value+=ValueNoise(p)*amplitude;
-        p=float2(p.y*1.73-p.x*1.21,p.x*1.37+p.y*1.61)+11.7;
-        amplitude*=0.48;
-    }
-    return value;
-}
+float Hash(float2 value) { return frac(sin(dot(value,float2(12.9898,78.233)))*43758.5453); }
+float Noise(float2 value) { float2 cell=floor(value),f=frac(value);
+    f=f*f*(3-2*f); float a=Hash(cell),b=Hash(cell+float2(1,0));
+    float c=Hash(cell+float2(0,1)),d=Hash(cell+1);
+    return lerp(lerp(a,b,f.x),lerp(c,d,f.x),f.y); }
 float4 PSMain(PixelInput input) : SV_TARGET { float2 p=input.uv*2-1;
     if (input.seed<-4.5) { float radius=length(p);
         float angle=atan2(p.y,p.x); float spoke=pow(abs(cos(angle*7)),36);
@@ -128,25 +109,43 @@ float4 PSMain(PixelInput input) : SV_TARGET { float2 p=input.uv*2-1;
         float shape=input.seed<-1.5 ? radial*radial : pow(radial,.65);
         float alpha=shape*input.color.a;
         return float4(input.color.rgb*alpha,alpha); }
-
-    // Smoke uses a stable screen-space field so neighboring particles feel
-    // like one cloud, with a smaller local component to break up round edges.
+    // Vanilla FireSmoke quantizes screen position first. _spriteRect is a
+    // camera/level-space mapping, not a per-particle rectangle, so the
+    // dominant turbulence should never be reconstructed from the rotated quad.
     float pixelCell=max(input.pixelInfo.x,.001);
     float2 screenPos=input.position.xy+input.pixelInfo.yz;
-    float2 snapped=floor(screenPos/pixelCell)*pixelCell;
-    float2 field=snapped/(pixelCell*32.0);
-    float body=saturate(1.0-length(p));
-    float macro=FractalNoise(field*0.42+float2(2.4,7.1));
-    float detail=FractalNoise(field*0.93+float2(-5.6,3.8));
-    float local=FractalNoise(input.uv*4.8+
-        float2(input.seed*0.071,input.seed*0.113));
-    float edge=body+(macro-0.5)*0.34+(detail-0.5)*0.18+
-        (local-0.5)*0.12;
-    float threshold=lerp(0.61,0.31,saturate(input.color.a));
-    float coverage=smoothstep(threshold,threshold+0.09,edge);
-    coverage*=saturate(input.color.a*1.25);
-    clip(coverage-0.08);
-    return float4(input.color.rgb*coverage,coverage); }
+    float2 snappedPos=floor(screenPos/pixelCell)*pixelCell;
+    float2 virtualScreen=float2(1366.0,768.0)*pixelCell;
+    float2 textCoord=snappedPos/virtualScreen;
+    textCoord.y+=.04;
+
+    // Keep the radial body in local sprite UVs so the smoke stays circular,
+    // while the major noise layers remain screen-axis aligned like vanilla.
+    float dist=saturate(1-length(p));
+    const float rain=.5; const float tau=6.28318530718;
+    // Procedural value noise needs extra density to stand in for the original
+    // noise textures, but too much turns the silhouette into powder. Keep the
+    // screen turbulence moderately detailed and the local breakup coarser.
+    const float screenNoiseDensity=18.0;
+    const float localNoiseDensity=8.0;
+    // FireSmoke's material is shared: particles sample one common turbulence
+    // field. Their position, scale and rotation expose different parts of it;
+    // a private per-particle offset makes the cloud look like separate blobs.
+    float h=sin((1.77*rain+Noise(
+        float2(textCoord.x*5.2,rain*.1+textCoord.y*2.6)*screenNoiseDensity)*3)*tau)*.5+.5;
+    h*=sin((3.5*rain+Noise(
+        float2(textCoord.x*12.2,rain*.25+textCoord.y*6.6)*screenNoiseDensity)*3)*tau)*.5+.5;
+    // Vanilla keeps one local-UV noise layer, so rotation still adds a small
+    // amount of organic variation without rotating the entire smoke mass.
+    h*=.5+.5*sin((Noise(input.uv*localNoiseDensity)+rain)*tau*3);
+    h=lerp(h*dist,lerp(h,1,lerp(.3,.8,input.color.a)),dist);
+    h-=Noise(float2(textCoord.x*15.2,rain*.1+textCoord.y*7.6)*
+        screenNoiseDensity)*lerp(.7,.3,input.color.a);
+    float cutoff=h*input.color.a;
+    clip(cutoff-.35);
+    // Vanilla FireSmoke uses color alpha to decide which pixels survive, but
+    // surviving pixels are emitted at alpha 1 instead of softly fading out.
+    return float4(input.color.rgb,1); }
 )";
 
     struct Renderer
@@ -555,9 +554,9 @@ float4 PSMain(PixelInput input) : SV_TARGET { float2 p=input.uv*2-1;
             if (SUCCEEDED(draw=drawing.As(&texture)))
                 draw=Device->CreateRenderTargetView(texture.Get(),nullptr,&target);
 
-            // Use a stable virtual effect grid so procedural cells keep a
-            // consistent square footprint across widescreen and multi-monitor
-            // desktop windows.
+            // Rain World's 16:9 render grid is 1366x768. Use the smaller
+            // client-axis scale so virtual pixels stay square on widescreen
+            // and multi-monitor desktop windows.
             float pixelScale=1.0f;
             RECT client={};
             if (Window && GetClientRect(Window,&client)) {
