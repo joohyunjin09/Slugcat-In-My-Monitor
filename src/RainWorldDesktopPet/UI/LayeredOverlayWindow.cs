@@ -32,9 +32,13 @@ namespace RainWorldDesktopPet.UI
         private const int DefaultRenderFramesPerSecond = 60;
         private const int DefaultRenderIntervalMilliseconds =
             (1000 + DefaultRenderFramesPerSecond - 1) / DefaultRenderFramesPerSecond;
+        private const double MinimumPlausibleRefreshRate = 20.0;
+        private const double MaximumPlausibleRefreshRate = 1000.0;
         private const int MinimumOverlaySize = 384;
         private const int OverlaySizeQuantum = 128;
         private const int OverlayPadding = 24;
+        private const double RefreshRateCacheLifetimeSeconds = 30.0;
+        private const double DuplicatePowerResumeWindowSeconds = 5.0;
         private const int WmEnsureTopMost = 0x8001;
         private const int WmHookMouseInput = 0x8002;
         private readonly RainWorldInstallation installation;
@@ -70,6 +74,7 @@ namespace RainWorldDesktopPet.UI
         private readonly DesktopCollisionWorld collisionWorld =
             new DesktopCollisionWorld(new WindowEnumerator());
         private readonly Stopwatch surfaceRefreshClock = Stopwatch.StartNew();
+        private readonly Stopwatch refreshRateCacheClock = Stopwatch.StartNew();
         private readonly ConcurrentQueue<HookMouseInput> hookMouseInputs =
             new ConcurrentQueue<HookMouseInput>();
         private DirectCompositionHost compositionHost;
@@ -83,6 +88,7 @@ namespace RainWorldDesktopPet.UI
         private IntPtr mouseInputWindowHandle;
         private int hookOwnsLeftButton;
         private IntPtr foregroundEventHook;
+        private IntPtr suspendResumeNotification;
         private SettingsWindow settingsWindow;
         private SkinEditorWindow skinEditor;
         private Rectangle virtualDesktopBounds;
@@ -91,6 +97,9 @@ namespace RainWorldDesktopPet.UI
         private int renderErrorCount;
         private bool renderingEnabled;
         private bool renderingFrame;
+        private bool powerSuspended;
+        private bool resumeRenderingAfterPowerResume;
+        private long lastPowerResumeTimestamp = long.MinValue;
         private double displayRefreshRate;
 
         private sealed class HookMouseInput
@@ -270,6 +279,7 @@ namespace RainWorldDesktopPet.UI
             InstallForegroundEventHook();
             EnsureOverlayTopMost();
             compositionHost = new DirectCompositionHost(Handle, virtualDesktopBounds);
+            RegisterForSuspendResumeNotifications();
             collisionWorld.Refresh(Handle);
             surfaceRefreshClock.Restart();
             AddSlugcat(startSlugcat);
@@ -285,6 +295,7 @@ namespace RainWorldDesktopPet.UI
         {
             renderingEnabled = false;
             renderTimer.Stop();
+            UnregisterForSuspendResumeNotifications();
             UninstallForegroundEventHook();
             UninstallMouseHook();
             ReleaseGrabInput();
@@ -519,6 +530,12 @@ namespace RainWorldDesktopPet.UI
 
         private void UpdateRenderCadence(SlugcatPose[] poses, int poseCount)
         {
+            if (refreshRateCacheClock.Elapsed.TotalSeconds >=
+                RefreshRateCacheLifetimeSeconds)
+            {
+                displayRefreshRates.Clear();
+                refreshRateCacheClock.Restart();
+            }
             double targetRefreshRate = 0.0;
             for (int i = 0; i < poseCount; i++)
             {
@@ -539,10 +556,123 @@ namespace RainWorldDesktopPet.UI
 
         private void ApplyRenderCadence(double refreshRate)
         {
-            if (refreshRate <= 1.0) refreshRate = DefaultRenderFramesPerSecond;
+            refreshRate = NormalizeRefreshRate(refreshRate);
             displayRefreshRate = refreshRate;
             int interval = Math.Max(1, (int)Math.Round(1000.0 / refreshRate));
             if (renderTimer.Interval != interval) renderTimer.Interval = interval;
+        }
+
+        private void RegisterForSuspendResumeNotifications()
+        {
+            try
+            {
+                suspendResumeNotification =
+                    NativeMethods.RegisterSuspendResumeNotification(Handle,
+                        NativeMethods.DEVICE_NOTIFY_WINDOW_HANDLE);
+            }
+            catch (EntryPointNotFoundException)
+            {
+                // Windows 7 still broadcasts conventional suspend messages to
+                // top-level windows even though explicit registration is absent.
+                suspendResumeNotification = IntPtr.Zero;
+            }
+        }
+
+        private void UnregisterForSuspendResumeNotifications()
+        {
+            if (suspendResumeNotification == IntPtr.Zero) return;
+            NativeMethods.UnregisterSuspendResumeNotification(
+                suspendResumeNotification);
+            suspendResumeNotification = IntPtr.Zero;
+        }
+
+        private void SuspendForPowerTransition()
+        {
+            powerSuspended = true;
+            resumeRenderingAfterPowerResume = renderingEnabled &&
+                renderTimer.Enabled;
+            lastPowerResumeTimestamp = long.MinValue;
+            renderTimer.Stop();
+            ReleaseGrabInput();
+        }
+
+        private void ResumeFromPowerTransition()
+        {
+            long now = Stopwatch.GetTimestamp();
+            if (!ShouldProcessPowerResume(lastPowerResumeTimestamp, now,
+                    Stopwatch.Frequency))
+                return;
+            lastPowerResumeTimestamp = now;
+
+            bool shouldRestart = powerSuspended
+                ? resumeRenderingAfterPowerResume
+                : renderingEnabled && !retryRenderItem.Enabled;
+            powerSuspended = false;
+            resumeRenderingAfterPowerResume = false;
+            renderTimer.Stop();
+            try
+            {
+                ReleaseGrabInput();
+                for (int i = 0; i < gameLoops.Count; i++)
+                    gameLoops[i].ResetFrameTiming();
+                surfaceRefreshClock.Restart();
+                displayRefreshRates.Clear();
+                refreshRateCacheClock.Restart();
+                // Do not cache a potentially transitional display query. Start
+                // at a safe cadence; the next rendered pose selects its monitor.
+                ApplyRenderCadence(DefaultRenderFramesPerSecond);
+                ConfigureVirtualDesktop();
+                if (compositionHost != null) compositionHost.ResetSurfaces();
+                collisionWorld.RequestRefresh(Handle);
+                EnsureOverlayTopMost();
+                if (shouldRestart)
+                {
+                    renderErrorCount = 0;
+                    retryRenderItem.Enabled = false;
+                    renderingEnabled = true;
+                    renderTimer.Start();
+                }
+                RefreshSettingsWindow();
+            }
+            catch (Exception exception)
+            {
+                Program.LogException(exception);
+                renderingEnabled = false;
+                renderTimer.Stop();
+                retryRenderItem.Enabled = true;
+                RefreshSettingsWindow();
+            }
+        }
+
+        internal static bool IsSuspendPowerEvent(int powerEvent)
+        {
+            return powerEvent == NativeMethods.PBT_APMSUSPEND;
+        }
+
+        internal static bool IsResumePowerEvent(int powerEvent)
+        {
+            return powerEvent == NativeMethods.PBT_APMRESUMEAUTOMATIC ||
+                powerEvent == NativeMethods.PBT_APMRESUMESUSPEND ||
+                powerEvent == NativeMethods.PBT_APMRESUMECRITICAL;
+        }
+
+        internal static double NormalizeRefreshRate(double refreshRate)
+        {
+            return double.IsNaN(refreshRate) || double.IsInfinity(refreshRate) ||
+                refreshRate < MinimumPlausibleRefreshRate ||
+                refreshRate > MaximumPlausibleRefreshRate
+                ? DefaultRenderFramesPerSecond
+                : refreshRate;
+        }
+
+        internal static bool ShouldProcessPowerResume(long previousTimestamp,
+            long currentTimestamp, long frequency)
+        {
+            if (frequency <= 0) throw new ArgumentOutOfRangeException("frequency");
+            if (previousTimestamp == long.MinValue) return true;
+            long elapsedTicks = currentTimestamp - previousTimestamp;
+            return elapsedTicks < 0 || elapsedTicks / (double)frequency >=
+                DuplicatePowerResumeWindowSeconds;
         }
 
         private void ConfigureVirtualDesktop()
@@ -787,6 +917,21 @@ namespace RainWorldDesktopPet.UI
                 EnsureOverlayTopMost();
                 return;
             }
+            if (message.Msg == NativeMethods.WM_POWERBROADCAST)
+            {
+                int powerEvent = message.WParam.ToInt32();
+                if (IsSuspendPowerEvent(powerEvent))
+                    SuspendForPowerTransition();
+                else if (IsResumePowerEvent(powerEvent))
+                    ResumeFromPowerTransition();
+                else
+                {
+                    base.WndProc(ref message);
+                    return;
+                }
+                message.Result = new IntPtr(1);
+                return;
+            }
             if (message.Msg == NativeMethods.WM_LBUTTONUP && mouseCaptured)
             {
                 ReleaseGrabInput();
@@ -805,6 +950,7 @@ namespace RainWorldDesktopPet.UI
                     ConfigureVirtualDesktop();
                     if (compositionHost != null) compositionHost.ResetSurfaces();
                     displayRefreshRates.Clear();
+                    refreshRateCacheClock.Restart();
                     ApplyRenderCadence(NativeMethods.GetPrimaryDisplayRefreshRate());
                 }
                 catch (Exception exception)
