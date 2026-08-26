@@ -42,6 +42,8 @@ namespace RainWorldDesktopPet.Physics
         // Includes the flexible tail, whose final point extends about 22
         // simulation units from the BodyChunk center.
         public const double EggBugEggVisualReach = 23.0;
+        // Kept for API/test compatibility. Shared desktop food no longer expires
+        // merely because it has been left on the desktop for this many ticks.
         public const int DefaultLifetimeTicks = 1200;
 
         private const double Gravity = 0.9;
@@ -226,6 +228,17 @@ namespace RainWorldDesktopPet.Physics
             return true;
         }
 
+        // Shared-food reservation is external to the edible object. When a
+        // seeker abandons an item, make the physical object globally available
+        // again without recreating it or changing its bite state.
+        public bool ReleaseClaim()
+        {
+            if (State != DesktopFoodState.Claimed &&
+                State != DesktopFoodState.Ignored) return false;
+            State = DesktopFoodState.Free;
+            return true;
+        }
+
         public bool Ignore()
         {
             if (State != DesktopFoodState.Free) return false;
@@ -312,12 +325,10 @@ namespace RainWorldDesktopPet.Physics
                 return;
             }
 
+            // Food remains in the shared desktop pool until it is eaten or the
+            // user explicitly clears it. Age is still tracked for procedural
+            // animation/debugging, but it no longer turns the item Expired.
             AgeTicks++;
-            if (AgeTicks >= DefaultLifetimeTicks)
-            {
-                State = DesktopFoodState.Expired;
-                return;
-            }
 
             lastRotation = rotation;
             Chunk.BeginTick();
