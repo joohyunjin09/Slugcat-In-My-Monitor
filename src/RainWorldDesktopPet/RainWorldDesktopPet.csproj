@@ -89,6 +89,7 @@
     <Compile Include="Graphics\SlugcatGraphicsExtension.cs" />
     <Compile Include="Graphics\SlugcatPose.cs" />
     <Compile Include="Graphics\SlugcatVisualProfile.cs" />
+    <Compile Include="Graphics\SpriteCanvas.cs" />
     <Compile Include="Graphics\SpriteRenderer.cs" />
     <Compile Include="Physics\BodyChunk.cs" />
     <Compile Include="Physics\BodyChunkConnection.cs" />

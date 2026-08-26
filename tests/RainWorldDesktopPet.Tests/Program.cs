@@ -189,6 +189,10 @@ namespace RainWorldDesktopPet.Tests
                 CompositionSurfacesOnlyGrow);
             Run("GPU smoke command ABI matches the native renderer",
                 GpuSmokeCommandAbiMatchesNativeRenderer);
+            Run("GPU sprite command ABI matches the native renderer",
+                GpuSpriteCommandAbiMatchesNativeRenderer);
+            Run("GPU sprite surface renders through Direct2D",
+                GpuSpriteSurfaceRendersThroughDirect2D);
             Run("Artificer smoke emits direct GPU effect commands",
                 ArtificerSmokeEmitsGpuEffectCommands);
             Run("Artificer flash expands the independent GPU effect bounds",
@@ -3430,6 +3434,90 @@ namespace RainWorldDesktopPet.Tests
             Equal(14 * sizeof(float),
                 Marshal.SizeOf(typeof(DirectCompositionHost.GpuSmokeEffect)),
                 "GPU smoke command byte size");
+        }
+
+        private static void GpuSpriteCommandAbiMatchesNativeRenderer()
+        {
+            Equal(8, Marshal.SizeOf(typeof(GpuPoint)), "GPU point byte size");
+            Equal(56, Marshal.SizeOf(typeof(GpuDrawCommand)),
+                "GPU sprite command byte size");
+        }
+
+        private static void GpuSpriteSurfaceRendersThroughDirect2D()
+        {
+            using (System.Windows.Forms.Form form = new System.Windows.Forms.Form())
+            using (DirectCompositionHost host = new DirectCompositionHost(
+                form.Handle, new Rectangle(0, 0, 640, 480)))
+            using (Bitmap texture = new Bitmap(4, 4,
+                PixelFormat.Format32bppPArgb))
+            {
+                using (System.Drawing.Graphics drawing =
+                    System.Drawing.Graphics.FromImage(texture))
+                    drawing.Clear(Color.White);
+                GpuSpriteCanvas canvas = host.PrepareGpuSurface(0,
+                    new Rectangle(32, 24, 384, 384));
+                canvas.SetTransform(2.0f, 0.0f, 0.0f, 2.0f, -40.0f, -20.0f);
+                canvas.Save();
+                canvas.TranslateTransform(10.0f, 15.0f);
+                canvas.RotateTransform(32.0f);
+                canvas.ScaleTransform(-1.0f, 0.75f);
+                PointF transformFrom = new PointF(3.0f, 7.0f);
+                PointF transformTo = new PointF(11.0f, -2.0f);
+                canvas.DrawLine(Color.White, 2.0f, transformFrom, transformTo);
+                using (System.Drawing.Drawing2D.Matrix expectedTransform =
+                    new System.Drawing.Drawing2D.Matrix(2.0f, 0.0f, 0.0f,
+                        2.0f, -40.0f, -20.0f))
+                {
+                    expectedTransform.Translate(10.0f, 15.0f);
+                    expectedTransform.Rotate(32.0f);
+                    expectedTransform.Scale(-1.0f, 0.75f);
+                    PointF[] expected = { transformFrom, transformTo };
+                    expectedTransform.TransformPoints(expected);
+                    Near(expected[0].X, canvas.Points[0].X, 0.0001,
+                        "GPU transform first X");
+                    Near(expected[0].Y, canvas.Points[0].Y, 0.0001,
+                        "GPU transform first Y");
+                    Near(expected[1].X, canvas.Points[1].X, 0.0001,
+                        "GPU transform second X");
+                    Near(expected[1].Y, canvas.Points[1].Y, 0.0001,
+                        "GPU transform second Y");
+                }
+                canvas.Restore();
+                canvas.FillEllipse(Color.FromArgb(230, 80, 190, 255),
+                    20.0f, 25.0f, 60.0f, 45.0f);
+                PointF[] destination =
+                {
+                    new PointF(100.0f, 80.0f),
+                    new PointF(132.0f, 80.0f),
+                    new PointF(100.0f, 112.0f)
+                };
+                canvas.DrawImage(texture, destination,
+                    new RectangleF(0.0f, 0.0f, 4.0f, 4.0f),
+                    Color.FromArgb(255, 160, 220, 255), false);
+                host.PresentGpu(canvas);
+                host.Commit(1);
+                True(canvas.CommandCount == 3,
+                    "line, ellipse and texture should remain ordered GPU commands");
+
+                DesktopCollisionWorld world = new DesktopCollisionWorld(
+                    new WindowEnumerator());
+                world.Refresh(IntPtr.Zero);
+                Slugcat slugcat = new Slugcat(new Vec2(150.0, 130.0));
+                DesktopPetAI ai = new DesktopPetAI(2718);
+                SlugcatGraphics procedural = new SlugcatGraphics(slugcat);
+                procedural.Step(ai.Attention, world);
+                SlugcatPose pose = procedural.BuildPose(0.5, ai.Attention, 1);
+                canvas = host.PrepareGpuSurface(0,
+                    new Rectangle(0, 0, 384, 384));
+                using (SpriteRenderer renderer = new SpriteRenderer(null))
+                    renderer.RenderGpu(canvas, pose,
+                        new RenderSpace(canvas.Bounds), world, slugcat, ai,
+                        "gpu-test", slugcat.SelectedSlugcat);
+                True(canvas.CommandCount > 10,
+                    "a procedural Slugcat should emit a complete GPU draw list");
+                host.PresentGpu(canvas);
+                host.Commit(1);
+            }
         }
 
         private static void ArtificerSmokeEmitsGpuEffectCommands()

@@ -340,13 +340,37 @@ namespace RainWorldDesktopPet.UI
                 for (int batchIndex = 0; batchIndex < batches.Count; batchIndex++)
                 {
                     CompositionBatch batch = batches[batchIndex];
-                    DirectCompositionHost.CompositionSurface surface =
-                        compositionHost.PrepareSurface(batchIndex, batch.Bounds);
-                    System.Drawing.Graphics graphics = surface.Graphics;
-                    graphics.CompositingMode = System.Drawing.Drawing2D.CompositingMode.SourceCopy;
-                    graphics.Clear(Color.Transparent);
-                    graphics.CompositingMode = System.Drawing.Drawing2D.CompositingMode.SourceOver;
-                    RenderSpace renderSpace = new RenderSpace(surface.Bounds);
+                    bool batchUsesDebug = false;
+                    for (int member = 0; member < batch.SurfaceIndices.Count; member++)
+                    {
+                        int memberIndex = batch.SurfaceIndices[member];
+                        if (gameLoops[memberIndex].DebugEnabled &&
+                            ReferenceEquals(gameLoops[memberIndex], gameLoop))
+                        {
+                            batchUsesDebug = true;
+                            break;
+                        }
+                    }
+                    DirectCompositionHost.CompositionSurface surface = null;
+                    GpuSpriteCanvas gpuCanvas = null;
+                    RenderSpace renderSpace;
+                    if (batchUsesDebug)
+                    {
+                        surface = compositionHost.PrepareSurface(batchIndex, batch.Bounds);
+                        System.Drawing.Graphics graphics = surface.Graphics;
+                        graphics.CompositingMode =
+                            System.Drawing.Drawing2D.CompositingMode.SourceCopy;
+                        graphics.Clear(Color.Transparent);
+                        graphics.CompositingMode =
+                            System.Drawing.Drawing2D.CompositingMode.SourceOver;
+                        renderSpace = new RenderSpace(surface.Bounds);
+                    }
+                    else
+                    {
+                        gpuCanvas = compositionHost.PrepareGpuSurface(batchIndex,
+                            batch.Bounds);
+                        renderSpace = new RenderSpace(gpuCanvas.Bounds);
+                    }
                     int drawStepCount = batch.SurfaceIndices.Count * 3;
                     for (int drawStep = 0; drawStep < drawStepCount; drawStep++)
                     {
@@ -358,20 +382,35 @@ namespace RainWorldDesktopPet.UI
                         bool debug = loop.DebugEnabled && ReferenceEquals(loop, gameLoop);
                         if (layer == OverlayRenderLayer.Slugcat)
                         {
-                            loop.Renderer.Render(graphics, poseBuffer[loopIndex],
-                                renderSpace, debug, loop.World, loop.Slugcat,
-                                loop.AI, loop.AssetStatus, loop.SelectedSlugcat);
+                            if (batchUsesDebug)
+                                loop.Renderer.Render(surface.Graphics,
+                                    poseBuffer[loopIndex], renderSpace, debug,
+                                    loop.World, loop.Slugcat, loop.AI,
+                                    loop.AssetStatus, loop.SelectedSlugcat);
+                            else
+                                loop.Renderer.RenderGpu(gpuCanvas,
+                                    poseBuffer[loopIndex], renderSpace,
+                                    loop.World, loop.Slugcat, loop.AI,
+                                    loop.AssetStatus, loop.SelectedSlugcat);
                         }
                         else
                         {
-                            loop.Renderer.RenderFoods(graphics, loop.Foods,
-                                renderSpace,
-                                poseBuffer[loopIndex].CharacterRenderScale,
-                                poseBuffer[loopIndex].TimeStacker,
-                                layer == OverlayRenderLayer.HeldFood);
+                            if (batchUsesDebug)
+                                loop.Renderer.RenderFoods(surface.Graphics,
+                                    loop.Foods, renderSpace,
+                                    poseBuffer[loopIndex].CharacterRenderScale,
+                                    poseBuffer[loopIndex].TimeStacker,
+                                    layer == OverlayRenderLayer.HeldFood);
+                            else
+                                loop.Renderer.RenderFoodsGpu(gpuCanvas,
+                                    loop.Foods, renderSpace,
+                                    poseBuffer[loopIndex].CharacterRenderScale,
+                                    poseBuffer[loopIndex].TimeStacker,
+                                    layer == OverlayRenderLayer.HeldFood);
                         }
                     }
-                    compositionHost.Present(batchIndex);
+                    if (batchUsesDebug) compositionHost.Present(batchIndex);
+                    else compositionHost.PresentGpu(gpuCanvas);
 
                     RectangleF effectContentBounds = RectangleF.Empty;
                     for (int member = 0; member < batch.SurfaceIndices.Count; member++)
