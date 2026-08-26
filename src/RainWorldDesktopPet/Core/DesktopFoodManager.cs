@@ -259,6 +259,12 @@ namespace RainWorldDesktopPet.Core
         private const double PickupVerticalTolerance = 32.0;
         private const int InitialEatCounter = 40;
         private const int BiteIntervalTicks = 15;
+        private const int SpearmasterMinimumHoldTicks =
+            (int)SimulationConstants.LogicTicksPerSecond;
+        private const int SpearmasterMaximumHoldTicks =
+            (int)(SimulationConstants.LogicTicksPerSecond * 3.0);
+        private const double TossAngleDegrees = 60.0;
+        private const double TossSpeed = 12.5;
         private const double FoodHandReachDistance = 34.0;
         private const double SeekingHandBlend = 0.34;
 
@@ -270,6 +276,8 @@ namespace RainWorldDesktopPet.Core
         private DesktopFoodPool pool;
         private readonly Random random;
         private readonly Random rotationRandom;
+        private readonly HashSet<DesktopFood> spearmasterRejectedFoods =
+            new HashSet<DesktopFood>();
         private DesktopFood target;
         private DesktopFood draggedFood;
         private Vec2 dragOffset;
@@ -280,6 +288,7 @@ namespace RainWorldDesktopPet.Core
         private bool placementDropActive;
         private bool placementReadyForClick;
         private bool placementLastLeftDown;
+        private bool spearmasterFoodRulesActive;
         private long physicsSerial;
         private long lastPoolStepSerial;
         private readonly int managerId;
@@ -306,7 +315,8 @@ namespace RainWorldDesktopPet.Core
             get
             {
                 return pool.IsSharedWorld && sharedHungry && target == null &&
-                    draggedFood == null;
+                    draggedFood == null && (!spearmasterFoodRulesActive ||
+                        HasAvailableSharedFood());
             }
         }
 
@@ -506,10 +516,19 @@ namespace RainWorldDesktopPet.Core
         {
             input = VirtualInput.Neutral;
             if (slugcat == null || graphics == null) return false;
+            bool useSpearmasterRules = IsSpearmaster(slugcat);
+            if (useSpearmasterRules && !spearmasterFoodRulesActive &&
+                target != null && (target.State == DesktopFoodState.Held ||
+                    target.State == DesktopFoodState.Biting))
+            {
+                interactionCountdown = random.Next(SpearmasterMinimumHoldTicks,
+                    SpearmasterMaximumHoldTicks + 1);
+            }
+            spearmasterFoodRulesActive = useSpearmasterRules;
             if (draggedFood != null) return false;
 
             if (pool.IsSharedWorld) SelectSharedTarget(slugcat);
-            else SelectLegacyTarget();
+            else SelectLegacyTarget(slugcat);
             if (target == null)
             {
                 InteractionState = FoodInteractionState.None;
@@ -556,7 +575,10 @@ namespace RainWorldDesktopPet.Core
                 if (target.PickUp(target.Chunk.Position))
                 {
                     EnsureFoodHand(slugcat);
-                    interactionCountdown = 0;
+                    interactionCountdown = IsSpearmaster(slugcat)
+                        ? random.Next(SpearmasterMinimumHoldTicks,
+                            SpearmasterMaximumHoldTicks + 1)
+                        : 0;
                     InteractionState = FoodInteractionState.Holding;
                     LastEvent = FoodEventName(target, "PickUp");
                 }
@@ -594,6 +616,17 @@ namespace RainWorldDesktopPet.Core
                     target.State != DesktopFoodState.Biting) return;
 
                 EnsureFoodHand(slugcat);
+
+                if (IsSpearmaster(slugcat))
+                {
+                    // Spearmaster has no mouth and never enters the edible bite
+                    // path. Keep the grasp for one to three seconds, then use
+                    // Player.TossObject's light-item direction and speed.
+                    InteractionState = FoodInteractionState.Holding;
+                    if (interactionCountdown > 0) interactionCountdown--;
+                    if (interactionCountdown <= 0) TossUneatenTarget(slugcat);
+                    return;
+                }
 
                 if (target.State == DesktopFoodState.Held)
                 {
@@ -716,6 +749,8 @@ namespace RainWorldDesktopPet.Core
             placementDropActive = false;
             placementReadyForClick = false;
             placementLastLeftDown = false;
+            spearmasterFoodRulesActive = false;
+            spearmasterRejectedFoods.Clear();
             InteractionState = FoodInteractionState.None;
             LastSpawnAccepted = false;
             LastEvent = "Food_Clear";
@@ -764,6 +799,8 @@ namespace RainWorldDesktopPet.Core
             {
                 DesktopFood food = pool.Items[i];
                 if (!food.IsActive || food.State != DesktopFoodState.Free) continue;
+                if (IsSpearmaster(slugcat) && spearmasterRejectedFoods.Contains(food))
+                    continue;
                 double distance = Vec2.Distance(slugcat.Center, food.Chunk.Position);
                 if (distance >= closestDistance) continue;
                 closest = food;
@@ -775,7 +812,7 @@ namespace RainWorldDesktopPet.Core
             LastEvent = FoodEventName(target, "ClaimShared");
         }
 
-        private void SelectLegacyTarget()
+        private void SelectLegacyTarget(Slugcat slugcat)
         {
             if (target != null && target.IsActive && pool.Contains(target)) return;
             target = null;
@@ -784,6 +821,8 @@ namespace RainWorldDesktopPet.Core
                 DesktopFood food = pool.Items[i];
                 if (!food.IsActive || food.State == DesktopFoodState.Ignored ||
                     food.State == DesktopFoodState.Dragged) continue;
+                if (IsSpearmaster(slugcat) && spearmasterRejectedFoods.Contains(food))
+                    continue;
                 if (food.State == DesktopFoodState.Free && !ConsiderFood(food)) continue;
                 target = food;
                 break;
@@ -806,6 +845,46 @@ namespace RainWorldDesktopPet.Core
             ResetTargetState();
         }
 
+        private void TossUneatenTarget(Slugcat slugcat)
+        {
+            DesktopFood tossed = target;
+            if (tossed == null || (tossed.State != DesktopFoodState.Held &&
+                tossed.State != DesktopFoodState.Biting)) return;
+
+            int facing = slugcat.State.Facing == 0 ? 1 : slugcat.State.Facing;
+            double radians = TossAngleDegrees * facing * Math.PI / 180.0;
+            Vec2 direction = new Vec2(Math.Sin(radians), -Math.Cos(radians));
+            // Player.TossObject for a 0.2-mass item first carries 60% of the
+            // main chunk velocity, then adds a 12.5-unit 60-degree toss.
+            Vec2 velocity = slugcat.BodyChunks[0].Velocity * 0.6 +
+                direction * TossSpeed;
+            tossed.Drop(velocity);
+            spearmasterRejectedFoods.Add(tossed);
+            if (pool.IsSharedWorld)
+                pool.ReleaseReservation(tossed, this, true);
+            else
+                tossed.ReleaseClaim();
+            LastEvent = FoodEventName(tossed, "TossUneaten");
+            ResetTargetState();
+        }
+
+        private bool HasAvailableSharedFood()
+        {
+            for (int i = 0; i < pool.Items.Count; i++)
+            {
+                DesktopFood food = pool.Items[i];
+                if (food.IsActive && food.State == DesktopFoodState.Free &&
+                    !spearmasterRejectedFoods.Contains(food)) return true;
+            }
+            return false;
+        }
+
+        private static bool IsSpearmaster(Slugcat slugcat)
+        {
+            return slugcat != null && slugcat.SelectedSlugcat != null &&
+                slugcat.SelectedSlugcat.Id == SlugcatId.SpearMaster;
+        }
+
         private void ResetTargetState()
         {
             target = null;
@@ -817,6 +896,10 @@ namespace RainWorldDesktopPet.Core
         private void RemoveInactive()
         {
             pool.RemoveInactive();
+            spearmasterRejectedFoods.RemoveWhere(delegate(DesktopFood food)
+            {
+                return food == null || !food.IsActive || !pool.Contains(food);
+            });
             if (target != null && (!target.IsActive || !pool.Contains(target)))
                 ResetTargetState();
             if (draggedFood != null && (!draggedFood.IsActive || !pool.Contains(draggedFood)))
@@ -874,7 +957,10 @@ namespace RainWorldDesktopPet.Core
             Limb hand = graphics.Arms[handIndex];
             if (carrying)
             {
-                graphics.SetEdibleHandPose(handIndex, interactionCountdown);
+                if (IsSpearmaster(slugcat))
+                    graphics.SetHeldFoodPose(handIndex);
+                else
+                    graphics.SetEdibleHandPose(handIndex, interactionCountdown);
                 if (biteOccurred)
                 {
                     graphics.ApplyEdibleBiteAfterGraphicsStep(handIndex);

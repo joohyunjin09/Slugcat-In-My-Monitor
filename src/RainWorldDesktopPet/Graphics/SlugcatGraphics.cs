@@ -22,6 +22,8 @@ namespace RainWorldDesktopPet.Graphics
         private readonly SlugcatPose renderPose;
         private readonly Random graphicsRandom = new Random();
         private readonly Vec2[,] drawPositions = new Vec2[2, 2];
+        private readonly Vec2[] crawlEdibleStart = new Vec2[2];
+        private readonly bool[] hasCrawlEdibleStart = new bool[2];
         private Vec2 lookDirection;
         private Vec2 lastLookDirection;
         private Vec2 originalLookDirection;
@@ -353,6 +355,26 @@ namespace RainWorldDesktopPet.Graphics
         {
             if (handIndex < 0 || handIndex >= arms.Length)
                 throw new ArgumentOutOfRangeException("handIndex");
+            Limb hand = arms[handIndex];
+            if (slugcat.State.BodyMode == BodyModeIndex.Crawl)
+            {
+                if (!hasCrawlEdibleStart[handIndex] || eatCounter >= 40)
+                {
+                    crawlEdibleStart[handIndex] = hand.End.Position;
+                    hasCrawlEdibleStart[handIndex] = true;
+                }
+                double mouthProgress = MathUtil.InverseLerp(40.0, 20.0,
+                    eatCounter);
+                Vec2 mouthTarget = drawPositions[0, 0];
+                hand.Mode = LimbMode.HuntAbsolutePosition;
+                hand.AbsoluteHuntPosition = Vec2.Lerp(
+                    crawlEdibleStart[handIndex], mouthTarget, mouthProgress);
+                hand.TargetPosition = hand.AbsoluteHuntPosition;
+                hand.GripSurfaceId = 0;
+                hand.RetractCounter = Math.Max(0, hand.RetractCounter - 10);
+                return;
+            }
+            hasCrawlEdibleStart[handIndex] = false;
             double scale = 1.0;
             double verticalRaise = 0.0;
             double horizontalSpread = 1.0;
@@ -363,13 +385,24 @@ namespace RainWorldDesktopPet.Graphics
                 verticalRaise = MathUtil.Lerp(2.0, 4.0, progress);
                 horizontalSpread = MathUtil.Lerp(1.0, 1.2, progress);
             }
-            Limb hand = arms[handIndex];
             hand.Mode = LimbMode.HuntRelativePosition;
             hand.RelativeHuntPosition = new Vec2(
                 (-20.0 + 40.0 * handIndex) * scale * horizontalSpread,
                 12.0 * scale - verticalRaise);
             hand.GripSurfaceId = 0;
             hand.RetractCounter = Math.Max(0, hand.RetractCounter - 10);
+        }
+
+        // A held item must not replace a crawl hand's low planted pose with the
+        // standing relative grasp target. Spearmaster keeps the item at the hand
+        // until its delayed toss; standing characters still use SlugcatHand's
+        // ordinary one-hand grasp.
+        public void SetHeldFoodPose(int handIndex)
+        {
+            if (handIndex < 0 || handIndex >= arms.Length)
+                throw new ArgumentOutOfRangeException("handIndex");
+            if (slugcat.State.BodyMode == BodyModeIndex.Crawl) return;
+            SetEdibleHandPose(handIndex, 40);
         }
 
         // PlayerGraphics.BiteFly runs before PlayerGraphics.Update in Rain World.

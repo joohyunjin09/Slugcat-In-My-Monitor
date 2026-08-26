@@ -101,6 +101,10 @@ namespace RainWorldDesktopPet.Tests
                 FoodInteractionUsesVirtualInputAndConsumes);
             Run("Food bite animation matches PlayerGraphics BiteFly cadence",
                 FoodBiteAnimationMatchesOriginalCadence);
+            Run("Spearmaster holds food for one to three seconds then tosses it",
+                SpearmasterTossesFoodWithoutEating);
+            Run("Crawl eating starts at the planted hand and moves toward the mouth",
+                CrawlFoodMovesFromHandToMouth);
             Run("Food offers use a farther randomized drop distance",
                 FoodSpawnUsesFarRandomizedDrop);
             Run("Fullness prevents five consecutive guaranteed meals",
@@ -189,6 +193,8 @@ namespace RainWorldDesktopPet.Tests
                 ArtificerSelfDestructUsesGpuEffectBounds);
             Run("Unused Stand and Walk hands retract like SlugcatHand", UnusedHandsRetract);
             Run("Crawl hands use original velocity-relative targets", CrawlHandsUseOriginalTargets);
+            Run("Entering Crawl clears both raised standing-hand targets",
+                CrawlEntryClearsRaisedHandTargets);
             Run("SlugcatHand connection constraint prevents arm separation", ArmConstraintPreventsSeparation);
             Run("Crawl face follows persistent body facing, not attention", CrawlFaceUsesBodyFacing);
             Run("Arm shoulders rotate from the interpolated body axis", ArmShouldersFollowBodyAxis);
@@ -621,6 +627,101 @@ namespace RainWorldDesktopPet.Tests
             Near(0.0, Vec2.Distance(manager.Target.Chunk.Position,
                 slugcat.BodyChunks[0].Position), 0.000001,
                 "the second bite is another single-frame body snap");
+        }
+
+        private static void SpearmasterTossesFoodWithoutEating()
+        {
+            Slugcat slugcat = new Slugcat(new Vec2(100.0, 100.0),
+                SlugcatId.SpearMaster);
+            slugcat.State.Grounded = true;
+            slugcat.State.Facing = 1;
+            SlugcatGraphics graphics = new SlugcatGraphics(slugcat);
+            DesktopFoodManager manager = new DesktopFoodManager(8127);
+            AttentionSystem attention = new AttentionSystem();
+            DesktopCollisionWorld world = new DesktopCollisionWorld(new WindowEnumerator());
+            world.Refresh(IntPtr.Zero);
+            VirtualInput input;
+
+            True(manager.TryAddDangleFruit(slugcat.Center + new Vec2(8.0, 0.0)),
+                "a reachable fruit can be offered to Spearmaster");
+            True(manager.TryProduceInput(slugcat, graphics, attention, out input) &&
+                manager.Target != null &&
+                manager.Target.State == DesktopFoodState.Held,
+                "Spearmaster still picks up the edible");
+            DesktopFood fruit = manager.Target;
+            int tossTick = -1;
+            for (int tick = 1; tick <= 121; tick++)
+            {
+                graphics.Step(attention, world);
+                manager.StepInteraction(slugcat, graphics);
+                Equal(0, manager.TotalBites,
+                    "Spearmaster never enters BiteEdibleObject");
+                if (manager.Target == null)
+                {
+                    tossTick = tick;
+                    break;
+                }
+            }
+
+            True(tossTick >= (int)SimulationConstants.LogicTicksPerSecond &&
+                tossTick <= (int)(SimulationConstants.LogicTicksPerSecond * 3.0),
+                "the toss delay stays inside the requested one-to-three-second range");
+            Equal(fruit.InitialBites, fruit.BitesRemaining,
+                "the tossed fruit loses no bites");
+            Equal(0, manager.FoodPointsEaten,
+                "Spearmaster gains no food points");
+            True(fruit.State == DesktopFoodState.Free &&
+                manager.LastEvent.EndsWith("TossUneaten", StringComparison.Ordinal),
+                "the held edible returns to the world as a tossed item");
+            Near(Math.Sin(Math.PI / 3.0) * 12.5, fruit.Chunk.Velocity.X,
+                0.000001, "Player.TossObject horizontal velocity");
+            Near(-Math.Cos(Math.PI / 3.0) * 12.5, fruit.Chunk.Velocity.Y,
+                0.000001, "Player.TossObject upward velocity in screen coordinates");
+            True(!manager.TryProduceInput(slugcat, graphics, attention, out input) &&
+                manager.Target == null,
+                "Spearmaster does not immediately pick up the same tossed item again");
+        }
+
+        private static void CrawlFoodMovesFromHandToMouth()
+        {
+            DesktopCollisionWorld world = new DesktopCollisionWorld(new WindowEnumerator());
+            world.Refresh(IntPtr.Zero);
+            Slugcat slugcat = new Slugcat(new Vec2(100.0, 100.0));
+            slugcat.BodyChunks[0].Position = new Vec2(108.0, 100.0);
+            slugcat.BodyChunks[1].Position = new Vec2(91.0, 100.0);
+            slugcat.State.Grounded = true;
+            slugcat.State.Facing = 1;
+            slugcat.State.BodyMode = BodyModeIndex.Crawl;
+            slugcat.State.Animation = AnimationIndex.None;
+            SlugcatGraphics graphics = new SlugcatGraphics(slugcat);
+            DesktopFoodManager manager = new DesktopFoodManager(3419);
+            AttentionSystem attention = new AttentionSystem();
+            VirtualInput input;
+
+            graphics.Step(attention, world);
+            True(manager.TryAddDangleFruit(slugcat.Center + new Vec2(5.0, 0.0)) &&
+                manager.TryProduceInput(slugcat, graphics, attention, out input),
+                "the crawling Slugcat picks up a reachable fruit");
+            graphics.Step(attention, world);
+            Vec2 plantedHand = graphics.Arms[0].End.Position;
+            manager.StepInteraction(slugcat, graphics);
+            True(graphics.Arms[0].Mode == LimbMode.HuntAbsolutePosition,
+                "crawl eating keeps an absolute low hand target");
+            Near(0.0, Vec2.Distance(plantedHand,
+                graphics.Arms[0].AbsoluteHuntPosition), 0.000001,
+                "the first eating frame preserves the planted hand position");
+
+            for (int tick = 0; tick < 20; tick++)
+            {
+                graphics.Step(attention, world);
+                manager.StepInteraction(slugcat, graphics);
+            }
+            SlugcatPose pose = graphics.BuildPose(1.0, attention);
+            Near(0.0, Vec2.Distance(pose.Chest,
+                graphics.Arms[0].AbsoluteHuntPosition), 0.000001,
+                "the original 40-to-20 eating phase reaches the mouth/chest target");
+            Equal(0, manager.TotalBites,
+                "the hand reaches the mouth before the first bite");
         }
 
         private static void FoodVisualBoundsIncludeProceduralParts()
@@ -3495,6 +3596,35 @@ namespace RainWorldDesktopPet.Tests
             True(graphics.Arms[0].Mode == LimbMode.HuntAbsolutePosition &&
                  graphics.Arms[1].Mode == LimbMode.HuntAbsolutePosition,
                 "crawl arms use absolute hunt mode");
+        }
+
+        private static void CrawlEntryClearsRaisedHandTargets()
+        {
+            DesktopCollisionWorld world = new DesktopCollisionWorld(new WindowEnumerator());
+            world.Refresh(IntPtr.Zero);
+            Slugcat slugcat = new Slugcat(new Vec2(400.0, 400.0));
+            SlugcatGraphics graphics = new SlugcatGraphics(slugcat);
+            AttentionSystem attention = new AttentionSystem();
+            Vec2 connection = slugcat.BodyChunks[0].Position;
+            for (int hand = 0; hand < 2; hand++)
+            {
+                graphics.Arms[hand].Mode = LimbMode.HuntAbsolutePosition;
+                graphics.Arms[hand].AbsoluteHuntPosition =
+                    connection + new Vec2(hand == 0 ? -5.0 : 5.0, -18.0);
+                graphics.Arms[hand].End.Position =
+                    graphics.Arms[hand].AbsoluteHuntPosition;
+            }
+
+            slugcat.State.BodyMode = BodyModeIndex.Crawl;
+            slugcat.State.Animation = AnimationIndex.None;
+            for (int tick = 0; tick < 3; tick++) graphics.Step(attention, world);
+            for (int hand = 0; hand < 2; hand++)
+            {
+                True(graphics.Arms[hand].TargetPosition.Y >= connection.Y - 0.000001,
+                    "crawl entry replaces raised target for hand " + hand);
+                True(graphics.Arms[hand].End.Position.Y >= connection.Y - 2.0,
+                    "crawl hand lowers instead of preserving the raised pose for hand " + hand);
+            }
         }
 
         private static void ArmConstraintPreventsSeparation()
