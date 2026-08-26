@@ -7,10 +7,19 @@ namespace RainWorldDesktopPet.RainWorld
 {
     public sealed class RainWorldAssetLoader
     {
+        private sealed class CachedPlayerAtlas
+        {
+            public RainWorldAtlasSet Root;
+            public string Status;
+        }
+
         private static readonly string[] RequiredPlayerElements =
         {
             "BodyA", "HipsA", "HeadA0", "FaceA0"
         };
+        private static readonly object PlayerAtlasCacheSync = new object();
+        private static readonly Dictionary<string, CachedPlayerAtlas> PlayerAtlasCache =
+            new Dictionary<string, CachedPlayerAtlas>(StringComparer.OrdinalIgnoreCase);
 
         private readonly RainWorldInstallation installation;
 
@@ -32,6 +41,42 @@ namespace RainWorldDesktopPet.RainWorld
                 return null;
             }
 
+            string cacheKey = installation.RootPath;
+            lock (PlayerAtlasCacheSync)
+            {
+                CachedPlayerAtlas cached;
+                if (PlayerAtlasCache.TryGetValue(cacheKey, out cached))
+                {
+                    Status = cached.Status;
+                    return cached.Root.CreateSharedView();
+                }
+            }
+
+            RainWorldAtlasSet loaded = TryLoadPlayerAtlasUncached();
+            if (loaded == null) return null;
+            string loadedStatus = Status;
+
+            lock (PlayerAtlasCacheSync)
+            {
+                CachedPlayerAtlas existing;
+                if (PlayerAtlasCache.TryGetValue(cacheKey, out existing))
+                {
+                    loaded.Dispose();
+                    Status = existing.Status;
+                    return existing.Root.CreateSharedView();
+                }
+
+                PlayerAtlasCache[cacheKey] = new CachedPlayerAtlas
+                {
+                    Root = loaded,
+                    Status = loadedStatus
+                };
+                return loaded.CreateSharedView();
+            }
+        }
+
+        private RainWorldAtlasSet TryLoadPlayerAtlasUncached()
+        {
             EmbeddedUnityAtlasProvider embedded = new EmbeddedUnityAtlasProvider(installation);
             RainWorldAtlasSet embeddedSet = embedded.TryLoadPlayerAtlases();
             if (embeddedSet != null)

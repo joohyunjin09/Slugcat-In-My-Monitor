@@ -228,6 +228,7 @@ namespace RainWorldDesktopPet.AI
         private int saintAttachedTicks;
         private int saintAttachDurationTicks = 70;
         private int saintFreestyleCooldownTicks;
+        private int saintTongueIntentCountdownTicks;
         private bool originalAttentionInitialized;
         private AttentionKind originalAttentionKind;
         private Vec2 originalAttentionTarget;
@@ -278,7 +279,7 @@ namespace RainWorldDesktopPet.AI
         private static readonly CharacterAIProfile RivuletAI = new CharacterAIProfile(
             0.94, 0.80, 0.88, 0.86, 0.55, 0.78, 0.18, 0.86, 0.22, 0.38, 0.24, 0.72, 0.62, 0.40);
         private static readonly CharacterAIProfile SaintAI = new CharacterAIProfile(
-            0.34, 0.72, 0.32, 0.22, 0.90, 0.62, 0.88, 0.18, 0.64, 0.94, 0.72, 0.86, 0.18, 0.62);
+            0.34, 0.72, 0.32, 0.22, 0.90, 0.62, 0.88, 0.18, 0.64, 0.94, 0.72, 0.86, 0.18, 0.82);
 
         public DesktopPetAI(int seed)
             : this(seed, 0)
@@ -408,6 +409,7 @@ namespace RainWorldDesktopPet.AI
             if (directionCommitmentTicks > 0) directionCommitmentTicks--;
             if (artificerFreestyleCooldownTicks > 0) artificerFreestyleCooldownTicks--;
             if (saintFreestyleCooldownTicks > 0) saintFreestyleCooldownTicks--;
+            if (saintTongueIntentCountdownTicks > 0) saintTongueIntentCountdownTicks--;
             if (microCooldownTicks > 0) microCooldownTicks--;
             if (moodTicksRemaining > 0) moodTicksRemaining--;
 
@@ -516,6 +518,8 @@ namespace RainWorldDesktopPet.AI
             evaluationCountdown = 1;
             freeRoamRetargetCountdown = 0;
             destinationKind = AIDestinationKind.None;
+            saintTongueIntentCountdownTicks = id == SlugcatId.Saint
+                ? SecondsToTicks(SampleCentered(3.0, 7.0)) : 0;
         }
 
         private static CharacterAIProfile ProfileFor(SlugcatId id)
@@ -730,7 +734,7 @@ namespace RainWorldDesktopPet.AI
             TransitionPlan.Clear();
             Vec2 center = slugcat.Center;
             double maximumRange = slugcat.AbilityController is SaintAbilityController
-                ? 195.0 : (slugcat.AbilityController is ArtificerAbilityController ? 250.0 : 105.0);
+                ? 220.0 : (slugcat.AbilityController is ArtificerAbilityController ? 250.0 : 105.0);
             DesktopSurface best = null;
             Vec2 bestPoint = Vec2.Zero;
             double bestScore = double.MaxValue;
@@ -880,23 +884,78 @@ namespace RainWorldDesktopPet.AI
                 saintTransitionFreestyle = false;
                 saintAwaitingJumpRelease = false;
                 saintAttachedTicks++;
+
+                bool contactRight = slugcat.BodyChunks[0].ContactRight ||
+                    slugcat.BodyChunks[1].ContactRight;
+                bool contactLeft = slugcat.BodyChunks[0].ContactLeft ||
+                    slugcat.BodyChunks[1].ContactLeft;
+                bool contactFloor = slugcat.BodyChunks[0].ContactFloor ||
+                    slugcat.BodyChunks[1].ContactFloor;
+                int escapeDirection = contactRight && !contactLeft ? -1 :
+                    (contactLeft && !contactRight ? 1 :
+                        (Math.Abs(slugcat.Center.X - saint.TonguePosition.X) > 8.0
+                            ? (slugcat.Center.X < saint.TonguePosition.X ? -1 : 1)
+                            : desiredDirection));
+
                 if (saintAttachedTicks >= saintAttachDurationTicks)
                 {
-                    saintAttachedTicks = 0;
-                    saintAttachDurationTicks = 45 + random.Next(0, 56);
                     Behavior = DesktopBehavior.TongueSwing;
-                    // The original tongue release is a fresh jump edge.
-                    input = new VirtualInput(desiredDirection, 0, true, false);
+                    if (saint.CanJumpReleaseAttachedTongue && !slugcat.LastInput.Jump)
+                    {
+                        saintAttachedTicks = 0;
+                        saintAttachDurationTicks = 45 + random.Next(0, 56);
+                        // The original tongue release is a fresh jump edge after
+                        // Saint has completely left the floor/wall contact.
+                        input = new VirtualInput(escapeDirection, 0, true, false);
+                        return true;
+                    }
+
+                    // Do not wait forever for CanJumpReleaseAttachedTongue to become
+                    // true. If Saint is still touching the floor or a wall, first use
+                    // the normal Player jump/wall-jump path to leave that surface.
+                    // AbilityController sees LaunchedThisTick and therefore does not
+                    // consume this first jump as a tongue release.
+                    if (slugcat.LastInput.Jump)
+                    {
+                        input = new VirtualInput(escapeDirection, 0, false, false);
+                        return true;
+                    }
+                    if (context.Grounded || contactFloor || contactLeft || contactRight)
+                    {
+                        input = new VirtualInput(escapeDirection, 0, true, false);
+                        return true;
+                    }
+
+                    // Airborne launch grace / CanJump is still expiring. Keep the
+                    // button released so the eventual release is a fresh jump edge.
+                    input = new VirtualInput(escapeDirection, 0, false, false);
                     return true;
                 }
 
                 bool anchorAbove = saint.TonguePosition.Y < slugcat.Center.Y - 12.0;
-                input = new VirtualInput(desiredDirection, anchorAbove ? -1 : 0,
+                bool anchorBelow = saint.TonguePosition.Y > slugcat.Center.Y + 12.0;
+                // Pull toward an overhead anchor, but give a floor-side anchor slack
+                // instead of pinning Saint down against the same surface.
+                int ropeLengthInput = anchorAbove ? -1 : (anchorBelow ? 1 : 0);
+                input = new VirtualInput(desiredDirection, ropeLengthInput,
                     false, false);
                 return true;
             }
             saintAttachedTicks = 0;
             if (saint.Mode != SaintTongueMode.Retracted) return false;
+
+            if (!saintTransitionArmed && saintTongueIntentCountdownTicks <= 0 &&
+                saintFreestyleCooldownTicks == 0 && CanStartProactiveSaintTongue(context))
+            {
+                saintTransitionArmed = true;
+                saintTransitionFreestyle = true;
+                saintAwaitingJumpRelease = false;
+                saintFreestyleCooldownTicks = SecondsToTicks(SampleCentered(1.5, 3.0));
+                saintTongueIntentCountdownTicks = NextSaintTongueIntentTicks();
+                EnterBehavior(slugcat, DesktopBehavior.Jump, context);
+                input = new VirtualInput(desiredDirection, 0, true, false);
+                return true;
+            }
 
             if (context.Grounded && Behavior == DesktopBehavior.Jump &&
                 behaviorTicks <= 8)
@@ -911,7 +970,8 @@ namespace RainWorldDesktopPet.AI
                     saintTransitionFreestyle = freestyle;
                     saintAwaitingJumpRelease = false;
                     if (freestyle)
-                        saintFreestyleCooldownTicks = SecondsToTicks(SampleCentered(1.6, 4.0));
+                        saintFreestyleCooldownTicks = SecondsToTicks(0.5);
+                    saintTongueIntentCountdownTicks = NextSaintTongueIntentTicks();
                     return false;
                 }
             }
@@ -970,8 +1030,8 @@ namespace RainWorldDesktopPet.AI
         {
             return TransitionPlan.Mode == PlatformTransitionMode.TongueSwing &&
                 TransitionPlan.IsValid &&
-                (Math.Abs(TransitionPlan.HorizontalDistance) >= 42.0 ||
-                 TransitionPlan.VerticalDistance <= -20.0);
+                (Math.Abs(TransitionPlan.HorizontalDistance) >= 28.0 ||
+                 TransitionPlan.VerticalDistance <= -12.0);
         }
 
         private bool IsSpecialTraversalAvailable(Slugcat slugcat)
@@ -1005,9 +1065,26 @@ namespace RainWorldDesktopPet.AI
 
         private double SaintFreestyleChance()
         {
-            return MathUtil.Clamp01(0.12 + curiosity * 0.10 +
-                playfulness * 0.07 + traitSpecialUse * 0.09 +
-                (mood == AIMood.Curious ? 0.05 : 0.0));
+            return MathUtil.Clamp01(0.28 + curiosity * 0.16 +
+                playfulness * 0.10 + traitSpecialUse * 0.18 +
+                (mood == AIMood.Curious ? 0.08 : 0.0));
+        }
+
+        private bool CanStartProactiveSaintTongue(UtilityContext context)
+        {
+            bool eligibleBehavior = IsLocomotionBehavior(Behavior) ||
+                Behavior == DesktopBehavior.Idle ||
+                Behavior == DesktopBehavior.LookAround ||
+                Behavior == DesktopBehavior.ObserveWindow;
+            return eligibleBehavior && context.Grounded && !context.ObstacleAhead &&
+                context.EdgeDistance > 24.0;
+        }
+
+        private int NextSaintTongueIntentTicks()
+        {
+            double seconds = SampleCentered(8.0, 18.0);
+            seconds *= MathUtil.Lerp(1.10, 0.82, traitSpecialUse);
+            return SecondsToTicks(seconds);
         }
 
         private void ResetArtificerTransition()
@@ -1230,10 +1307,16 @@ namespace RainWorldDesktopPet.AI
             context.ExplorationJumpAvailable = explorationJumpRequested &&
                 explorationJumpCooldownTicks == 0 && context.Grounded &&
                 !context.ObstacleAhead && context.EdgeDistance > 48.0;
-            context.FreeJumpOpportunity = context.Grounded &&
-                jumpCooldownTicks == 0 && explorationJumpCooldownTicks == 0 &&
-                !context.ObstacleAhead && context.EdgeDistance > 54.0 &&
-                playfulness > 0.58 && (restlessness + boredom) > 0.82;
+            bool saintFreeJumpOpportunity =
+                slugcat.AbilityController is SaintAbilityController &&
+                context.Grounded && jumpCooldownTicks == 0 &&
+                explorationJumpCooldownTicks == 0 && saintFreestyleCooldownTicks == 0 &&
+                !context.ObstacleAhead && context.EdgeDistance > 38.0;
+            context.FreeJumpOpportunity = saintFreeJumpOpportunity ||
+                (context.Grounded && jumpCooldownTicks == 0 &&
+                 explorationJumpCooldownTicks == 0 && !context.ObstacleAhead &&
+                 context.EdgeDistance > 54.0 && playfulness > 0.58 &&
+                 (restlessness + boredom) > 0.82);
 
             context.OnWindow = slugcat.PrimarySupportingSurfaceId > 0;
             context.MouseDistance = Vec2.Distance(slugcat.Center, mouse.Position);
@@ -1273,6 +1356,18 @@ namespace RainWorldDesktopPet.AI
                 double variation = (random.NextDouble() - 0.5) * 0.055;
                 double score = UtilityEvaluator.Score(candidate, context, variation);
                 score = ApplyIntentContinuity(candidate, score, urgentAvoid, urgentClimb);
+                // Crawl remains a valid personality/rest behavior, but it should be
+                // occasional rather than competing evenly with normal locomotion.
+                if (candidate == DesktopBehavior.Crawl) score *= 0.48;
+                if (candidate == DesktopBehavior.Jump &&
+                    slugcat.AbilityController is SaintAbilityController &&
+                    context.FreeJumpOpportunity && saintFreestyleCooldownTicks == 0)
+                {
+                    // Saint has low base playfulness, so generic free-jump utility almost
+                    // never wins. Give safe Saint hops a character-only utility boost to
+                    // create more natural tongue-launch opportunities.
+                    score += 0.45 + traitSpecialUse * 0.22 + curiosity * 0.10;
+                }
                 score -= RecentBehaviorPenalty(candidate);
                 if (score < 0.0) score = 0.0;
                 utilityScores[i] = score;
@@ -1499,7 +1594,7 @@ namespace RainWorldDesktopPet.AI
                 case DesktopBehavior.Idle: minimum = 0.5; maximum = 15.0; break;
                 case DesktopBehavior.Walk: minimum = 1.4; maximum = 7.5; break;
                 case DesktopBehavior.Run: minimum = 0.4; maximum = 4.0; break;
-                case DesktopBehavior.Crawl: minimum = 0.8; maximum = 6.5; break;
+                case DesktopBehavior.Crawl: minimum = 0.35; maximum = 2.4; break;
                 case DesktopBehavior.Explore: minimum = 1.2; maximum = 10.0; break;
                 case DesktopBehavior.Sit: minimum = 0.7; maximum = 12.0; break;
                 case DesktopBehavior.Sleep: minimum = 3.0; maximum = 22.0; break;
@@ -1880,28 +1975,32 @@ namespace RainWorldDesktopPet.AI
                 return VirtualInput.Neutral;
 
             int towardMouse = mouse.Position.X < slugcat.Center.X ? -1 : 1;
+            // Releasing Crawl/brief crouch to neutral Y can leave Player.Standing
+            // false. Upright locomotion therefore sends the original up intent
+            // while grounded until the movement state has actually stood up.
+            int uprightY = context.Grounded && !slugcat.State.Standing ? -1 : 0;
             switch (Behavior)
             {
                 case DesktopBehavior.Walk:
                 case DesktopBehavior.Run:
                 case DesktopBehavior.Explore:
-                    return new VirtualInput(desiredDirection, 0, false, false);
+                    return new VirtualInput(desiredDirection, uprightY, false, false);
                 case DesktopBehavior.Crawl:
                     return new VirtualInput(desiredDirection, 1, false, false);
                 case DesktopBehavior.Play:
                     // Play remains an intent; actual motion still goes through the
                     // existing movement system. Short targets/micro-actions make it
                     // visually distinct without inventing a new speed or physics path.
-                    return new VirtualInput(desiredDirection, 0, false, false);
+                    return new VirtualInput(desiredDirection, uprightY, false, false);
                 case DesktopBehavior.TurnAround:
-                    return new VirtualInput(desiredDirection, 0, false, false);
+                    return new VirtualInput(desiredDirection, uprightY, false, false);
                 case DesktopBehavior.FollowMouse:
                     if (!context.MouseAttentionActive) return VirtualInput.Neutral;
-                    return new VirtualInput(towardMouse, 0, context.Grounded &&
+                    return new VirtualInput(towardMouse, uprightY, context.Grounded &&
                         mouse.Position.Y < slugcat.Center.Y - 80.0, false);
                 case DesktopBehavior.AvoidMouse:
                     if (!context.MouseAttentionActive) return VirtualInput.Neutral;
-                    return new VirtualInput(-towardMouse, 0, context.Grounded &&
+                    return new VirtualInput(-towardMouse, uprightY, context.Grounded &&
                         context.MouseDistance < 55.0, false);
                 case DesktopBehavior.Jump:
                     return new VirtualInput(desiredDirection, 0,

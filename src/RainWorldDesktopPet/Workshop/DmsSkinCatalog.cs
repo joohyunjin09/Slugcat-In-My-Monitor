@@ -26,9 +26,93 @@ namespace RainWorldDesktopPet.Workshop
         public bool HasCustomShape { get { return Length > 0f || Wideness > 0f || Roundness > 0f; } }
     }
 
+    internal sealed class SharedDmsAtlasLease : IDisposable
+    {
+        private string key;
+
+        internal SharedDmsAtlasLease(string key, RainWorldAtlas atlas)
+        {
+            this.key = key;
+            Atlas = atlas;
+        }
+
+        public RainWorldAtlas Atlas { get; private set; }
+
+        public void Dispose()
+        {
+            RainWorldAtlas atlas = Atlas;
+            if (atlas == null) return;
+            Atlas = null;
+            string releaseKey = key;
+            key = null;
+            SharedDmsAtlasCache.Release(releaseKey, atlas);
+        }
+    }
+
+    internal static class SharedDmsAtlasCache
+    {
+        private sealed class Entry
+        {
+            public RainWorldAtlas Atlas;
+            public int References;
+        }
+
+        private static readonly object Sync = new object();
+        private static readonly Dictionary<string, Entry> Entries =
+            new Dictionary<string, Entry>(StringComparer.OrdinalIgnoreCase);
+
+        public static SharedDmsAtlasLease Acquire(string imagePath, string metadataPath)
+        {
+            string key = BuildKey(imagePath, metadataPath);
+            lock (Sync)
+            {
+                Entry entry;
+                if (Entries.TryGetValue(key, out entry))
+                {
+                    entry.References++;
+                    return new SharedDmsAtlasLease(key, entry.Atlas);
+                }
+
+                RainWorldAtlas atlas = RainWorldAtlasLoader.Load(imagePath, metadataPath);
+                entry = new Entry { Atlas = atlas, References = 1 };
+                Entries[key] = entry;
+                return new SharedDmsAtlasLease(key, atlas);
+            }
+        }
+
+        internal static void Release(string key, RainWorldAtlas atlas)
+        {
+            RainWorldAtlas release = null;
+            if (string.IsNullOrEmpty(key) || atlas == null) return;
+            lock (Sync)
+            {
+                Entry entry;
+                if (!Entries.TryGetValue(key, out entry) ||
+                    !ReferenceEquals(entry.Atlas, atlas)) return;
+                entry.References--;
+                if (entry.References > 0) return;
+                Entries.Remove(key);
+                release = entry.Atlas;
+            }
+            if (release != null) release.Dispose();
+        }
+
+        private static string BuildKey(string imagePath, string metadataPath)
+        {
+            string image = Path.GetFullPath(imagePath);
+            string metadata = Path.GetFullPath(metadataPath);
+            FileInfo imageInfo = new FileInfo(image);
+            FileInfo metadataInfo = new FileInfo(metadata);
+            return image + "|" + imageInfo.Length + "|" + imageInfo.LastWriteTimeUtc.Ticks +
+                "|" + metadata + "|" + metadataInfo.Length + "|" +
+                metadataInfo.LastWriteTimeUtc.Ticks;
+        }
+    }
+
     public sealed class DmsSkinDefinition : IDisposable
     {
-        private readonly List<RainWorldAtlas> atlases = new List<RainWorldAtlas>();
+        private readonly List<SharedDmsAtlasLease> atlasLeases =
+            new List<SharedDmsAtlasLease>();
         private readonly Dictionary<string, AtlasSprite> elements =
             new Dictionary<string, AtlasSprite>(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, AtlasSprite> leftElements =
@@ -60,9 +144,11 @@ namespace RainWorldDesktopPet.Workshop
             return !string.IsNullOrWhiteSpace(part) && availableParts.Contains(part);
         }
 
-        internal void AddAtlas(RainWorldAtlas atlas)
+        internal void AddAtlas(SharedDmsAtlasLease lease)
         {
-            atlases.Add(atlas);
+            if (lease == null || lease.Atlas == null) throw new ArgumentNullException("lease");
+            atlasLeases.Add(lease);
+            RainWorldAtlas atlas = lease.Atlas;
             foreach (KeyValuePair<string, AtlasElement> item in atlas.Elements)
             {
                 string name = item.Key;
@@ -144,8 +230,8 @@ namespace RainWorldDesktopPet.Workshop
 
         public void Dispose()
         {
-            foreach (RainWorldAtlas atlas in atlases) atlas.Dispose();
-            atlases.Clear();
+            for (int i = 0; i < atlasLeases.Count; i++) atlasLeases[i].Dispose();
+            atlasLeases.Clear();
             elements.Clear();
             leftElements.Clear();
             rightElements.Clear();
@@ -345,7 +431,7 @@ namespace RainWorldDesktopPet.Workshop
                 }
                 try
                 {
-                    skin.AddAtlas(RainWorldAtlasLoader.Load(png, text));
+                    skin.AddAtlas(SharedDmsAtlasCache.Acquire(png, text));
                 }
                 catch (Exception exception)
                 {
