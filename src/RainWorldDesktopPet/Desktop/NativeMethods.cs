@@ -29,7 +29,16 @@ namespace RainWorldDesktopPet.Desktop
         internal const int WM_CAPTURECHANGED = 0x0215;
         internal const int WM_DISPLAYCHANGE = 0x007E;
         internal const int WM_DPICHANGED = 0x02E0;
+        internal const int WM_GETTEXT = 0x000D;
+        internal const int WM_POWERBROADCAST = 0x0218;
         internal const int WM_QUIT = 0x0012;
+        internal const int PBT_APMRESUMECRITICAL = 0x0006;
+        internal const int PBT_APMRESUMESUSPEND = 0x0007;
+        internal const int PBT_APMSUSPEND = 0x0004;
+        internal const int PBT_APMRESUMEAUTOMATIC = 0x0012;
+        internal const uint DEVICE_NOTIFY_WINDOW_HANDLE = 0x00000000;
+        internal const uint SMTO_BLOCK = 0x0001;
+        internal const uint SMTO_ABORTIFHUNG = 0x0002;
         internal const uint PM_NOREMOVE = 0x0000;
         internal const int HTTRANSPARENT = -1;
         internal const int HTCLIENT = 1;
@@ -41,6 +50,11 @@ namespace RainWorldDesktopPet.Desktop
         internal const int VK_RBUTTON = 0x02;
         internal const int VK_MBUTTON = 0x04;
         internal const int VREFRESH = 116;
+        internal const int ProcessPowerThrottling = 4;
+        internal const uint PROCESS_POWER_THROTTLING_CURRENT_VERSION = 1;
+        internal const uint PROCESS_POWER_THROTTLING_EXECUTION_SPEED = 0x1;
+        internal const uint PROCESS_POWER_THROTTLING_IGNORE_TIMER_RESOLUTION = 0x2;
+        internal const uint DesiredTimerResolutionMilliseconds = 1;
 
         internal delegate bool EnumWindowsProc(IntPtr handle, IntPtr parameter);
         internal delegate IntPtr LowLevelMouseProc(int code, IntPtr message, IntPtr data);
@@ -126,6 +140,14 @@ namespace RainWorldDesktopPet.Desktop
             internal int Height { get { return Bottom - Top; } }
         }
 
+        [StructLayout(LayoutKind.Sequential)]
+        internal struct ProcessPowerThrottlingState
+        {
+            internal uint Version;
+            internal uint ControlMask;
+            internal uint StateMask;
+        }
+
         [DllImport("user32.dll")]
         [return: MarshalAs(UnmanagedType.Bool)]
         internal static extern bool EnumWindows(EnumWindowsProc callback, IntPtr parameter);
@@ -149,8 +171,11 @@ namespace RainWorldDesktopPet.Desktop
         [DllImport("user32.dll", CharSet = CharSet.Unicode)]
         internal static extern int GetClassName(IntPtr handle, StringBuilder className, int maximumCount);
 
-        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
-        internal static extern int GetWindowText(IntPtr handle, StringBuilder text, int maximumCount);
+        [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        internal static extern bool SendMessageTimeout(IntPtr handle, uint message,
+            UIntPtr wParam, StringBuilder lParam, uint flags, uint timeout,
+            out UIntPtr result);
 
         [DllImport("user32.dll")]
         internal static extern uint GetWindowThreadProcessId(IntPtr handle, out uint processId);
@@ -238,6 +263,15 @@ namespace RainWorldDesktopPet.Desktop
         [DllImport("user32.dll")]
         internal static extern IntPtr GetCapture();
 
+        [DllImport("user32.dll", SetLastError = true)]
+        internal static extern IntPtr RegisterSuspendResumeNotification(
+            IntPtr recipient, uint flags);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        internal static extern bool UnregisterSuspendResumeNotification(
+            IntPtr registrationHandle);
+
         [DllImport("user32.dll")]
         internal static extern IntPtr GetDC(IntPtr handle);
 
@@ -285,6 +319,21 @@ namespace RainWorldDesktopPet.Desktop
         [DllImport("winmm.dll")]
         internal static extern int waveOutClose(IntPtr hWaveOut);
 
+        [DllImport("winmm.dll")]
+        private static extern uint timeBeginPeriod(uint period);
+
+        [DllImport("winmm.dll")]
+        private static extern uint timeEndPeriod(uint period);
+
+        [DllImport("kernel32.dll")]
+        private static extern IntPtr GetCurrentProcess();
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool SetProcessInformation(IntPtr process,
+            int processInformationClass, ref ProcessPowerThrottlingState processInformation,
+            int processInformationSize);
+
         [DllImport("gdi32.dll")]
         internal static extern int GetDeviceCaps(IntPtr deviceContext, int index);
 
@@ -311,6 +360,44 @@ namespace RainWorldDesktopPet.Desktop
             }
 
             SetProcessDPIAware();
+        }
+
+        internal static ProcessPowerThrottlingState CreateInteractivePowerThrottlingState()
+        {
+            ProcessPowerThrottlingState state = new ProcessPowerThrottlingState();
+            state.Version = PROCESS_POWER_THROTTLING_CURRENT_VERSION;
+            state.ControlMask = PROCESS_POWER_THROTTLING_EXECUTION_SPEED |
+                PROCESS_POWER_THROTTLING_IGNORE_TIMER_RESOLUTION;
+            // Taking control with a cleared StateMask disables EcoQoS and makes
+            // Windows honor this process's timer-resolution request.
+            state.StateMask = 0;
+            return state;
+        }
+
+        internal static bool ConfigureInteractiveProcessPowerPolicy()
+        {
+            try
+            {
+                ProcessPowerThrottlingState state =
+                    CreateInteractivePowerThrottlingState();
+                return SetProcessInformation(GetCurrentProcess(),
+                    ProcessPowerThrottling, ref state,
+                    Marshal.SizeOf(typeof(ProcessPowerThrottlingState)));
+            }
+            catch (EntryPointNotFoundException)
+            {
+                return false;
+            }
+        }
+
+        internal static bool BeginHighResolutionTimer()
+        {
+            return timeBeginPeriod(DesiredTimerResolutionMilliseconds) == 0;
+        }
+
+        internal static void EndHighResolutionTimer()
+        {
+            timeEndPeriod(DesiredTimerResolutionMilliseconds);
         }
 
         internal static double GetPrimaryDisplayRefreshRate()

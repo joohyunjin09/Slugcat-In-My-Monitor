@@ -49,8 +49,17 @@ namespace RainWorldDesktopPet
                 bool debug = HasFlag(args, "--debug");
                 SlugcatId selectedSlugcat = ReadSlugcat(ReadOption(args, "--slugcat"));
                 string dmsSkin = ReadOption(args, "--dms-skin");
-                Application.Run(new LayeredOverlayWindow(installation, debug,
-                    selectedSlugcat, dmsSkin));
+                NativeMethods.ConfigureInteractiveProcessPowerPolicy();
+                bool highResolutionTimer = NativeMethods.BeginHighResolutionTimer();
+                try
+                {
+                    Application.Run(new LayeredOverlayWindow(installation, debug,
+                        selectedSlugcat, dmsSkin));
+                }
+                finally
+                {
+                    if (highResolutionTimer) NativeMethods.EndHighResolutionTimer();
+                }
             }
         }
 

@@ -205,6 +205,19 @@ namespace RainWorldDesktopPet.Core
             renderMetricClock.Restart();
         }
 
+        public void ResetFrameTiming()
+        {
+            // Keep the clock monotonic for AI and mouse-attention timestamps,
+            // but discard the long suspended interval before the next update.
+            lastTime = clock.Elapsed.TotalSeconds;
+            fixedTimeStep.Reset();
+            surfaceRefreshAccumulator = 0.0;
+            simulationStepsLastFrame = 0;
+            renderFramesInSample = 0;
+            renderFramesPerSecond = 0.0;
+            renderMetricClock.Restart();
+        }
+
         public void Advance(IntPtr overlayHandle)
         {
             double now = clock.Elapsed.TotalSeconds;
