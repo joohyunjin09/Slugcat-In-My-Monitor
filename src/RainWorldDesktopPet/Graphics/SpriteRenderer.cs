@@ -55,7 +55,10 @@ namespace RainWorldDesktopPet.Graphics
         private readonly PointF[] tailTextureDestinationTriangle = new PointF[3];
         private readonly PointF[] abilityQuad = new PointF[4];
         private readonly PointF[] abilityTriangle = new PointF[3];
-        private readonly PointF[] eggTailQuad = new PointF[4];
+        private readonly Vec2[] eggTailCenters =
+            new Vec2[DesktopFood.EggBugEggTailSegmentCount + 1];
+        private readonly PointF[] eggTailOutline =
+            new PointF[(DesktopFood.EggBugEggTailSegmentCount + 1) * 2];
         private readonly Bitmap tailRaster;
         private readonly System.Drawing.Graphics tailRasterGraphics;
         private readonly Bitmap flatLightShaderMask;
@@ -1242,35 +1245,37 @@ namespace RainWorldDesktopPet.Graphics
         {
             if (direction.LengthSquared < 0.000001) direction = Vec2.Down;
             else direction = direction.Normalized;
-            Vec2 previous = center + direction * (5.0 * swellFactor);
-            double previousWidth = 1.0;
+            eggTailCenters[0] = center + direction * (5.0 * swellFactor);
             for (int i = 0; i < DesktopFood.EggBugEggTailSegmentCount; i++)
+                eggTailCenters[i + 1] = food.EggTailPosition(i, interpolation);
+
+            int nodeCount = eggTailCenters.Length;
+            for (int node = 0; node < nodeCount; node++)
             {
-                double progress = i /
-                    (double)(DesktopFood.EggBugEggTailSegmentCount - 1);
-                Vec2 point = food.EggTailPosition(i, interpolation);
-                Vec2 segmentDirection = point - previous;
-                if (segmentDirection.LengthSquared < 0.000001)
-                    segmentDirection = direction;
+                Vec2 tangent;
+                if (node == 0)
+                    tangent = eggTailCenters[1] - eggTailCenters[0];
+                else if (node == nodeCount - 1)
+                    tangent = eggTailCenters[node] - eggTailCenters[node - 1];
                 else
-                    segmentDirection = segmentDirection.Normalized;
-                Vec2 perpendicular = segmentDirection.Perpendicular;
+                    tangent = eggTailCenters[node + 1] -
+                        eggTailCenters[node - 1];
+                if (tangent.LengthSquared < 0.000001) tangent = direction;
+                else tangent = tangent.Normalized;
+
+                double progress = node == 0 ? 0.0 : (node - 1) /
+                    (double)(DesktopFood.EggBugEggTailSegmentCount - 1);
                 double width = MathUtil.Lerp(1.0, 0.5,
                     Math.Pow(progress, 0.25));
-                double endInset = Vec2.Distance(point, previous) / 5.0;
-                double rootWidth = i == 0
-                    ? width : (width + previousWidth) * 0.5;
-                Vec2 root = previous + (i == 0
-                    ? Vec2.Zero : segmentDirection * endInset);
-                Vec2 end = point - segmentDirection * endInset;
-                eggTailQuad[0] = (root - perpendicular * rootWidth).ToPointF();
-                eggTailQuad[1] = (root + perpendicular * rootWidth).ToPointF();
-                eggTailQuad[2] = (end + perpendicular * width).ToPointF();
-                eggTailQuad[3] = (end - perpendicular * width).ToPointF();
-                graphics.FillPolygon(GetBodyBrush(color), eggTailQuad);
-                previous = point;
-                previousWidth = width;
+                Vec2 perpendicular = tangent.Perpendicular * width;
+                eggTailOutline[node] =
+                    (eggTailCenters[node] - perpendicular).ToPointF();
+                eggTailOutline[eggTailOutline.Length - 1 - node] =
+                    (eggTailCenters[node] + perpendicular).ToPointF();
             }
+            // One continuous silhouette avoids the antialiased seams produced
+            // by filling five independent segment quads.
+            graphics.FillPolygon(GetBodyBrush(color), eggTailOutline);
         }
 
         private void FillCachedCircle(System.Drawing.Graphics graphics,

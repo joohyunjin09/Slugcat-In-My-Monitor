@@ -343,15 +343,17 @@ namespace RainWorldDesktopPet.Physics
                 Chunk.Velocity.X *= 0.8;
             }
 
-            // Preserve EggBugEgg's retail positive-rotVel condition. Negative
-            // horizontal floor motion updates rotVel but does not rotate the egg.
+            // The retail branch only advances positive rotVel. On a desktop
+            // floor that makes leftward eggs visually lock while rightward eggs
+            // roll, so preserve the same signed equation in both directions.
             ApplyEggRotationVelocity();
             StepEggTail();
         }
 
         private void ApplyEggRotationVelocity()
         {
-            if (Kind == DesktopFoodKind.EggBugEgg && rotationVelocity > 0.0)
+            if (Kind == DesktopFoodKind.EggBugEgg &&
+                Math.Abs(rotationVelocity) > 0.000001)
                 rotation = (rotation + rotation.Perpendicular *
                     rotationVelocity).Normalized;
         }

@@ -742,6 +742,22 @@ namespace RainWorldDesktopPet.Tests
             held.HoldAt(new Vec2(120.0, 100.0), new Vec2(100.0, 100.0));
             Near(0.0, Vec2.Distance(Vec2.Up, held.Rotation), 0.000001,
                 "held food uses the original item-to-grabber perpendicular orientation");
+
+            DesktopFood leftRollingEgg = new DesktopFood(
+                DesktopFoodKind.EggBugEgg,
+                new Vec2(500.0, floor - DesktopFood.EggBugEggRadius),
+                0.13, Vec2.Up);
+            leftRollingEgg.SetCreationVelocity(new Vec2(-2.0, 0.0));
+            leftRollingEgg.StepPhysics(floorWorld);
+            double leftCollisionVelocity = -2.0 * 0.999;
+            double leftTurn = 0.8 * (0.12 * leftCollisionVelocity);
+            Vec2 expectedLeftRotation = (Vec2.Up +
+                Vec2.Up.Perpendicular * leftTurn).Normalized;
+            Near(0.0, Vec2.Distance(expectedLeftRotation,
+                leftRollingEgg.Rotation), 0.000001,
+                "EggBugEgg applies signed ground rotation while moving left");
+            True(leftRollingEgg.Rotation.X < 0.0,
+                "left and right floor motion rotate EggBugEgg in opposite directions");
         }
 
         private static void EggBugEggTailMatchesOriginalProceduralAnimation()
