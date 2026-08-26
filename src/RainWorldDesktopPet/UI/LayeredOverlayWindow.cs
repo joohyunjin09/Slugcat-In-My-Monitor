@@ -15,6 +15,13 @@ using RainWorldDesktopPet.Workshop;
 
 namespace RainWorldDesktopPet.UI
 {
+    internal enum OverlayRenderLayer
+    {
+        GroundFood,
+        Slugcat,
+        HeldFood
+    }
+
     public sealed class LayeredOverlayWindow : Form
     {
         private const int MaximumSlugcats = 8;
@@ -312,20 +319,29 @@ namespace RainWorldDesktopPet.UI
                     graphics.Clear(Color.Transparent);
                     graphics.CompositingMode = System.Drawing.Drawing2D.CompositingMode.SourceOver;
                     RenderSpace renderSpace = new RenderSpace(surface.Bounds);
-                    for (int member = 0; member < batch.SurfaceIndices.Count; member++)
+                    int drawStepCount = batch.SurfaceIndices.Count * 3;
+                    for (int drawStep = 0; drawStep < drawStepCount; drawStep++)
                     {
-                        int loopIndex = batch.SurfaceIndices[member];
+                        int loopIndex;
+                        OverlayRenderLayer layer;
+                        ResolveRenderStep(batch.SurfaceIndices, drawStep,
+                            out loopIndex, out layer);
                         GameLoop loop = gameLoops[loopIndex];
                         bool debug = loop.DebugEnabled && ReferenceEquals(loop, gameLoop);
-                        loop.Renderer.RenderFoods(graphics, loop.Foods, renderSpace,
-                            poseBuffer[loopIndex].CharacterRenderScale,
-                            poseBuffer[loopIndex].TimeStacker, false);
-                        loop.Renderer.Render(graphics, poseBuffer[loopIndex], renderSpace, debug,
-                            loop.World, loop.Slugcat, loop.AI, loop.AssetStatus,
-                            loop.SelectedSlugcat);
-                        loop.Renderer.RenderFoods(graphics, loop.Foods, renderSpace,
-                            poseBuffer[loopIndex].CharacterRenderScale,
-                            poseBuffer[loopIndex].TimeStacker, true);
+                        if (layer == OverlayRenderLayer.Slugcat)
+                        {
+                            loop.Renderer.Render(graphics, poseBuffer[loopIndex],
+                                renderSpace, debug, loop.World, loop.Slugcat,
+                                loop.AI, loop.AssetStatus, loop.SelectedSlugcat);
+                        }
+                        else
+                        {
+                            loop.Renderer.RenderFoods(graphics, loop.Foods,
+                                renderSpace,
+                                poseBuffer[loopIndex].CharacterRenderScale,
+                                poseBuffer[loopIndex].TimeStacker,
+                                layer == OverlayRenderLayer.HeldFood);
+                        }
                     }
                     compositionHost.Present(batchIndex);
 
@@ -707,6 +723,19 @@ namespace RainWorldDesktopPet.UI
                 mouseMessage == NativeMethods.WM_LBUTTONDBLCLK) && slugcatUnderPointer;
         }
 
+        internal static void ResolveRenderStep(IList<int> surfaceIndices,
+            int drawStep, out int loopIndex, out OverlayRenderLayer layer)
+        {
+            if (surfaceIndices == null) throw new ArgumentNullException("surfaceIndices");
+            int count = surfaceIndices.Count;
+            if (count < 1 || drawStep < 0 || drawStep >= count * 3)
+                throw new ArgumentOutOfRangeException("drawStep");
+            int layerIndex = drawStep / count;
+            int backToFrontIndex = count - 1 - drawStep % count;
+            loopIndex = surfaceIndices[backToFrontIndex];
+            layer = (OverlayRenderLayer)layerIndex;
+        }
+
         private void ReleaseGrabInput()
         {
             GameLoop grabbed = grabbedGameLoop;
@@ -717,7 +746,9 @@ namespace RainWorldDesktopPet.UI
 
         private GameLoop FindDraggableAt(Vec2 point)
         {
-            for (int i = gameLoops.Count - 1; i >= 0; i--)
+            // Slugcat 1 is visually in front, so overlapping hit regions must
+            // resolve in the same front-to-back order.
+            for (int i = 0; i < gameLoops.Count; i++)
                 if (gameLoops[i].HitTest(point)) return gameLoops[i];
             return null;
         }

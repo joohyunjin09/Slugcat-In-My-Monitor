@@ -181,6 +181,8 @@ namespace RainWorldDesktopPet.Tests
             Run("Graphics bounds include procedural extremities", GraphicsBoundsIncludeExtremities);
             Run("Overlapping Slugcats share one bounded composition upload",
                 OverlappingSlugcatsShareCompositionUpload);
+            Run("Render order keeps held food above Slugcat 1 through 8",
+                HeldFoodAndSlugcatRenderOrder);
             Run("Composition surfaces grow without resize oscillation",
                 CompositionSurfacesOnlyGrow);
             Run("GPU smoke command ABI matches the native renderer",
@@ -3345,6 +3347,41 @@ namespace RainWorldDesktopPet.Tests
             };
             IList<CompositionBatch> separated = planner.Plan(distant, 128);
             Equal(2, separated.Count, "distant surface batch count");
+
+            Rectangle[] barelyOverlapping =
+            {
+                new Rectangle(0, 0, 384, 384),
+                new Rectangle(383, 0, 384, 384)
+            };
+            IList<CompositionBatch> requiredMerge = planner.Plan(
+                barelyOverlapping, 128);
+            Equal(1, requiredMerge.Count,
+                "even a one-pixel overlap must share one Z-ordered surface");
+        }
+
+        private static void HeldFoodAndSlugcatRenderOrder()
+        {
+            IList<int> indices = new[] { 0, 1, 2, 3, 4, 5, 6, 7 };
+            for (int step = 0; step < indices.Count * 3; step++)
+            {
+                int loopIndex;
+                OverlayRenderLayer layer;
+                LayeredOverlayWindow.ResolveRenderStep(indices, step,
+                    out loopIndex, out layer);
+                int expectedLayer = step / indices.Count;
+                int expectedLoop = indices.Count - 1 - step % indices.Count;
+                Equal(expectedLayer, (int)layer,
+                    "global render layer at step " + step);
+                Equal(expectedLoop, loopIndex,
+                    "back-to-front Slugcat order at step " + step);
+            }
+
+            int frontLoop;
+            OverlayRenderLayer frontLayer;
+            LayeredOverlayWindow.ResolveRenderStep(indices,
+                indices.Count * 3 - 1, out frontLoop, out frontLayer);
+            True(frontLayer == OverlayRenderLayer.HeldFood && frontLoop == 0,
+                "Slugcat 1 held food is the final and frontmost sprite pass");
         }
 
         private static void CompositionSurfacesOnlyGrow()
