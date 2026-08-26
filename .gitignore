@@ -7,6 +7,20 @@ assets/skins/
 .tools/
 .local-tools/
 
+# Local compatibility/research output. Keep proprietary binaries and decompiler
+# products outside the tracked source tree.
+.decomp/
+.decompiled/
+research-private/
+*.il
+*.ildasm
+Assembly-CSharp.dll
+Assembly-CSharp-firstpass.dll
+HOOKS-Assembly-CSharp.dll
+RainWorld_Data/
+resources.assets
+resources.assets.resS
+
 # Native C# build output and local runtime configuration.
 bin/
 obj/

@@ -55,12 +55,17 @@ namespace RainWorldDesktopPet.Graphics
         private readonly PointF[] tailTextureDestinationTriangle = new PointF[3];
         private readonly PointF[] abilityQuad = new PointF[4];
         private readonly PointF[] abilityTriangle = new PointF[3];
+        private readonly Vec2[] eggTailCenters =
+            new Vec2[DesktopFood.EggBugEggTailSegmentCount + 1];
+        private readonly PointF[] eggTailOutline =
+            new PointF[(DesktopFood.EggBugEggTailSegmentCount + 1) * 2];
         private readonly Bitmap tailRaster;
         private readonly System.Drawing.Graphics tailRasterGraphics;
         private readonly Bitmap flatLightShaderMask;
         private readonly Bitmap lightSourceShaderMask;
         private readonly Bitmap shockWaveShaderMask;
         private const int TailRasterSize = 128;
+        private const int ResourceCacheLimit = 1024;
         public const int OriginalTailMeshVertexCount = 15;
         public const int OriginalTailMeshTriangleCount = 13;
         private static readonly int[,] TailTriangles =
@@ -681,6 +686,12 @@ namespace RainWorldDesktopPet.Graphics
         {
             SolidBrush brush;
             if (bodyBrushes.TryGetValue(color.ToArgb(), out brush)) return brush;
+            if (bodyBrushes.Count >= ResourceCacheLimit)
+            {
+                foreach (KeyValuePair<int, SolidBrush> item in bodyBrushes)
+                    item.Value.Dispose();
+                bodyBrushes.Clear();
+            }
             brush = new SolidBrush(color);
             bodyBrushes[color.ToArgb()] = brush;
             return brush;
@@ -1110,6 +1121,171 @@ namespace RainWorldDesktopPet.Graphics
             }
         }
 
+        public void RenderFoods(System.Drawing.Graphics graphics,
+            DesktopFoodManager foodManager, RenderSpace renderSpace,
+            double characterRenderScale, double interpolation, bool heldLayer)
+        {
+            if (foodManager == null || foodManager.Foods.Count == 0) return;
+            IList<DesktopFood> foods = foodManager.Foods;
+            bool hasFoodInLayer = false;
+            for (int i = 0; i < foods.Count; i++)
+            {
+                DesktopFood candidate = foods[i];
+                if (!candidate.IsActive) continue;
+                bool held = candidate.State == DesktopFoodState.Held ||
+                    candidate.State == DesktopFoodState.Biting ||
+                    candidate.State == DesktopFoodState.Dragged;
+                if (held != heldLayer) continue;
+                hasFoodInLayer = true;
+                break;
+            }
+            // Rendering is called once behind and once in front of the
+            // Slugcat. Most frames have food in only one layer, so avoid a
+            // Matrix allocation and graphics state change for the empty pass.
+            if (!hasFoodInLayer) return;
+            GraphicsState state = graphics.Save();
+            try
+            {
+                using (Matrix transform = new Matrix((float)characterRenderScale,
+                    0.0f, 0.0f, (float)characterRenderScale,
+                    (float)-renderSpace.WorldOrigin.X,
+                    (float)-renderSpace.WorldOrigin.Y))
+                {
+                    graphics.Transform = transform;
+                }
+
+                for (int i = 0; i < foods.Count; i++)
+                {
+                    DesktopFood food = foods[i];
+                    if (!food.IsActive) continue;
+                    bool held = food.State == DesktopFoodState.Held ||
+                        food.State == DesktopFoodState.Biting ||
+                        food.State == DesktopFoodState.Dragged;
+                    if (held != heldLayer) continue;
+
+                    Vec2 center = food.Chunk.RenderPosition(interpolation);
+                    Vec2 direction = MathUtil.SlerpDirection(food.LastRotation,
+                        food.Rotation, interpolation);
+                    double angle = AimScreen(Vec2.Zero, direction);
+                    if (food.Kind == DesktopFoodKind.EggBugEgg)
+                    {
+                        DrawEggBugEgg(graphics, food, center, direction, angle,
+                            interpolation);
+                        continue;
+                    }
+                    AtlasSprite ignored;
+                    bool hasFront = atlas != null &&
+                        atlas.TryGet(food.FrontElement, out ignored);
+                    bool hasBack = atlas != null &&
+                        atlas.TryGet(food.BackElement, out ignored);
+                    if (hasFront)
+                        DrawElement(graphics, food.FrontElement, center, angle,
+                            1.0, 1.0, 0.5, 0.5,
+                            FoodRenderPalette.DangleFruit.BaseColor);
+                    else
+                        FillCachedCircle(graphics, center, 8.0,
+                            FoodRenderPalette.DangleFruit.BaseColor);
+                    if (hasBack)
+                        DrawElement(graphics, food.BackElement, center, angle,
+                            1.0, 1.0, 0.5, 0.5,
+                            FoodRenderPalette.DangleFruit.PrimaryColor);
+                    else
+                        FillCachedCircle(graphics, center, 6.5,
+                            FoodRenderPalette.DangleFruit.PrimaryColor);
+                }
+            }
+            finally
+            {
+                graphics.Restore(state);
+            }
+        }
+
+        private void DrawEggBugEgg(System.Drawing.Graphics graphics, DesktopFood food,
+            Vec2 center, Vec2 direction, double angle, double interpolation)
+        {
+            const double swellFactor = 1.15;
+            center -= direction * (3.0 * swellFactor);
+            double scaleX = 0.7 * swellFactor;
+            double scaleY = 0.75 * swellFactor;
+            AtlasSprite ignored;
+            bool hasShell = atlas != null &&
+                atlas.TryGet(food.FrontElement, out ignored);
+            bool hasColor = atlas != null &&
+                atlas.TryGet(food.BackElement, out ignored);
+            bool hasEye = atlas != null &&
+                atlas.TryGet(food.DetailElement, out ignored);
+            FoodLayerPalette palette = FoodRenderPalette.EggBugEgg(food.VisualHue);
+
+            if (food.HasVisibleEggTail)
+                DrawEggBugTail(graphics, food, center, direction, swellFactor,
+                    interpolation, palette.BaseColor);
+
+            if (hasShell)
+                DrawElement(graphics, food.FrontElement, center, angle,
+                    scaleX, scaleY, 0.5, 0.3, palette.BaseColor);
+            else
+                FillCachedCircle(graphics, center, 5.4, palette.BaseColor);
+            if (hasColor)
+                DrawElement(graphics, food.BackElement, center, angle,
+                    scaleX, scaleY, 0.5, 0.3, palette.PrimaryColor);
+            else
+                FillCachedCircle(graphics, center, 4.1, palette.PrimaryColor);
+            if (hasEye)
+                DrawElement(graphics, food.DetailElement, center, angle,
+                    0.45 * swellFactor, 0.45 * swellFactor, 0.5,
+                    food.SpriteFrame == 0 ? 0.7 : 0.4, palette.DetailColor);
+            else
+                FillCachedCircle(graphics, center - direction * 2.0, 1.8,
+                    palette.DetailColor);
+        }
+
+        private void DrawEggBugTail(System.Drawing.Graphics graphics,
+            DesktopFood food, Vec2 center, Vec2 direction, double swellFactor,
+            double interpolation, Color color)
+        {
+            if (direction.LengthSquared < 0.000001) direction = Vec2.Down;
+            else direction = direction.Normalized;
+            eggTailCenters[0] = center + direction * (5.0 * swellFactor);
+            for (int i = 0; i < DesktopFood.EggBugEggTailSegmentCount; i++)
+                eggTailCenters[i + 1] = food.EggTailPosition(i, interpolation);
+
+            int nodeCount = eggTailCenters.Length;
+            for (int node = 0; node < nodeCount; node++)
+            {
+                Vec2 tangent;
+                if (node == 0)
+                    tangent = eggTailCenters[1] - eggTailCenters[0];
+                else if (node == nodeCount - 1)
+                    tangent = eggTailCenters[node] - eggTailCenters[node - 1];
+                else
+                    tangent = eggTailCenters[node + 1] -
+                        eggTailCenters[node - 1];
+                if (tangent.LengthSquared < 0.000001) tangent = direction;
+                else tangent = tangent.Normalized;
+
+                double progress = node == 0 ? 0.0 : (node - 1) /
+                    (double)(DesktopFood.EggBugEggTailSegmentCount - 1);
+                double width = MathUtil.Lerp(1.0, 0.5,
+                    Math.Pow(progress, 0.25));
+                Vec2 perpendicular = tangent.Perpendicular * width;
+                eggTailOutline[node] =
+                    (eggTailCenters[node] - perpendicular).ToPointF();
+                eggTailOutline[eggTailOutline.Length - 1 - node] =
+                    (eggTailCenters[node] + perpendicular).ToPointF();
+            }
+            // One continuous silhouette avoids the antialiased seams produced
+            // by filling five independent segment quads.
+            graphics.FillPolygon(GetBodyBrush(color), eggTailOutline);
+        }
+
+        private void FillCachedCircle(System.Drawing.Graphics graphics,
+            Vec2 center, double radius, Color color)
+        {
+            graphics.FillEllipse(GetBodyBrush(color),
+                (float)(center.X - radius), (float)(center.Y - radius),
+                (float)(radius * 2.0), (float)(radius * 2.0));
+        }
+
         private static DmsSpriteSide SelectTorsoSide(SlugcatPose pose)
         {
             if (pose.BodyMode == BodyModeIndex.Stand && pose.InputX != 0)
@@ -1123,6 +1299,13 @@ namespace RainWorldDesktopPet.Graphics
         {
             ImageAttributes attributes;
             if (tintAttributes.TryGetValue(tint.ToArgb(), out attributes)) return attributes;
+
+            if (tintAttributes.Count >= ResourceCacheLimit)
+            {
+                foreach (KeyValuePair<int, ImageAttributes> item in tintAttributes)
+                    item.Value.Dispose();
+                tintAttributes.Clear();
+            }
 
             attributes = CreateTintAttributes(tint);
             tintAttributes[tint.ToArgb()] = attributes;
