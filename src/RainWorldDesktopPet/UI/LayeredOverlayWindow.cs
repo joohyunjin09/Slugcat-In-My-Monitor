@@ -434,13 +434,10 @@ namespace RainWorldDesktopPet.UI
                         effectContentBounds = effectContentBounds.IsEmpty ? memberBounds :
                             RectangleF.Union(effectContentBounds, memberBounds);
                     }
-                    RectangleF visibleEffectBounds;
-                    if (!effectContentBounds.IsEmpty && TryClipVisibleContent(
-                            effectContentBounds, virtualDesktopBounds,
-                            out visibleEffectBounds))
+                    if (!effectContentBounds.IsEmpty)
                     {
                         Rectangle effectBounds = compositionHost.PrepareEffectBounds(
-                            batchIndex, visibleEffectBounds);
+                            batchIndex, effectContentBounds);
                         RenderSpace effectRenderSpace = new RenderSpace(effectBounds);
                         int smokeEffectCount = 0;
                         for (int member = 0; member < batch.SurfaceIndices.Count; member++)
@@ -752,25 +749,6 @@ namespace RainWorldDesktopPet.UI
                 }
             }
 
-            // DirectComposition surfaces only need to cover pixels that can be
-            // seen on the virtual desktop.  A far-thrown Spearmaster needle or
-            // Saint tongue used to expand this rectangle without a limit.  That
-            // allocated very large GPU surfaces, caused severe compositor stalls,
-            // and eventually made BeginDraw/PresentGpu fail with E_INVALIDARG.
-            RectangleF visibleContent;
-            if (TryClipVisibleContent(content, virtualDesktopBounds,
-                    out visibleContent))
-            {
-                content = visibleContent;
-            }
-            else
-            {
-                content = new RectangleF(
-                    virtualDesktopBounds.Left + virtualDesktopBounds.Width * 0.5f,
-                    virtualDesktopBounds.Top + virtualDesktopBounds.Height * 0.5f,
-                    1.0f, 1.0f);
-            }
-
             int contentWidth = (int)Math.Ceiling(content.Width) + OverlayPadding * 2;
             int contentHeight = (int)Math.Ceiling(content.Height) + OverlayPadding * 2;
             int width = RoundOverlaySize(Math.Max(MinimumOverlaySize, contentWidth));
@@ -783,26 +761,6 @@ namespace RainWorldDesktopPet.UI
         private static int RoundOverlaySize(int value)
         {
             return ((value + OverlaySizeQuantum - 1) / OverlaySizeQuantum) * OverlaySizeQuantum;
-        }
-
-        internal static bool TryClipVisibleContent(RectangleF content,
-            Rectangle desktop, out RectangleF visible)
-        {
-            visible = RectangleF.Empty;
-            if (desktop.Width <= 0 || desktop.Height <= 0 ||
-                float.IsNaN(content.Left) || float.IsNaN(content.Top) ||
-                float.IsNaN(content.Right) || float.IsNaN(content.Bottom) ||
-                float.IsInfinity(content.Left) || float.IsInfinity(content.Top) ||
-                float.IsInfinity(content.Right) || float.IsInfinity(content.Bottom))
-                return false;
-
-            float left = Math.Max(content.Left, desktop.Left);
-            float top = Math.Max(content.Top, desktop.Top);
-            float right = Math.Min(content.Right, desktop.Right);
-            float bottom = Math.Min(content.Bottom, desktop.Bottom);
-            if (right <= left || bottom <= top) return false;
-            visible = RectangleF.FromLTRB(left, top, right, bottom);
-            return true;
         }
 
         private void PollDragInput()

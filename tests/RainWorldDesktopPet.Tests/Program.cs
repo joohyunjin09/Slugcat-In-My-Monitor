@@ -189,8 +189,6 @@ namespace RainWorldDesktopPet.Tests
             Run("Ten-second idle/walk/turn/jump graphics stay connected", LongGraphicsScenarioStaysConnected);
             Run("Five-minute varied-window soak preserves sprite integrity", FiveMinuteVariedWindowSpriteIntegrity);
             Run("Graphics bounds include procedural extremities", GraphicsBoundsIncludeExtremities);
-            Run("Offscreen render content is clipped to the virtual desktop",
-                OffscreenRenderContentIsClipped);
             Run("Overlapping Slugcats share one bounded composition upload",
                 OverlappingSlugcatsShareCompositionUpload);
             Run("Render order keeps held food above Slugcat 1 through 8",
@@ -1857,29 +1855,6 @@ namespace RainWorldDesktopPet.Tests
                 "an invalid refresh rate must not reach the timer interval");
             Near(144.0, LayeredOverlayWindow.NormalizeRefreshRate(144.0), 0.0,
                 "a valid high-refresh monitor must preserve its cadence");
-        }
-
-        private static void OffscreenRenderContentIsClipped()
-        {
-            Rectangle desktop = new Rectangle(-120, 0, 3000, 1800);
-            RectangleF visible;
-            True(LayeredOverlayWindow.TryClipVisibleContent(
-                    new RectangleF(-10000.0f, -5000.0f, 20000.0f, 10000.0f),
-                    desktop, out visible),
-                "an oversized render span must retain its visible portion");
-            Near(desktop.Left, visible.Left, 0.0, "clipped render left");
-            Near(desktop.Top, visible.Top, 0.0, "clipped render top");
-            Near(desktop.Right, visible.Right, 0.0, "clipped render right");
-            Near(desktop.Bottom, visible.Bottom, 0.0, "clipped render bottom");
-
-            True(!LayeredOverlayWindow.TryClipVisibleContent(
-                    new RectangleF(20000.0f, 20000.0f, 100.0f, 100.0f),
-                    desktop, out visible),
-                "fully offscreen content must not allocate a distant surface");
-            True(!LayeredOverlayWindow.TryClipVisibleContent(
-                    new RectangleF(float.NaN, 0.0f, 20.0f, 20.0f),
-                    desktop, out visible),
-                "non-finite physics coordinates must not reach DirectComposition");
         }
 
         private static void MouseHookHitSnapshotsPreserveInputRules()
