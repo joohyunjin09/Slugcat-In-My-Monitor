@@ -60,6 +60,8 @@ namespace RainWorldDesktopPet.Tests
             }
 
             Run("FixedTimeStep uses 40 Hz independently of render rate", FixedStepUsesFortyHertz);
+            Run("Resume timing reset discards a one-hour suspended interval",
+                ResumeTimingResetDiscardsSuspendedInterval);
             Run("Desktop world transform scales original X/Y travel uniformly", DesktopWorldTransformScalesTravelUniformly);
             Run("Original horizontal acceleration and friction match input order", OriginalHorizontalInputParity);
             Run("Crawl reversal uses Player's 0.75 dynamicRunSpeed branch",
@@ -120,6 +122,12 @@ namespace RainWorldDesktopPet.Tests
             Run("Dragging passes through window walls", DraggingPassesThroughWindowWalls);
             Run("Slugcat dragging blocks desktop pointer interactions",
                 SlugcatDraggingBlocksDesktopInteractions);
+            Run("Suspend and resume power events use the recovery path",
+                PowerTransitionEventsUseRecoveryPath);
+            Run("Interactive process power policy disables both throttles",
+                InteractivePowerPolicyDisablesThrottles);
+            Run("Resume recovery rejects duplicate events and invalid refresh rates",
+                ResumeRecoveryGuardsInvalidInputs);
             Run("Mouse hook hit snapshots preserve click-through and topmost order",
                 MouseHookHitSnapshotsPreserveInputRules);
             Run("AI produces VirtualInput without moving physics directly", AiDoesNotMoveCreature);
@@ -1267,6 +1275,23 @@ namespace RainWorldDesktopPet.Tests
             Equal(4, count, "0.1 seconds must contain four 40 Hz ticks");
         }
 
+        private static void ResumeTimingResetDiscardsSuspendedInterval()
+        {
+            FixedTimeStep step = new FixedTimeStep(
+                SimulationConstants.LogicStepSeconds);
+            step.AddElapsed(60.0 * 60.0);
+            step.Reset();
+            Near(0.0, step.AccumulatorSeconds, 0.0000001,
+                "resume must discard the hour spent asleep");
+            True(!step.ConsumeStep(),
+                "no catch-up simulation tick may survive the resume reset");
+            step.AddElapsed(SimulationConstants.LogicStepSeconds);
+            True(step.ConsumeStep(),
+                "normal 40 Hz simulation must continue immediately after resume");
+            True(!step.ConsumeStep(),
+                "resume must not introduce an extra simulation tick");
+        }
+
         private static void DesktopWorldTransformScalesTravelUniformly()
         {
             BodyChunk chunk = new BodyChunk(0, Vec2.Zero, 9.0, 0.35);
@@ -1773,6 +1798,63 @@ namespace RainWorldDesktopPet.Tests
             True(!LayeredOverlayWindow.ShouldSuppressLeftButton(
                     NativeMethods.WM_LBUTTONDOWN, false, false),
                 "a click outside every Slugcat must reach the underlying application");
+        }
+
+        private static void PowerTransitionEventsUseRecoveryPath()
+        {
+            True(LayeredOverlayWindow.IsSuspendPowerEvent(
+                    NativeMethods.PBT_APMSUSPEND),
+                "PBT_APMSUSPEND must stop the renderer before sleep");
+            True(LayeredOverlayWindow.IsResumePowerEvent(
+                    NativeMethods.PBT_APMRESUMEAUTOMATIC),
+                "automatic resume must reset rendering state");
+            True(LayeredOverlayWindow.IsResumePowerEvent(
+                    NativeMethods.PBT_APMRESUMESUSPEND),
+                "interactive resume must reset rendering state");
+            True(LayeredOverlayWindow.IsResumePowerEvent(
+                    NativeMethods.PBT_APMRESUMECRITICAL),
+                "critical resume must reset rendering state");
+            True(!LayeredOverlayWindow.IsResumePowerEvent(0x000A),
+                "a battery-status change must not rebuild composition surfaces");
+        }
+
+        private static void InteractivePowerPolicyDisablesThrottles()
+        {
+            NativeMethods.ProcessPowerThrottlingState state =
+                NativeMethods.CreateInteractivePowerThrottlingState();
+            True(state.Version ==
+                    NativeMethods.PROCESS_POWER_THROTTLING_CURRENT_VERSION,
+                "power throttling state must use the current structure version");
+            uint expectedMask =
+                NativeMethods.PROCESS_POWER_THROTTLING_EXECUTION_SPEED |
+                NativeMethods.PROCESS_POWER_THROTTLING_IGNORE_TIMER_RESOLUTION;
+            True(state.ControlMask == expectedMask,
+                "the app must explicitly control EcoQoS and timer-resolution throttling");
+            True(state.StateMask == 0,
+                "clearing StateMask must disable both selected throttling mechanisms");
+        }
+
+        private static void ResumeRecoveryGuardsInvalidInputs()
+        {
+            const long frequency = 1000;
+            True(LayeredOverlayWindow.ShouldProcessPowerResume(
+                    long.MinValue, 10000, frequency),
+                "the first resume event must always run recovery");
+            True(!LayeredOverlayWindow.ShouldProcessPowerResume(
+                    10000, 10001, frequency),
+                "automatic and interactive resume events must coalesce");
+            True(LayeredOverlayWindow.ShouldProcessPowerResume(
+                    10000, 16000, frequency),
+                "a later resume transition must not remain suppressed");
+
+            Near(60.0, LayeredOverlayWindow.NormalizeRefreshRate(0.0), 0.0,
+                "a missing refresh rate must recover to 60 Hz");
+            Near(60.0, LayeredOverlayWindow.NormalizeRefreshRate(10.0), 0.0,
+                "a transitional low refresh rate must not throttle rendering");
+            Near(60.0, LayeredOverlayWindow.NormalizeRefreshRate(double.NaN), 0.0,
+                "an invalid refresh rate must not reach the timer interval");
+            Near(144.0, LayeredOverlayWindow.NormalizeRefreshRate(144.0), 0.0,
+                "a valid high-refresh monitor must preserve its cadence");
         }
 
         private static void MouseHookHitSnapshotsPreserveInputRules()
