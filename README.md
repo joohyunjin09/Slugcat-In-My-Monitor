@@ -227,5 +227,12 @@ skins they use, and must follow the terms for those assets. See
 
 This is an unofficial fan project and is not affiliated with or endorsed by
 Videocult or Akupara Games. Rain World and related names and assets belong to their
-respective owners. Project code is distributed under the [MIT License](LICENSE);
-that license does not apply to third-party assets.
+respective owners.
+
+The [MIT License](LICENSE) applies only to code and other material independently
+authored by this project's contributors and for which they hold the necessary
+licensing rights. It does not apply to Rain World source or object code,
+characters, artwork, audio, game assets, names, trademarks, or any other
+third-party material. Nothing in this repository grants a license to use those
+materials. Third-party components remain subject to their respective licenses and
+terms.
