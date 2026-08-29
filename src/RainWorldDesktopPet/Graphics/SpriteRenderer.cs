@@ -1587,16 +1587,19 @@ namespace RainWorldDesktopPet.Graphics
             {
                 Vec2[] currentRope = saint.RopeForRender;
                 Vec2[] previousRope = saint.LastRopeForRender;
-                Vec2 previous = Vec2.Lerp(previousRope[0], currentRope[0], interpolation);
+                Vec2 previousWorld = Vec2.Lerp(previousRope[0], currentRope[0],
+                    interpolation);
                 if (currentRope.Length > 1)
-                    previous += (previous - Vec2.Lerp(previousRope[1],
+                    previousWorld += (previousWorld - Vec2.Lerp(previousRope[1],
                         currentRope[1], interpolation)).Normalized;
+                Vec2 previous = pose.ToCharacterRenderSpaceForWorld(previousWorld);
                 double stretch = saint.RopeStretchFactor;
                 for (int segment = 1; segment < currentRope.Length; segment++)
                 {
                     double fraction = segment / (double)(currentRope.Length - 1);
                     Vec2 next = segment < currentRope.Length - 2
-                        ? Vec2.Lerp(previousRope[segment], currentRope[segment], interpolation)
+                        ? pose.ToCharacterRenderSpaceForWorld(Vec2.Lerp(
+                            previousRope[segment], currentRope[segment], interpolation))
                         : pose.FacePosition;
                     Vec2 perpendicular = (previous - next).Normalized.Perpendicular;
                     double width = 0.2 + 1.6 * MathUtil.Lerp(1.0, stretch,
@@ -1626,7 +1629,8 @@ namespace RainWorldDesktopPet.Graphics
             for (int i = 0; i < slugcat.AbilityEffects.Count; i++)
             {
                 AbilityEffect effect = slugcat.AbilityEffects[i];
-                Vec2 position = Vec2.Lerp(effect.LastPosition, effect.Position, interpolation);
+                Vec2 position = pose.ToCharacterRenderSpaceForWorld(Vec2.Lerp(
+                    effect.LastPosition, effect.Position, interpolation));
                 double life = MathUtil.Lerp(effect.LastLife, effect.Life, interpolation);
                 if (effect.Kind == AbilityEffectKind.ShockWave)
                 {
@@ -1656,8 +1660,9 @@ namespace RainWorldDesktopPet.Graphics
                         // tenth of life; it does not fade every frame.
                         ? Color.White
                         : Color.FromArgb(MathUtil.Clamp((int)(210 * life), 0, 255), 220, 225, 235);
-                    Vec2 trail = Vec2.Lerp(effect.PreviousPreviousPosition,
-                        effect.PreviousPreviousPreviousPosition, interpolation);
+                    Vec2 trail = pose.ToCharacterRenderSpaceForWorld(Vec2.Lerp(
+                        effect.PreviousPreviousPosition,
+                        effect.PreviousPreviousPreviousPosition, interpolation));
                     if (Vec2.Distance(position, trail) < 9.0)
                         trail = position - effect.Velocity.Normalized * 9.0;
                     trail = Vec2.Lerp(position, trail,
@@ -1704,7 +1709,8 @@ namespace RainWorldDesktopPet.Graphics
                 double life = MathUtil.Lerp(effect.LastLife, effect.Life, interpolation);
                 Vec2 position = Vec2.Lerp(effect.LastPosition, effect.Position,
                     interpolation);
-                Vec2 center = pose.ToRenderedWorld(position) - renderSpace.WorldOrigin;
+                Vec2 center = pose.ToRenderedStaticWorld(position) -
+                    renderSpace.WorldOrigin;
                 if (effect.Kind == AbilityEffectKind.ExplosionLight)
                 {
                     double rootLife = Math.Sqrt(Math.Max(0.0, life));
@@ -1856,8 +1862,8 @@ namespace RainWorldDesktopPet.Graphics
                 }
                 else continue;
                 if (size <= 0.0001) continue;
-                Vec2 position = pose.ToRenderedWorld(Vec2.Lerp(effect.LastPosition,
-                    effect.Position, interpolation));
+                Vec2 position = pose.ToRenderedStaticWorld(Vec2.Lerp(
+                    effect.LastPosition, effect.Position, interpolation));
                 double half = size * 0.5 + 2.0;
                 if (!hasBounds)
                 {
@@ -1887,6 +1893,9 @@ namespace RainWorldDesktopPet.Graphics
                 double spearOpacity = spear.Opacity;
                 if (spearOpacity <= 0.0) continue;
                 Vec2 center = spear.Chunk.RenderPosition(interpolation);
+                bool worldAnchored = spear.Mode != DesktopSpearMode.Held;
+                if (worldAnchored)
+                    center = pose.ToCharacterRenderSpaceForWorld(center);
                 Vec2 direction = MathUtil.SlerpDirection(
                     spear.LastRotation, spear.Rotation, interpolation);
                 if (spear.HasUmbilical)
@@ -1910,6 +1919,11 @@ namespace RainWorldDesktopPet.Graphics
                             current[segment - 1], interpolation);
                         Vec2 next = Vec2.Lerp(previousFrame[segment],
                             current[segment], interpolation);
+                        if (worldAnchored)
+                        {
+                            previous = pose.ToCharacterRenderSpaceForWorld(previous);
+                            next = pose.ToCharacterRenderSpaceForWorld(next);
+                        }
                         graphics.DrawLine(color, (float)(0.65 * opacity),
                             previous.ToPointF(), next.ToPointF());
                     }

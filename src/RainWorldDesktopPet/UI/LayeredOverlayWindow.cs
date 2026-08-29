@@ -698,8 +698,10 @@ namespace RainWorldDesktopPet.UI
             for (int i = 0; i < loop.Slugcat.Spears.Count; i++)
             {
                 DesktopSpear spear = loop.Slugcat.Spears[i];
-                Vec2 center = pose.ToRenderedWorld(
-                    spear.Chunk.RenderPosition(pose.TimeStacker));
+                Vec2 spearPosition = spear.Chunk.RenderPosition(pose.TimeStacker);
+                Vec2 center = spear.Mode == DesktopSpearMode.Held
+                    ? pose.ToRenderedWorld(spearPosition)
+                    : pose.ToRenderedStaticWorld(spearPosition);
                 RectangleF spearBounds = new RectangleF((float)(center.X - 28.0),
                     (float)(center.Y - 28.0), 56.0f, 56.0f);
                 content = RectangleF.Union(content, spearBounds);
@@ -707,7 +709,7 @@ namespace RainWorldDesktopPet.UI
                 Vec2[] points = spear.Umbilical;
                 for (int point = 0; point < points.Length; point++)
                 {
-                    Vec2 rendered = pose.ToRenderedWorld(Vec2.Lerp(
+                    Vec2 rendered = pose.ToRenderedStaticWorld(Vec2.Lerp(
                         spear.LastUmbilical[point], points[point], pose.TimeStacker));
                     content = RectangleF.Union(content, new RectangleF(
                         (float)(rendered.X - 2.0), (float)(rendered.Y - 2.0),
@@ -741,8 +743,8 @@ namespace RainWorldDesktopPet.UI
                 int ropePointCount = Math.Min(currentRope.Length, previousRope.Length);
                 for (int point = 0; point < ropePointCount; point++)
                 {
-                    Vec2 currentPoint = pose.ToRenderedWorld(currentRope[point]);
-                    Vec2 previousPoint = pose.ToRenderedWorld(previousRope[point]);
+                    Vec2 currentPoint = pose.ToRenderedStaticWorld(currentRope[point]);
+                    Vec2 previousPoint = pose.ToRenderedStaticWorld(previousRope[point]);
                     content = RectangleF.Union(content, new RectangleF(
                         (float)(currentPoint.X - 8.0), (float)(currentPoint.Y - 8.0),
                         16.0f, 16.0f));
