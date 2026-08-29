@@ -1,0 +1,178 @@
+name: Temporary size world-anchor fix
+
+on:
+  push:
+    branches:
+      - fix/size-world-anchored-objects
+
+permissions:
+  contents: write
+
+jobs:
+  patch-build-push:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Patch world-anchored rendering
+        shell: powershell
+        run: |
+          @'
+          from pathlib import Path
+
+          def replace_once(path, old, new):
+              p = Path(path)
+              text = p.read_text(encoding="utf-8")
+              count = text.count(old)
+              if count != 1:
+                  raise RuntimeError(f"{path}: expected one match, found {count}\n--- needle ---\n{old}")
+              p.write_text(text.replace(old, new, 1), encoding="utf-8")
+
+          pose = "src/RainWorldDesktopPet/Graphics/SlugcatPose.cs"
+          replace_once(pose,
+          '''        public Vec2 CharacterRenderOffset
+          {''',
+          '''        // Character-local graphics are scaled around CharacterOrigin. World objects
+                  // must keep their desktop position instead of inheriting later Slugcat motion.
+                  public Vec2 ToRenderedStaticWorld(Vec2 point)
+                  {
+                      return DesktopWorldTransform.ToDesktop(point);
+                  }
+
+                  // Convert a world-space point into the coordinate space consumed by the
+                  // current character transform. After CharacterRenderScale is applied, the
+                  // point lands at DesktopWorldTransform.ToDesktop(point) regardless of size.
+                  public Vec2 ToCharacterRenderSpaceForWorld(Vec2 point)
+                  {
+                      if (CharacterRenderScale <= 0.0 ||
+                          double.IsNaN(CharacterRenderScale) ||
+                          double.IsInfinity(CharacterRenderScale))
+                          throw new InvalidOperationException(
+                              "CharacterRenderScale must be finite and positive.");
+                      return CharacterOrigin + (point - CharacterOrigin) *
+                          (SimulationConstants.DesktopWorldScale / CharacterRenderScale);
+                  }
+
+                  public Vec2 CharacterRenderOffset
+                  {''')
+
+          renderer = "src/RainWorldDesktopPet/Graphics/SpriteRenderer.cs"
+          replace_once(renderer,
+          '''                Vec2 previous = Vec2.Lerp(previousRope[0], currentRope[0], interpolation);
+                          if (currentRope.Length > 1)
+                              previous += (previous - Vec2.Lerp(previousRope[1],
+                                  currentRope[1], interpolation)).Normalized;
+                          double stretch = saint.RopeStretchFactor;''',
+          '''                Vec2 previousWorld = Vec2.Lerp(previousRope[0], currentRope[0],
+                              interpolation);
+                          if (currentRope.Length > 1)
+                              previousWorld += (previousWorld - Vec2.Lerp(previousRope[1],
+                                  currentRope[1], interpolation)).Normalized;
+                          Vec2 previous = pose.ToCharacterRenderSpaceForWorld(previousWorld);
+                          double stretch = saint.RopeStretchFactor;''')
+
+          replace_once(renderer,
+          '''                    Vec2 next = segment < currentRope.Length - 2
+                                  ? Vec2.Lerp(previousRope[segment], currentRope[segment], interpolation)
+                                  : pose.FacePosition;''',
+          '''                    Vec2 next = segment < currentRope.Length - 2
+                                  ? pose.ToCharacterRenderSpaceForWorld(Vec2.Lerp(
+                                      previousRope[segment], currentRope[segment], interpolation))
+                                  : pose.FacePosition;''')
+
+          replace_once(renderer,
+          '''                Vec2 position = Vec2.Lerp(effect.LastPosition, effect.Position, interpolation);
+                          double life = MathUtil.Lerp(effect.LastLife, effect.Life, interpolation);''',
+          '''                Vec2 position = pose.ToCharacterRenderSpaceForWorld(Vec2.Lerp(
+                              effect.LastPosition, effect.Position, interpolation));
+                          double life = MathUtil.Lerp(effect.LastLife, effect.Life, interpolation);''')
+
+          replace_once(renderer,
+          '''                    Vec2 trail = Vec2.Lerp(effect.PreviousPreviousPosition,
+                                  effect.PreviousPreviousPreviousPosition, interpolation);''',
+          '''                    Vec2 trail = pose.ToCharacterRenderSpaceForWorld(Vec2.Lerp(
+                                  effect.PreviousPreviousPosition,
+                                  effect.PreviousPreviousPreviousPosition, interpolation));''')
+
+          replace_once(renderer,
+          '''                Vec2 center = pose.ToRenderedWorld(position) - renderSpace.WorldOrigin;''',
+          '''                Vec2 center = pose.ToRenderedStaticWorld(position) -
+                              renderSpace.WorldOrigin;''')
+
+          replace_once(renderer,
+          '''                Vec2 position = pose.ToRenderedWorld(Vec2.Lerp(effect.LastPosition,
+                              effect.Position, interpolation));''',
+          '''                Vec2 position = pose.ToRenderedStaticWorld(Vec2.Lerp(
+                              effect.LastPosition, effect.Position, interpolation));''')
+
+          replace_once(renderer,
+          '''                Vec2 center = spear.Chunk.RenderPosition(interpolation);
+                          Vec2 direction = MathUtil.SlerpDirection(
+                              spear.LastRotation, spear.Rotation, interpolation);''',
+          '''                Vec2 center = spear.Chunk.RenderPosition(interpolation);
+                          bool worldAnchored = spear.Mode != DesktopSpearMode.Held;
+                          if (worldAnchored)
+                              center = pose.ToCharacterRenderSpaceForWorld(center);
+                          Vec2 direction = MathUtil.SlerpDirection(
+                              spear.LastRotation, spear.Rotation, interpolation);''')
+
+          replace_once(renderer,
+          '''                        Vec2 next = Vec2.Lerp(previousFrame[segment],
+                                  current[segment], interpolation);
+                              graphics.DrawLine(color, (float)(0.65 * opacity),
+                                  previous.ToPointF(), next.ToPointF());''',
+          '''                        Vec2 next = Vec2.Lerp(previousFrame[segment],
+                                  current[segment], interpolation);
+                              if (worldAnchored)
+                              {
+                                  previous = pose.ToCharacterRenderSpaceForWorld(previous);
+                                  next = pose.ToCharacterRenderSpaceForWorld(next);
+                              }
+                              graphics.DrawLine(color, (float)(0.65 * opacity),
+                                  previous.ToPointF(), next.ToPointF());''')
+
+          overlay = "src/RainWorldDesktopPet/UI/LayeredOverlayWindow.cs"
+          replace_once(overlay,
+          '''                Vec2 center = pose.ToRenderedWorld(
+                              spear.Chunk.RenderPosition(pose.TimeStacker));''',
+          '''                Vec2 spearPosition = spear.Chunk.RenderPosition(pose.TimeStacker);
+                          Vec2 center = spear.Mode == DesktopSpearMode.Held
+                              ? pose.ToRenderedWorld(spearPosition)
+                              : pose.ToRenderedStaticWorld(spearPosition);''')
+
+          replace_once(overlay,
+          '''                    Vec2 rendered = pose.ToRenderedWorld(Vec2.Lerp(
+                                  spear.LastUmbilical[point], points[point], pose.TimeStacker));''',
+          '''                    Vec2 rendered = pose.ToRenderedStaticWorld(Vec2.Lerp(
+                                  spear.LastUmbilical[point], points[point], pose.TimeStacker));''')
+
+          replace_once(overlay,
+          '''                    Vec2 currentPoint = pose.ToRenderedWorld(currentRope[point]);
+                              Vec2 previousPoint = pose.ToRenderedWorld(previousRope[point]);''',
+          '''                    Vec2 currentPoint = pose.ToRenderedStaticWorld(currentRope[point]);
+                              Vec2 previousPoint = pose.ToRenderedStaticWorld(previousRope[point]);''')
+
+          # The workflow is only a transport for this one patch. Remove it from the
+          # branch before committing so the eventual squash merge contains code only.
+          Path(".github/workflows/temp-size-world-fix.yml").unlink()
+          '@ | Set-Content -Encoding UTF8 apply_size_world_fix.py
+          python apply_size_world_fix.py
+          Remove-Item apply_size_world_fix.py
+
+      - name: Build Release and run tests
+        shell: powershell
+        run: .\build.ps1 -Configuration Release
+
+      - name: Commit verified fix
+        shell: powershell
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "fix: keep scaled world objects anchored"
+          git push origin HEAD:fix/size-world-anchored-objects
