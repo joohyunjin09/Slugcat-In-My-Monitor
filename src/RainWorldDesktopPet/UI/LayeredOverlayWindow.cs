@@ -1056,6 +1056,16 @@ namespace RainWorldDesktopPet.UI
             }
         }
 
+        internal static Vec2 ResolveWorldFoodHitCenter(Vec2 simulationPosition)
+        {
+            return DesktopWorldTransform.ToDesktop(simulationPosition);
+        }
+
+        internal static double ResolveWorldFoodHitRadius(double simulationRadius)
+        {
+            return DesktopWorldTransform.ToDesktopLength(simulationRadius);
+        }
+
         private void PublishMouseHitSnapshot()
         {
             int maximumCircleCount = 0;
@@ -1083,8 +1093,8 @@ namespace RainWorldDesktopPet.UI
                     DesktopFood food = loop.Foods.Foods[foodIndex];
                     if (!food.IsActive || !food.IsDraggable) continue;
                     circles[circleCount++] = new MouseHookHitCircle(
-                        loop.ToRenderedScreen(food.Chunk.Position),
-                        loop.ToRenderedScreenLength(food.VisualReach + 5.0));
+                        ResolveWorldFoodHitCenter(food.Chunk.Position),
+                        ResolveWorldFoodHitRadius(food.VisualReach + 5.0));
                 }
                 for (int chunkIndex = 0;
                     chunkIndex < loop.Slugcat.BodyChunks.Length; chunkIndex++)

@@ -136,6 +136,8 @@ namespace RainWorldDesktopPet.Tests
                 ResumeRecoveryGuardsInvalidInputs);
             Run("Mouse hook hit snapshots preserve click-through and topmost order",
                 MouseHookHitSnapshotsPreserveInputRules);
+            Run("World food mouse hit circles ignore Slugcat visual size",
+                WorldFoodMouseHitCirclesIgnoreSlugcatVisualSize);
             Run("AI produces VirtualInput without moving physics directly", AiDoesNotMoveCreature);
             Run("Futile atlas metadata parses frame geometry", AtlasMetadataParses);
             Run("DMS part atlas overrides and restores original sprites", DmsPartAtlasOverrideRestoresBase);
@@ -2004,6 +2006,35 @@ namespace RainWorldDesktopPet.Tests
                     new RectangleF(float.NaN, 0.0f, 20.0f, 20.0f),
                     desktop, out visible),
                 "non-finite physics coordinates must not reach DirectComposition");
+        }
+
+        private static void WorldFoodMouseHitCirclesIgnoreSlugcatVisualSize()
+        {
+            Vec2 foodPosition = new Vec2(180.0, 92.0);
+            double foodReach = 13.0;
+            Vec2 expectedCenter = DesktopWorldTransform.ToDesktop(foodPosition);
+            double expectedRadius = DesktopWorldTransform.ToDesktopLength(foodReach);
+
+            Vec2 actualCenter = LayeredOverlayWindow.ResolveWorldFoodHitCenter(
+                foodPosition);
+            double actualRadius = LayeredOverlayWindow.ResolveWorldFoodHitRadius(
+                foodReach);
+            Near(0.0, Vec2.Distance(expectedCenter, actualCenter), 0.000001,
+                "world food mouse hit center matches the rendered desktop position");
+            Near(expectedRadius, actualRadius, 0.000001,
+                "world food mouse hit radius matches the rendered desktop size");
+
+            Vec2 characterCenter = new Vec2(70.0, 55.0);
+            Vec2 smallCharacterMapped = DesktopWorldTransform.ToDesktop(
+                characterCenter + (foodPosition - characterCenter) *
+                    SlugcatSizeSettings.SmallMultiplier);
+            Vec2 normalCharacterMapped = DesktopWorldTransform.ToDesktop(
+                characterCenter + (foodPosition - characterCenter) *
+                    SlugcatSizeSettings.NormalMultiplier);
+            True(Vec2.Distance(actualCenter, smallCharacterMapped) > 1.0,
+                "Small Slugcat character scaling must not move the world-food hit circle");
+            True(Vec2.Distance(actualCenter, normalCharacterMapped) > 1.0,
+                "Normal Slugcat character scaling must not move the world-food hit circle");
         }
 
         private static void MouseHookHitSnapshotsPreserveInputRules()
