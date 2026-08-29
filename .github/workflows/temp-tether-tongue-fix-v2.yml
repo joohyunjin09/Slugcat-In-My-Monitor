@@ -1,0 +1,347 @@
+name: Temporary tether tongue size fix v2
+
+on:
+  push:
+    branches:
+      - fix/spearmaster-tether-saint-size
+
+permissions:
+  contents: write
+
+jobs:
+  patch-build-push:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Patch tether and tongue scaling
+        shell: powershell
+        run: |
+          @'
+          from pathlib import Path
+          import re
+
+          def read(path):
+              return Path(path).read_text(encoding="utf-8")
+
+          def write(path, text):
+              Path(path).write_text(text, encoding="utf-8")
+
+          def sub_once(path, pattern, replacement, flags=0):
+              text = read(path)
+              new, count = re.subn(pattern, replacement, text, count=1, flags=flags)
+              if count != 1:
+                  raise RuntimeError(f"{path}: expected one regex match, found {count}\n--- pattern ---\n{pattern}")
+              write(path, new)
+
+          spear = "src/RainWorldDesktopPet/Physics/DesktopSpear.cs"
+          sub_once(spear,
+              r'(\s*private double\[\] umbilicalLifeDecay;)',
+              r'\1\n        private double connectionScale = 1.0;')
+          sub_once(spear,
+              r'''        public void SetConnectionAnchor\(Vec2 position\)\n        \{\n            ConnectionAnchor = position;\n        \}''',
+              '''        public void SetConnectionAnchor(Vec2 position)
+                  {
+                      ConnectionAnchor = position;
+                      // Graphics updates the tail after spear physics. Snap the live
+                      // endpoint here so the visible tether never trails the tail hole.
+                      if (umbilical != null && umbilical.Length > 0 &&
+                          LifeOfUmbilicalSegment(0) > 0.0)
+                      {
+                          umbilical[0] = position;
+                          umbilicalVelocity[0] = Vec2.Zero;
+                      }
+                  }
+
+                  public void SetConnectionScale(double value)
+                  {
+                      if (value <= 0.0 || double.IsNaN(value) || double.IsInfinity(value))
+                          throw new ArgumentOutOfRangeException("value");
+                      connectionScale = value;
+                      if (umbilical == null || umbilical.Length == 0) return;
+                      int last = umbilical.Length - 1;
+                      if (LifeOfUmbilicalSegment(last) <= 0.0) return;
+                      umbilical[last] = Chunk.Position - Rotation *
+                          (25.0 * connectionScale);
+                      umbilicalVelocity[last] = Vec2.Zero;
+                  }''')
+          sub_once(spear,
+              r'umbilical\[last\] = Chunk\.Position - Rotation \* 25\.0;',
+              'umbilical[last] = Chunk.Position - Rotation *\n                    (25.0 * connectionScale);')
+
+          abilities = "src/RainWorldDesktopPet/Creature/SlugcatAbilities.cs"
+          sub_once(abilities,
+              r'return hips \+ awayFromChest \* 8\.0;',
+              'return hips + awayFromChest * (8.0 * Owner.SizeMovementScale);')
+          sub_once(abilities,
+              r'(        private const int RopeSegments = 20;)',
+              r'''\1
+                  // Existing values are the Large-size Saint baseline. Every spatial
+                  // tongue distance below is converted by Owner.SizeMovementScale.
+                  private const double LargeRequestedLength = 140.0;
+                  private const double LargeIdealLength = 150.0;
+                  private const double LargeMinimumIdealLength = 50.0;
+                  private const double LargeMaximumIdealLength = 170.0;
+                  private const double LargeElasticRopeLength = 200.0;
+                  private const double LargeRopePadding = 80.0;
+                  private const double LargeSafetyLength = 500.0;
+                  private const double LargeShotOffset = 5.0;
+                  private const double LargeShotSpeed = 70.0;
+                  private const double LargeReturnDistance = 40.0;
+                  private const double LargeAutoAimDistance = 230.0;''')
+          sub_once(abilities,
+              r'private double requestedLength = 140\.0;\n        private double idealLength = 150\.0;',
+              'private double requestedLength = LargeRequestedLength;\n        private double idealLength = LargeIdealLength;')
+          sub_once(abilities,
+              r'public double RequestedRopeLength \{ get \{ return requestedLength; \} \}',
+              'public double RequestedRopeLength { get { return ScaleLength(requestedLength); } }\n        public double MaximumTongueLength { get { return ScaleLength(LargeElasticRopeLength); } }')
+          sub_once(abilities,
+              r'''double stretch = MathUtil\.Lerp\(200\.0,\s*Math\.Min\(requestedLength, 200\.0\), 0\.5\) /\s*\(desktopRope\.TotalLength \+ 80\.0\);''',
+              '''double totalRope = ScaleLength(LargeElasticRopeLength);
+                          double stretch = MathUtil.Lerp(totalRope,
+                              Math.Min(ScaleLength(requestedLength), totalRope), 0.5) /
+                              (desktopRope.TotalLength + ScaleLength(LargeRopePadding));''', re.S)
+          sub_once(abilities,
+              r'Vec2\.Distance\(Owner\.BodyChunks\[0\]\.Position, position\), idealLength\);',
+              'Vec2.Distance(Owner.BodyChunks[0].Position, position),\n                ScaleLength(idealLength));')
+          sub_once(abilities,
+              r'if \(input\.Y < 0\) idealLength = Math\.Max\(50\.0, idealLength - 3\.0\);\n\s*if \(input\.Y > 0\) idealLength = Math\.Min\(170\.0, idealLength \+ 3\.0\);',
+              '''if (input.Y < 0) idealLength = Math.Max(
+                      LargeMinimumIdealLength, idealLength - 3.0);
+                  if (input.Y > 0) idealLength = Math.Min(
+                      LargeMaximumIdealLength, idealLength + 3.0);''')
+          sub_once(abilities,
+              r'requestedLength = Vec2\.Distance\(mouth, anchor\);',
+              'requestedLength = Vec2.Distance(mouth, anchor) /\n                        Math.Max(0.000001, TongueScale);')
+          sub_once(abilities,
+              r'if \(distance > 500\.0 \|\|',
+              'if (distance > ScaleLength(LargeSafetyLength) ||')
+          sub_once(abilities,
+              r'''velocity\.Y \+= 0\.9 - 0\.8 \*\s*MathUtil\.InverseLerp\(0\.0, 1\.0, elastic\);''',
+              '''velocity.Y += (0.9 - 0.8 *
+                      MathUtil.InverseLerp(0.0, 1.0, elastic)) * TongueScale;''')
+          sub_once(abilities,
+              r'Vec2\.Distance\(mouth, position\) < 40\.0',
+              'Vec2.Distance(mouth, position) < ScaleLength(LargeReturnDistance)')
+          sub_once(abilities,
+              r'position = mouth \+ direction \* 5\.0;',
+              'position = mouth + direction * ScaleLength(LargeShotOffset);')
+          sub_once(abilities,
+              r'velocity = direction \* 70\.0;',
+              'velocity = direction * ScaleLength(LargeShotSpeed);')
+          # The field initializer was already replaced above, so this is the shot reset.
+          sub_once(abilities,
+              r'(?m)^            requestedLength = 140\.0;$',
+              '            requestedLength = LargeRequestedLength;')
+          sub_once(abilities,
+              r'private static Vec2 AutoAim\(DesktopCollisionWorld world, Vec2 from, Vec2 direction\)\n        \{\n            if \(RayIsClear\(world, from, from \+ direction \* 230\.0\)\) return direction;',
+              '''private Vec2 AutoAim(DesktopCollisionWorld world, Vec2 from, Vec2 direction)
+                  {
+                      double aimDistance = ScaleLength(LargeAutoAimDistance);
+                      if (RayIsClear(world, from, from + direction * aimDistance)) return direction;''')
+          sub_once(abilities,
+              r'from \+ left \* 230\.0', 'from + left * aimDistance')
+          sub_once(abilities,
+              r'from \+ right \* 230\.0', 'from + right * aimDistance')
+          sub_once(abilities,
+              r'''const double onRopePosition = 1\.0;\n            const double totalRope = 200\.0;\n            double requestRope = Math\.Min\(requestedLength,\n                onRopePosition \* totalRope\);''',
+              '''const double onRopePosition = 1.0;
+                  double totalRope = ScaleLength(LargeElasticRopeLength);
+                  double requestRope = Math.Min(ScaleLength(requestedLength),
+                      onRopePosition * totalRope);''')
+          sub_once(abilities,
+              r'(        private static bool FindFirstSurfaceHit\(DesktopCollisionWorld world, Vec2 from,)',
+              r'''        private double TongueScale
+                  {
+                      get { return Owner.SizeMovementScale; }
+                  }
+
+                  private double ScaleLength(double largeSizeLength)
+                  {
+                      return largeSizeLength * TongueScale;
+                  }
+
+          \1''')
+
+          graphics = "src/RainWorldDesktopPet/Graphics/SlugcatGraphics.cs"
+          sub_once(graphics,
+              r'''for \(int i = 0; i < slugcat\.Spears\.Count; i\+\+\)\n                    \{\n                        if \(slugcat\.Spears\[i\]\.NeedleHasConnection\)\n                            slugcat\.Spears\[i\]\.SetConnectionAnchor\(\n                                tail\.Segments\[2\]\.Position\);\n                    \}''',
+              '''for (int i = 0; i < slugcat.Spears.Count; i++)
+                              {
+                                  if (!slugcat.Spears[i].HasUmbilical) continue;
+                                  slugcat.Spears[i].SetConnectionAnchor(
+                                      tail.Segments[2].Position);
+                                  slugcat.Spears[i].SetConnectionScale(
+                                      slugcat.SizeMovementScale);
+                              }''')
+          sub_once(graphics,
+              r'''spearAbility\.HeldSpear\.SetConnectionAnchor\(\n                    tail\.Segments\.Length > 2 \? tail\.Segments\[2\]\.Position :\n                    slugcat\.BodyChunks\[1\]\.Position\);''',
+              '''spearAbility.HeldSpear.SetConnectionAnchor(
+                      tail.Segments.Length > 2 ? tail.Segments[2].Position :
+                      slugcat.BodyChunks[1].Position);
+                  spearAbility.HeldSpear.SetConnectionScale(slugcat.SizeMovementScale);''')
+
+          renderer = "src/RainWorldDesktopPet/Graphics/SpriteRenderer.cs"
+          sub_once(renderer,
+              r'''if \(worldAnchored\)\n                        \{\n                            previous = pose\.ToCharacterRenderSpaceForWorld\(previous\);\n                            next = pose\.ToCharacterRenderSpaceForWorld\(next\);\n                        \}''',
+              '''if (worldAnchored)
+                                  {
+                                      ResolveUmbilicalRenderEndpoints(pose, center, direction,
+                                          segment, current.Length, ref previous, ref next);
+                                  }''')
+          sub_once(renderer,
+              r'(        private static void FillCircle\(ISpriteCanvas graphics, Vec2 center, double radius, Color color\))',
+              r'''        internal static void ResolveUmbilicalRenderEndpoints(SlugcatPose pose,
+                      Vec2 spearCenter, Vec2 spearDirection, int segment, int pointCount,
+                      ref Vec2 previous, ref Vec2 next)
+                  {
+                      if (pose == null) throw new ArgumentNullException("pose");
+                      if (segment == 1 && pose.Tail != null && pose.Tail.Length > 2)
+                          previous = pose.Tail[2];
+                      else
+                          previous = pose.ToCharacterRenderSpaceForWorld(previous);
+                      if (segment == pointCount - 1)
+                          next = spearCenter - spearDirection * 25.0;
+                      else
+                          next = pose.ToCharacterRenderSpaceForWorld(next);
+                  }
+
+          \1''')
+
+          tests = "tests/RainWorldDesktopPet.Tests/AbilityParityReplayTests.cs"
+          sub_once(tests,
+              r'(            run\("Spearmaster throw uses ThrowObject velocity and needle gravity",\n                SpearmasterThrowReplay\);)',
+              r'''\1
+                      run("Spearmaster umbilical endpoints follow scaled tail and spear",
+                          SpearmasterUmbilicalEndpointsFollowScaledVisuals);''')
+          sub_once(tests,
+              r'(            run\("Saint replay shoots, attaches and jump-releases through Tongue states",\n                SaintTongueReplay\);)',
+              r'''\1
+                      run("Saint tongue reach follows the selected Slugcat size",
+                          SaintTongueReachScalesWithSize);''')
+          sub_once(tests,
+              r'(        private static void RivuletMovementReplay\(\)\n        \{)',
+              r'''        private static void SpearmasterUmbilicalEndpointsFollowScaledVisuals()
+                  {
+                      double size = SlugcatSizeSettings.SmallMultiplier;
+                      DesktopCollisionWorld world = CreateAirWorld();
+                      DesktopSpear spear = new DesktopSpear(new Vec2(120.0, 90.0), 0);
+                      Vec2 tailAnchor = new Vec2(80.0, 105.0);
+                      spear.SetConnectionAnchor(tailAnchor);
+                      spear.SetConnectionScale(size);
+                      spear.Throw(new Vec2(12.0, 0.0), Vec2.Right);
+                      spear.Step(world);
+                      Vec2 movedTailAnchor = tailAnchor + new Vec2(6.0, -4.0);
+                      spear.SetConnectionAnchor(movedTailAnchor);
+                      spear.SetConnectionScale(size);
+                      True(spear.HasUmbilical, "thrown needle creates an umbilical");
+                      Near(0.0, Vec2.Distance(movedTailAnchor, spear.Umbilical[0]),
+                          0.000001, "tail endpoint follows the current tail hole");
+                      int last = spear.Umbilical.Length - 1;
+                      Vec2 expectedPhysicalSpearEnd = spear.Chunk.Position -
+                          spear.Rotation * (25.0 * size);
+                      Near(0.0, Vec2.Distance(expectedPhysicalSpearEnd,
+                          spear.Umbilical[last]), 0.000001,
+                          "physical spear endpoint follows scaled spear length");
+
+                      SlugcatPose pose = new SlugcatPose();
+                      pose.CharacterOrigin = new Vec2(100.0, 100.0);
+                      pose.CharacterRenderScale = SimulationConstants.CharacterRenderScale * size;
+                      pose.Tail = new Vec2[]
+                      {
+                          new Vec2(96.0, 103.0), new Vec2(93.0, 107.0),
+                          new Vec2(89.0, 111.0), new Vec2(85.0, 114.0)
+                      };
+                      Vec2 spearWorldCenter = new Vec2(180.0, 110.0);
+                      Vec2 renderCenter = pose.ToCharacterRenderSpaceForWorld(spearWorldCenter);
+                      Vec2 previous = new Vec2(90.0, 108.0);
+                      Vec2 next = new Vec2(120.0, 109.0);
+                      SpriteRenderer.ResolveUmbilicalRenderEndpoints(pose, renderCenter,
+                          Vec2.Right, 1, 4, ref previous, ref next);
+                      Near(0.0, Vec2.Distance(pose.ToRenderedWorld(pose.Tail[2]),
+                          pose.ToRenderedWorld(previous)), 0.000001,
+                          "rendered tail endpoint is welded to scaled tail hole");
+
+                      previous = new Vec2(145.0, 110.0);
+                      next = new Vec2(170.0, 110.0);
+                      SpriteRenderer.ResolveUmbilicalRenderEndpoints(pose, renderCenter,
+                          Vec2.Right, 3, 4, ref previous, ref next);
+                      Vec2 renderedSpearCenter = pose.ToRenderedStaticWorld(spearWorldCenter);
+                      Vec2 expectedRenderedSpearEnd = renderedSpearCenter -
+                          Vec2.Right * (25.0 * pose.CharacterRenderScale);
+                      Near(0.0, Vec2.Distance(expectedRenderedSpearEnd,
+                          pose.ToRenderedWorld(next)), 0.000001,
+                          "rendered spear endpoint is welded to scaled spear sprite");
+                  }
+
+          \1''')
+          sub_once(tests,
+              r'(        private static void GourmandRollReplay\(\)\n        \{)',
+              r'''        private static void SaintTongueReachScalesWithSize()
+                  {
+                      double[] scales =
+                      {
+                          SlugcatSizeSettings.SmallMultiplier,
+                          SlugcatSizeSettings.NormalMultiplier,
+                          SlugcatSizeSettings.LargeMultiplier
+                      };
+                      double[] normalizedReach = new double[scales.Length];
+                      for (int index = 0; index < scales.Length; index++)
+                      {
+                          DesktopCollisionWorld world = CreateAirWorld();
+                          Slugcat saint = CreateAirSlugcat(SlugcatId.Saint);
+                          saint.SetSizeScale(scales[index]);
+                          saint.State.Grounded = false;
+                          SaintAbilityController ability =
+                              (SaintAbilityController)saint.AbilityController;
+                          Near(200.0 * scales[index], ability.MaximumTongueLength,
+                              0.000001, "maximum tongue length " + index);
+                          saint.Step(new VirtualInput(0, -1, true, false), world,
+                              Vec2.Zero, Vec2.Zero);
+                          Near(140.0 * scales[index], ability.RequestedRopeLength,
+                              0.000001, "initial requested rope length " + index);
+                          double maximum = Vec2.Distance(saint.BodyChunks[0].Position,
+                              ability.TonguePosition);
+                          for (int tick = 0; tick < 5; tick++)
+                          {
+                              saint.Step(VirtualInput.Neutral, world, Vec2.Zero, Vec2.Zero);
+                              maximum = Math.Max(maximum, Vec2.Distance(
+                                  saint.BodyChunks[0].Position, ability.TonguePosition));
+                          }
+                          normalizedReach[index] = maximum / scales[index];
+                      }
+                      Near(normalizedReach[2], normalizedReach[0], 0.05,
+                          "Small tongue follows Large spatial ratio");
+                      Near(normalizedReach[2], normalizedReach[1], 0.05,
+                          "Normal tongue follows Large spatial ratio");
+                  }
+
+          \1''')
+
+          for helper in [
+              ".github/workflows/temp-tether-tongue-fix.yml",
+              ".github/workflows/temp-tether-tongue-fix-v2.yml"
+          ]:
+              p = Path(helper)
+              if p.exists(): p.unlink()
+          '@ | Set-Content -Encoding UTF8 apply_tether_tongue_fix.py
+          python apply_tether_tongue_fix.py
+          Remove-Item apply_tether_tongue_fix.py
+
+      - name: Build Release and run tests
+        shell: powershell
+        run: .\build.ps1 -Configuration Release
+
+      - name: Commit verified fix
+        shell: powershell
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "fix: scale Saint tongue and align Spearmaster tether"
+          git push origin HEAD:fix/spearmaster-tether-saint-size
