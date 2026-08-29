@@ -203,6 +203,18 @@ namespace RainWorldDesktopPet.Graphics
 
             Vec2 upper = drawPositions[0, 0];
             Vec2 lower = drawPositions[1, 0];
+            // In Rain World, BodyChunk velocity and per-tick displacement use
+            // the same horizontal scale. Size-compensated desktop locomotion
+            // deliberately separates them, so procedural parts must inherit
+            // the host chunk's actual X displacement or they visibly trail it.
+            Vec2 chestGraphicsVelocity = new Vec2(
+                slugcat.BodyChunks[0].Position.X -
+                    slugcat.BodyChunks[0].LastPosition.X,
+                slugcat.BodyChunks[0].Velocity.Y);
+            Vec2 hipsGraphicsVelocity = new Vec2(
+                slugcat.BodyChunks[1].Position.X -
+                    slugcat.BodyChunks[1].LastPosition.X,
+                slugcat.BodyChunks[1].Velocity.Y);
             Vec2 bodyUp = (upper - lower).Normalized;
             if (bodyUp.LengthSquared < 0.1) bodyUp = Vec2.Up;
 
@@ -217,8 +229,13 @@ namespace RainWorldDesktopPet.Graphics
                 head.Velocity += lookDirection;
             }
 
-            tail.Step(upper, lower, slugcat.BodyChunks[1].Velocity,
-                slugcat.State.Facing, slugcat.State.BodyMode, world);
+            // Keep the original PlayerGraphics time response. Rendering scales
+            // the tail spatially, while its procedural direction-change cadence
+            // continues to use the canonical BodyChunk velocity.
+            tail.Step(upper, lower, slugcat.BodyChunks[1].Position,
+                slugcat.BodyChunks[1].Velocity,
+                slugcat.State.Facing, slugcat.State.BodyMode, world,
+                slugcat.SizeMovementScale);
 
             SpearmasterAbilityController extraction =
                 slugcat.AbilityController as SpearmasterAbilityController;
@@ -229,9 +246,11 @@ namespace RainWorldDesktopPet.Graphics
                     extraction.SetTailNeedlePosition(tail.Segments[2].Position);
                     for (int i = 0; i < slugcat.Spears.Count; i++)
                     {
-                        if (slugcat.Spears[i].NeedleHasConnection)
-                            slugcat.Spears[i].SetConnectionAnchor(
-                                tail.Segments[2].Position);
+                        if (!slugcat.Spears[i].HasUmbilical) continue;
+                        slugcat.Spears[i].SetConnectionAnchor(
+                            tail.Segments[2].Position);
+                        slugcat.Spears[i].SetConnectionScale(
+                            slugcat.SizeMovementScale);
                     }
                 }
                 head.Velocity += extraction.ConsumeGraphicsHeadImpulse();
@@ -244,7 +263,7 @@ namespace RainWorldDesktopPet.Graphics
             Vec2 headTarget = Vec2.Lerp(upper, lower, 0.2) + neckDirection;
             headTargetPosition = headTarget;
             head.ConnectToPoint(headTarget, 3.0, false, 0.2,
-                slugcat.BodyChunks[0].Velocity, 0.7, 0.1);
+                chestGraphicsVelocity, 0.7, 0.1);
 
             legs.Update();
             world.PushOutOfTerrain(legs, slugcat.BodyChunks[1].Position);
@@ -254,7 +273,7 @@ namespace RainWorldDesktopPet.Graphics
                 : slugcat.BodyChunks[1].Position + new Vec2(legsDirection.X * 8.0, 2.0);
             legsTargetPosition = legsTarget;
             legs.ConnectToPoint(legsTarget, grounded ? 5.0 : 4.0, false, 0.25,
-                new Vec2(slugcat.BodyChunks[1].Velocity.X, 10.0), 0.5, 0.1);
+                new Vec2(hipsGraphicsVelocity.X, 10.0), 0.5, 0.1);
             if (grounded)
             {
                 if (slugcat.BodyChunks[1].ContactLeft) legsDirection.X += 1.0;
@@ -271,7 +290,7 @@ namespace RainWorldDesktopPet.Graphics
             for (int i = 0; i < 2; i++)
             {
                 arms[i].Step(slugcat, slugcat.BodyChunks[0].Position,
-                    slugcat.BodyChunks[1].Position, slugcat.BodyChunks[0].Velocity,
+                    slugcat.BodyChunks[1].Position, chestGraphicsVelocity,
                     world, i == 0 ? null : arms[0], airborneCounter);
             }
             SpearmasterAbilityController spearAbility = extraction;
@@ -316,8 +335,10 @@ namespace RainWorldDesktopPet.Graphics
                 spearAbility.HeldSpear.HoldAt(arms[hand].End.Position,
                     heldDirection, arms[hand].End.Velocity);
                 spearAbility.HeldSpear.SetConnectionAnchor(
-                    tail.Segments.Length > 2 ? tail.Segments[2].Position :
-                    slugcat.BodyChunks[1].Position);
+            tail.Segments.Length > 2 ? tail.Segments[2].Position :
+            slugcat.BodyChunks[1].Position);
+        spearAbility.HeldSpear.SetConnectionScale(
+            slugcat.SizeMovementScale);
             }
             else if (spearAbility != null && spearAbility.ThrowFollowTicks > 0 &&
                 spearAbility.ThrownSpear != null && slugcat.State.Conscious)
@@ -677,7 +698,13 @@ namespace RainWorldDesktopPet.Graphics
                 double stretched = MathUtil.Lerp(segments[i].LastStretched, segments[i].Stretched, timeStacker);
                 pose.TailRadii[i] = segments[i].Radius * stretched;
             }
-            pose.CharacterOrigin = (pose.Chest + pose.Hips) * 0.5;
+            // Size scaling must use the interpolated physical hips chunk.
+            // Chest/Hips include authored walk-cycle offsets; using their
+            // average as the scale origin turns those local offsets into a
+            // second whole-character bob whenever the selected scale is not
+            // the 2.2x reference size. Anchoring to the physical hips also
+            // keeps its proportionally scaled collision bottom on the surface.
+            pose.CharacterOrigin = pose.ChunkRender[1];
             pose.CharacterRenderScale = SimulationConstants.CharacterRenderScale;
             pose.TailRoot = (pose.Hips * 3.0 + pose.Chest) / 4.0;
             OriginalFaceState face = SpriteRenderer.ResolveOriginalFaceState(pose);

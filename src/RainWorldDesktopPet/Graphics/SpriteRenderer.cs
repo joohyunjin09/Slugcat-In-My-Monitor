@@ -233,9 +233,10 @@ namespace RainWorldDesktopPet.Graphics
             try
             {
                 double scale = pose.CharacterRenderScale;
+                Vec2 offset = pose.CharacterRenderOffset;
                 graphics.SetTransform((float)scale, 0.0f, 0.0f, (float)scale,
-                    (float)-renderSpace.WorldOrigin.X,
-                    (float)-renderSpace.WorldOrigin.Y);
+                    (float)(offset.X - renderSpace.WorldOrigin.X),
+                    (float)(offset.Y - renderSpace.WorldOrigin.Y));
 
                 bool profileAtlasAvailable = IsProfileAtlasAvailable(pose.SelectedSlugcat);
                 DrawSpears(graphics, slugcat, pose, pose.TimeStacker, false);
@@ -1132,13 +1133,13 @@ namespace RainWorldDesktopPet.Graphics
 
         public void RenderFoods(System.Drawing.Graphics graphics,
             DesktopFoodManager foodManager, RenderSpace renderSpace,
-            double characterRenderScale, double interpolation, bool heldLayer)
+            SlugcatPose pose, bool heldLayer)
         {
             gdiCanvas.Begin(graphics);
             try
             {
                 RenderFoodsCore(gdiCanvas, foodManager, renderSpace,
-                    characterRenderScale, interpolation, heldLayer);
+                    pose, heldLayer);
             }
             finally
             {
@@ -1146,89 +1147,166 @@ namespace RainWorldDesktopPet.Graphics
             }
         }
 
-        internal void RenderFoodsGpu(GpuSpriteCanvas canvas,
+        // Kept for preview tooling and external callers that render food without
+        // an owning Slugcat pose. A zero origin preserves the former transform.
+        public void RenderFoods(System.Drawing.Graphics graphics,
             DesktopFoodManager foodManager, RenderSpace renderSpace,
             double characterRenderScale, double interpolation, bool heldLayer)
         {
+            SlugcatPose pose = new SlugcatPose();
+            pose.CharacterRenderScale = characterRenderScale;
+            pose.TimeStacker = interpolation;
+            RenderFoods(graphics, foodManager, renderSpace, pose, heldLayer);
+        }
+
+        internal void RenderFoodsGpu(GpuSpriteCanvas canvas,
+            DesktopFoodManager foodManager, RenderSpace renderSpace,
+            SlugcatPose pose, bool heldLayer)
+        {
             if (canvas == null) throw new ArgumentNullException("canvas");
             RenderFoodsCore(canvas, foodManager, renderSpace,
-                characterRenderScale, interpolation, heldLayer);
+                pose, heldLayer);
         }
 
         private void RenderFoodsCore(ISpriteCanvas graphics,
             DesktopFoodManager foodManager, RenderSpace renderSpace,
-            double characterRenderScale, double interpolation, bool heldLayer)
+            SlugcatPose pose, bool heldLayer)
         {
-            if (foodManager == null || foodManager.Foods.Count == 0) return;
+            if (pose == null) throw new ArgumentNullException("pose");
+            if (foodManager == null) return;
+
+            // Shared food belongs to desktop/world space until a Slugcat actually
+            // holds it. The manager that exposes the shared pool can change from
+            // frame to frame, so floor/dragged food must never inherit that
+            // manager's character scale or moving character origin.
             IList<DesktopFood> foods = foodManager.Foods;
-            bool hasFoodInLayer = false;
+            bool hasWorldFood = false;
             for (int i = 0; i < foods.Count; i++)
             {
                 DesktopFood candidate = foods[i];
-                if (!candidate.IsActive) continue;
-                bool held = candidate.State == DesktopFoodState.Held ||
-                    candidate.State == DesktopFoodState.Biting ||
-                    candidate.State == DesktopFoodState.Dragged;
-                if (held != heldLayer) continue;
-                hasFoodInLayer = true;
+                if (!candidate.IsActive || IsFoodAttachedToSlugcat(candidate)) continue;
+                bool frontLayer = candidate.State == DesktopFoodState.Dragged;
+                if (frontLayer != heldLayer) continue;
+                hasWorldFood = true;
                 break;
             }
-            // Rendering is called once behind and once in front of the
-            // Slugcat. Most frames have food in only one layer, so avoid a
-            // Matrix allocation and graphics state change for the empty pass.
-            if (!hasFoodInLayer) return;
+
+            if (hasWorldFood)
+            {
+                graphics.Save();
+                try
+                {
+                    ApplyFoodRenderTransform(graphics, pose, renderSpace, false);
+                    for (int i = 0; i < foods.Count; i++)
+                    {
+                        DesktopFood food = foods[i];
+                        if (!food.IsActive || IsFoodAttachedToSlugcat(food)) continue;
+                        bool frontLayer = food.State == DesktopFoodState.Dragged;
+                        if (frontLayer != heldLayer) continue;
+                        DrawFood(graphics, food, pose.TimeStacker);
+                    }
+                }
+                finally
+                {
+                    graphics.Restore();
+                }
+            }
+
+            // A held item is rendered by the manager that actually owns the
+            // interaction, not by whichever Slugcat happens to be the shared
+            // pool's display owner. This preserves the holder's selected size.
+            if (!heldLayer) return;
+            DesktopFood heldFood = foodManager.HeldFoodForRender;
+            if (heldFood == null) return;
+
             graphics.Save();
             try
             {
-                graphics.SetTransform((float)characterRenderScale,
-                    0.0f, 0.0f, (float)characterRenderScale,
-                    (float)-renderSpace.WorldOrigin.X,
-                    (float)-renderSpace.WorldOrigin.Y);
-
-                for (int i = 0; i < foods.Count; i++)
-                {
-                    DesktopFood food = foods[i];
-                    if (!food.IsActive) continue;
-                    bool held = food.State == DesktopFoodState.Held ||
-                        food.State == DesktopFoodState.Biting ||
-                        food.State == DesktopFoodState.Dragged;
-                    if (held != heldLayer) continue;
-
-                    Vec2 center = food.Chunk.RenderPosition(interpolation);
-                    Vec2 direction = MathUtil.SlerpDirection(food.LastRotation,
-                        food.Rotation, interpolation);
-                    double angle = AimScreen(Vec2.Zero, direction);
-                    if (food.Kind == DesktopFoodKind.EggBugEgg)
-                    {
-                        DrawEggBugEgg(graphics, food, center, direction, angle,
-                            interpolation);
-                        continue;
-                    }
-                    AtlasSprite ignored;
-                    bool hasFront = atlas != null &&
-                        atlas.TryGet(food.FrontElement, out ignored);
-                    bool hasBack = atlas != null &&
-                        atlas.TryGet(food.BackElement, out ignored);
-                    if (hasFront)
-                        DrawElement(graphics, food.FrontElement, center, angle,
-                            1.0, 1.0, 0.5, 0.5,
-                            FoodRenderPalette.DangleFruit.BaseColor);
-                    else
-                        FillCachedCircle(graphics, center, 8.0,
-                            FoodRenderPalette.DangleFruit.BaseColor);
-                    if (hasBack)
-                        DrawElement(graphics, food.BackElement, center, angle,
-                            1.0, 1.0, 0.5, 0.5,
-                            FoodRenderPalette.DangleFruit.PrimaryColor);
-                    else
-                        FillCachedCircle(graphics, center, 6.5,
-                            FoodRenderPalette.DangleFruit.PrimaryColor);
-                }
+                ApplyFoodRenderTransform(graphics, pose, renderSpace, true);
+                DrawFood(graphics, heldFood, pose.TimeStacker);
             }
             finally
             {
                 graphics.Restore();
             }
+        }
+
+        internal static bool IsFoodAttachedToSlugcat(DesktopFood food)
+        {
+            return food != null && (food.State == DesktopFoodState.Held ||
+                food.State == DesktopFoodState.Biting);
+        }
+
+        internal static double ResolveFoodRenderScale(SlugcatPose pose,
+            bool attachedToSlugcat)
+        {
+            if (pose == null) throw new ArgumentNullException("pose");
+            return attachedToSlugcat
+                ? pose.CharacterRenderScale
+                : SimulationConstants.DesktopWorldScale;
+        }
+
+        internal static Vec2 ResolveFoodRenderPosition(SlugcatPose pose,
+            Vec2 position, bool attachedToSlugcat)
+        {
+            if (pose == null) throw new ArgumentNullException("pose");
+            return attachedToSlugcat
+                ? pose.ToRenderedWorld(position)
+                : pose.ToRenderedStaticWorld(position);
+        }
+
+        internal static Vec2 ResolveFoodRenderOffset(SlugcatPose pose,
+            RenderSpace renderSpace, bool attachedToSlugcat)
+        {
+            if (pose == null) throw new ArgumentNullException("pose");
+            if (renderSpace == null) throw new ArgumentNullException("renderSpace");
+            Vec2 offset = attachedToSlugcat ? pose.CharacterRenderOffset : Vec2.Zero;
+            return offset - renderSpace.WorldOrigin;
+        }
+
+        private static void ApplyFoodRenderTransform(ISpriteCanvas graphics,
+            SlugcatPose pose, RenderSpace renderSpace, bool attachedToSlugcat)
+        {
+            double scale = ResolveFoodRenderScale(pose, attachedToSlugcat);
+            Vec2 offset = ResolveFoodRenderOffset(pose, renderSpace,
+                attachedToSlugcat);
+            graphics.SetTransform((float)scale, 0.0f, 0.0f, (float)scale,
+                (float)offset.X, (float)offset.Y);
+        }
+
+        private void DrawFood(ISpriteCanvas graphics, DesktopFood food,
+            double interpolation)
+        {
+            Vec2 center = food.Chunk.RenderPosition(interpolation);
+            Vec2 direction = MathUtil.SlerpDirection(food.LastRotation,
+                food.Rotation, interpolation);
+            double angle = AimScreen(Vec2.Zero, direction);
+            if (food.Kind == DesktopFoodKind.EggBugEgg)
+            {
+                DrawEggBugEgg(graphics, food, center, direction, angle,
+                    interpolation);
+                return;
+            }
+
+            AtlasSprite ignored;
+            bool hasFront = atlas != null &&
+                atlas.TryGet(food.FrontElement, out ignored);
+            bool hasBack = atlas != null &&
+                atlas.TryGet(food.BackElement, out ignored);
+            if (hasFront)
+                DrawElement(graphics, food.FrontElement, center, angle,
+                    1.0, 1.0, 0.5, 0.5,
+                    FoodRenderPalette.DangleFruit.BaseColor);
+            else
+                FillCachedCircle(graphics, center, 8.0,
+                    FoodRenderPalette.DangleFruit.BaseColor);
+            if (hasBack)
+                DrawElement(graphics, food.BackElement, center, angle,
+                    1.0, 1.0, 0.5, 0.5,
+                    FoodRenderPalette.DangleFruit.PrimaryColor);
+            else
+                FillCachedCircle(graphics, center, 6.5,
+                    FoodRenderPalette.DangleFruit.PrimaryColor);
         }
 
         private void DrawEggBugEgg(ISpriteCanvas graphics, DesktopFood food,
@@ -1572,16 +1650,19 @@ namespace RainWorldDesktopPet.Graphics
             {
                 Vec2[] currentRope = saint.RopeForRender;
                 Vec2[] previousRope = saint.LastRopeForRender;
-                Vec2 previous = Vec2.Lerp(previousRope[0], currentRope[0], interpolation);
+                Vec2 previousWorld = Vec2.Lerp(previousRope[0], currentRope[0],
+                    interpolation);
                 if (currentRope.Length > 1)
-                    previous += (previous - Vec2.Lerp(previousRope[1],
+                    previousWorld += (previousWorld - Vec2.Lerp(previousRope[1],
                         currentRope[1], interpolation)).Normalized;
+                Vec2 previous = pose.ToCharacterRenderSpaceForWorld(previousWorld);
                 double stretch = saint.RopeStretchFactor;
                 for (int segment = 1; segment < currentRope.Length; segment++)
                 {
                     double fraction = segment / (double)(currentRope.Length - 1);
                     Vec2 next = segment < currentRope.Length - 2
-                        ? Vec2.Lerp(previousRope[segment], currentRope[segment], interpolation)
+                        ? pose.ToCharacterRenderSpaceForWorld(Vec2.Lerp(
+                            previousRope[segment], currentRope[segment], interpolation))
                         : pose.FacePosition;
                     Vec2 perpendicular = (previous - next).Normalized.Perpendicular;
                     double width = 0.2 + 1.6 * MathUtil.Lerp(1.0, stretch,
@@ -1611,7 +1692,8 @@ namespace RainWorldDesktopPet.Graphics
             for (int i = 0; i < slugcat.AbilityEffects.Count; i++)
             {
                 AbilityEffect effect = slugcat.AbilityEffects[i];
-                Vec2 position = Vec2.Lerp(effect.LastPosition, effect.Position, interpolation);
+                Vec2 position = pose.ToCharacterRenderSpaceForWorld(Vec2.Lerp(
+                    effect.LastPosition, effect.Position, interpolation));
                 double life = MathUtil.Lerp(effect.LastLife, effect.Life, interpolation);
                 if (effect.Kind == AbilityEffectKind.ShockWave)
                 {
@@ -1641,8 +1723,9 @@ namespace RainWorldDesktopPet.Graphics
                         // tenth of life; it does not fade every frame.
                         ? Color.White
                         : Color.FromArgb(MathUtil.Clamp((int)(210 * life), 0, 255), 220, 225, 235);
-                    Vec2 trail = Vec2.Lerp(effect.PreviousPreviousPosition,
-                        effect.PreviousPreviousPreviousPosition, interpolation);
+                    Vec2 trail = pose.ToCharacterRenderSpaceForWorld(Vec2.Lerp(
+                        effect.PreviousPreviousPosition,
+                        effect.PreviousPreviousPreviousPosition, interpolation));
                     if (Vec2.Distance(position, trail) < 9.0)
                         trail = position - effect.Velocity.Normalized * 9.0;
                     trail = Vec2.Lerp(position, trail,
@@ -1689,7 +1772,8 @@ namespace RainWorldDesktopPet.Graphics
                 double life = MathUtil.Lerp(effect.LastLife, effect.Life, interpolation);
                 Vec2 position = Vec2.Lerp(effect.LastPosition, effect.Position,
                     interpolation);
-                Vec2 center = position * renderScale - renderSpace.WorldOrigin;
+                Vec2 center = pose.ToRenderedStaticWorld(position) -
+                    renderSpace.WorldOrigin;
                 if (effect.Kind == AbilityEffectKind.ExplosionLight)
                 {
                     double rootLife = Math.Sqrt(Math.Max(0.0, life));
@@ -1841,8 +1925,8 @@ namespace RainWorldDesktopPet.Graphics
                 }
                 else continue;
                 if (size <= 0.0001) continue;
-                Vec2 position = Vec2.Lerp(effect.LastPosition, effect.Position,
-                    interpolation) * renderScale;
+                Vec2 position = pose.ToRenderedStaticWorld(Vec2.Lerp(
+                    effect.LastPosition, effect.Position, interpolation));
                 double half = size * 0.5 + 2.0;
                 if (!hasBounds)
                 {
@@ -1872,6 +1956,9 @@ namespace RainWorldDesktopPet.Graphics
                 double spearOpacity = spear.Opacity;
                 if (spearOpacity <= 0.0) continue;
                 Vec2 center = spear.Chunk.RenderPosition(interpolation);
+                bool worldAnchored = spear.Mode != DesktopSpearMode.Held;
+                if (worldAnchored)
+                    center = pose.ToCharacterRenderSpaceForWorld(center);
                 Vec2 direction = MathUtil.SlerpDirection(
                     spear.LastRotation, spear.Rotation, interpolation);
                 if (spear.HasUmbilical)
@@ -1895,6 +1982,11 @@ namespace RainWorldDesktopPet.Graphics
                             current[segment - 1], interpolation);
                         Vec2 next = Vec2.Lerp(previousFrame[segment],
                             current[segment], interpolation);
+                        if (worldAnchored)
+                        {
+                            ResolveUmbilicalRenderEndpoints(pose, center, direction,
+                                segment, current.Length, ref previous, ref next);
+                        }
                         graphics.DrawLine(color, (float)(0.65 * opacity),
                             previous.ToPointF(), next.ToPointF());
                     }
@@ -1922,6 +2014,21 @@ namespace RainWorldDesktopPet.Graphics
                         (center + direction * 13.0).ToPointF());
                 }
             }
+        }
+
+        internal static void ResolveUmbilicalRenderEndpoints(SlugcatPose pose,
+            Vec2 spearCenter, Vec2 spearDirection, int segment, int pointCount,
+            ref Vec2 previous, ref Vec2 next)
+        {
+            if (pose == null) throw new ArgumentNullException("pose");
+            if (segment == 1 && pose.Tail != null && pose.Tail.Length > 2)
+                previous = pose.Tail[2];
+            else
+                previous = pose.ToCharacterRenderSpaceForWorld(previous);
+            if (segment == pointCount - 1)
+                next = spearCenter - spearDirection * 25.0;
+            else
+                next = pose.ToCharacterRenderSpaceForWorld(next);
         }
 
         private static void FillCircle(ISpriteCanvas graphics, Vec2 center, double radius, Color color)
