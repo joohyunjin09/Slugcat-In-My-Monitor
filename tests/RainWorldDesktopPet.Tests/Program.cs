@@ -3643,6 +3643,7 @@ namespace RainWorldDesktopPet.Tests
             slugcat.AddEffect(smoke);
             SlugcatPose pose = new SlugcatPose();
             pose.CharacterRenderScale = 2.0;
+            pose.CharacterOrigin = new Vec2(40.0, 30.0);
             pose.TimeStacker = 1.0;
             DirectCompositionHost.GpuSmokeEffect[] commands =
                 new DirectCompositionHost.GpuSmokeEffect[4];
@@ -3652,8 +3653,10 @@ namespace RainWorldDesktopPet.Tests
                     new RenderSpace(new Rectangle(50, 20, 400, 300)), commands,
                     ref count);
             Equal(1, count, "smoke command count");
-            Near(150.0, commands[0].CenterX, 0.0001, "smoke local X");
-            Near(140.0, commands[0].CenterY, 0.0001, "smoke local Y");
+            Near(100.0 * SimulationConstants.DesktopWorldScale - 50.0,
+                commands[0].CenterX, 0.0001, "smoke world-anchored X");
+            Near(80.0 * SimulationConstants.DesktopWorldScale - 20.0,
+                commands[0].CenterY, 0.0001, "smoke world-anchored Y");
             True(commands[0].BackSize > commands[0].FrontSize,
                 "back smoke quad should be larger than front smoke quad");
             True(commands[0].BackAlpha > commands[0].FrontAlpha,

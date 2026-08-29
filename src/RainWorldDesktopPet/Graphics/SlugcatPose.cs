@@ -215,6 +215,27 @@ namespace RainWorldDesktopPet.Graphics
                 (point - CharacterOrigin) * CharacterRenderScale;
         }
 
+        // Character-local graphics are scaled around CharacterOrigin. World objects
+        // must keep their desktop position instead of inheriting later Slugcat motion.
+        public Vec2 ToRenderedStaticWorld(Vec2 point)
+        {
+            return DesktopWorldTransform.ToDesktop(point);
+        }
+
+        // Convert a world-space point into the coordinate space consumed by the
+        // current character transform. After CharacterRenderScale is applied, the
+        // point lands at DesktopWorldTransform.ToDesktop(point) regardless of size.
+        public Vec2 ToCharacterRenderSpaceForWorld(Vec2 point)
+        {
+            if (CharacterRenderScale <= 0.0 ||
+                double.IsNaN(CharacterRenderScale) ||
+                double.IsInfinity(CharacterRenderScale))
+                throw new InvalidOperationException(
+                    "CharacterRenderScale must be finite and positive.");
+            return CharacterOrigin + (point - CharacterOrigin) *
+                (SimulationConstants.DesktopWorldScale / CharacterRenderScale);
+        }
+
         public Vec2 CharacterRenderOffset
         {
             get
