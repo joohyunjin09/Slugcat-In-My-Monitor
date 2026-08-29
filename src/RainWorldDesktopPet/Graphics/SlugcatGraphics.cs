@@ -337,7 +337,8 @@ namespace RainWorldDesktopPet.Graphics
                 spearAbility.HeldSpear.SetConnectionAnchor(
             tail.Segments.Length > 2 ? tail.Segments[2].Position :
             slugcat.BodyChunks[1].Position);
-        spearAbility.HeldSpear.SetConnectionScale(slugcat.SizeMovementScale);
+        spearAbility.HeldSpear.SetConnectionScale(
+            slugcat.SizeMovementScale);
             }
             else if (spearAbility != null && spearAbility.ThrowFollowTicks > 0 &&
                 spearAbility.ThrownSpear != null && slugcat.State.Conscious)

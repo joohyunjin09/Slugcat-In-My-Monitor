@@ -889,10 +889,12 @@ namespace RainWorldDesktopPet.Creature
                     FinishRetraction(mouth);
                     return;
                 }
-                if (input.Y < 0) idealLength = Math.Max(
-            LargeMinimumIdealLength, idealLength - 3.0);
-        if (input.Y > 0) idealLength = Math.Min(
-            LargeMaximumIdealLength, idealLength + 3.0);
+                if (input.Y < 0)
+            idealLength = Math.Max(LargeMinimumIdealLength,
+                idealLength - 3.0);
+        if (input.Y > 0)
+            idealLength = Math.Min(LargeMaximumIdealLength,
+                idealLength + 3.0);
                 if (input.JumpPressed && attachedTicks >= 2 &&
                     CanJumpReleaseAttachedTongue)
                 {
