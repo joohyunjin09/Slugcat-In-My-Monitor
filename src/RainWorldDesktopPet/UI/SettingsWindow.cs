@@ -109,13 +109,11 @@ namespace RainWorldDesktopPet.UI
             sizeSelector = new ComboBox { Dock = DockStyle.Fill,
                 DropDownStyle = ComboBoxStyle.DropDownList };
             sizeSelector.Items.Add(new SizeChoice(SlugcatSize.Small,
-                T("작게 (1920×1080 원작 크기)",
-                    "Small (original size at 1920x1080)")));
+                T("작게", "Small")));
             sizeSelector.Items.Add(new SizeChoice(SlugcatSize.Normal,
-                T("보통 (작게와 크게의 중간)",
-                    "Normal (midpoint of small and large)")));
+                T("보통", "Normal")));
             sizeSelector.Items.Add(new SizeChoice(SlugcatSize.Large,
-                T("크게 (2.2배, 기존 크기)", "Large (2.2x, previous size)")));
+                T("크게", "Large")));
             sizeSelector.SelectedIndexChanged += SlugcatSizeChanged;
             appearanceLayout.Controls.Add(sizeSelector, 1, 1);
             FlowLayoutPanel appearanceActions = new FlowLayoutPanel
