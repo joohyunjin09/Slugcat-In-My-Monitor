@@ -87,6 +87,8 @@ namespace RainWorldDesktopPet.Tests
                 SpearmasterNeutralGateReplay);
             run("Spearmaster throw uses ThrowObject velocity and needle gravity",
                 SpearmasterThrowReplay);
+            run("Spearmaster umbilical endpoints follow scaled tail and spear",
+                SpearmasterUmbilicalEndpointsFollowScaledVisuals);
             run("Spearmaster thrown spear fades then expires after fifteen seconds",
                 SpearmasterThrownSpearExpiryReplay);
             run("Grounded free spear keeps the original diagonal resting spread",
@@ -103,6 +105,8 @@ namespace RainWorldDesktopPet.Tests
                 MovementMomentumTrajectories);
             run("Saint replay shoots, attaches and jump-releases through Tongue states",
                 SaintTongueReplay);
+            run("Saint tongue reach follows the selected Slugcat size",
+                SaintTongueReachScalesWithSize);
             run("Gourmand falling diagonal replay gates roll through original counters",
                 GourmandRollReplay);
             run("Gourmand exhaustion uses aerobicLevel recovery and slowMovementStun",
@@ -913,6 +917,59 @@ namespace RainWorldDesktopPet.Tests
                 "autonomous throw releases the held needle");
         }
 
+        private static void SpearmasterUmbilicalEndpointsFollowScaledVisuals()
+        {
+            double size = SlugcatSizeSettings.SmallMultiplier;
+            DesktopCollisionWorld world = CreateAirWorld();
+            DesktopSpear spear = new DesktopSpear(new Vec2(120.0, 90.0), 0);
+            Vec2 tailAnchor = new Vec2(80.0, 105.0);
+            spear.SetConnectionAnchor(tailAnchor);
+            spear.SetConnectionScale(size);
+            spear.Throw(new Vec2(12.0, 0.0), Vec2.Right);
+            spear.Step(world);
+            Vec2 movedTailAnchor = tailAnchor + new Vec2(6.0, -4.0);
+            spear.SetConnectionAnchor(movedTailAnchor);
+            spear.SetConnectionScale(size);
+            True(spear.HasUmbilical, "thrown needle creates an umbilical");
+            Near(0.0, Vec2.Distance(movedTailAnchor, spear.Umbilical[0]),
+                0.000001, "tail endpoint follows the current tail hole");
+            int last = spear.Umbilical.Length - 1;
+            Vec2 expectedPhysicalSpearEnd = spear.Chunk.Position -
+                spear.Rotation * (25.0 * size);
+            Near(0.0, Vec2.Distance(expectedPhysicalSpearEnd,
+                spear.Umbilical[last]), 0.000001,
+                "physical spear endpoint follows scaled spear length");
+
+            SlugcatPose pose = new SlugcatPose();
+            pose.CharacterOrigin = new Vec2(100.0, 100.0);
+            pose.CharacterRenderScale = SimulationConstants.CharacterRenderScale * size;
+            pose.Tail = new Vec2[]
+            {
+                new Vec2(96.0, 103.0), new Vec2(93.0, 107.0),
+                new Vec2(89.0, 111.0), new Vec2(85.0, 114.0)
+            };
+            Vec2 spearWorldCenter = new Vec2(180.0, 110.0);
+            Vec2 renderCenter = pose.ToCharacterRenderSpaceForWorld(spearWorldCenter);
+            Vec2 previous = new Vec2(90.0, 108.0);
+            Vec2 next = new Vec2(120.0, 109.0);
+            SpriteRenderer.ResolveUmbilicalRenderEndpoints(pose, renderCenter,
+                Vec2.Right, 1, 4, ref previous, ref next);
+            Near(0.0, Vec2.Distance(pose.ToRenderedWorld(pose.Tail[2]),
+                pose.ToRenderedWorld(previous)), 0.000001,
+                "rendered tail endpoint is welded to scaled tail hole");
+
+            previous = new Vec2(145.0, 110.0);
+            next = new Vec2(170.0, 110.0);
+            SpriteRenderer.ResolveUmbilicalRenderEndpoints(pose, renderCenter,
+                Vec2.Right, 3, 4, ref previous, ref next);
+            Vec2 renderedSpearCenter = pose.ToRenderedStaticWorld(spearWorldCenter);
+            Vec2 expectedRenderedSpearEnd = renderedSpearCenter -
+                Vec2.Right * (25.0 * pose.CharacterRenderScale);
+            Near(0.0, Vec2.Distance(expectedRenderedSpearEnd,
+                pose.ToRenderedWorld(next)), 0.000001,
+                "rendered spear endpoint is welded to scaled spear sprite");
+        }
+
         private static void RivuletMovementReplay()
         {
             DesktopCollisionWorld airWorld = CreateAirWorld();
@@ -1063,6 +1120,47 @@ namespace RainWorldDesktopPet.Tests
             saint.Step(VirtualInput.Neutral, world, Vec2.Zero, Vec2.Zero);
             True(ability.Mode == SaintTongueMode.Retracted,
                 "following Tongue.Update completes retraction");
+        }
+
+        private static void SaintTongueReachScalesWithSize()
+        {
+            double[] scales =
+            {
+                SlugcatSizeSettings.SmallMultiplier,
+                SlugcatSizeSettings.NormalMultiplier,
+                SlugcatSizeSettings.LargeMultiplier
+            };
+            double[] normalizedReach = new double[scales.Length];
+            for (int index = 0; index < scales.Length; index++)
+            {
+                DesktopCollisionWorld world = CreateAirWorld();
+                Slugcat saint = CreateAirSlugcat(SlugcatId.Saint);
+                saint.SetSizeScale(scales[index]);
+                saint.State.Grounded = false;
+                SaintAbilityController ability =
+                    (SaintAbilityController)saint.AbilityController;
+                Near(200.0 * scales[index], ability.MaximumTongueLength,
+                    0.000001, "maximum tongue length " + index);
+                saint.Step(new VirtualInput(0, -1, true, false), world,
+                    Vec2.Zero, Vec2.Zero);
+                Near(140.0 * scales[index], ability.RequestedRopeLength,
+                    0.000001, "initial requested rope length " + index);
+                double maximum = Vec2.Distance(saint.BodyChunks[0].Position,
+                    ability.TonguePosition);
+                for (int tick = 0; tick < 5; tick++)
+                {
+                    saint.Step(VirtualInput.Neutral, world, Vec2.Zero, Vec2.Zero);
+                    maximum = Math.Max(maximum, Vec2.Distance(
+                        saint.BodyChunks[0].Position, ability.TonguePosition));
+                }
+                normalizedReach[index] = maximum / scales[index];
+            }
+            True(normalizedReach[0] > 0.0, "Small tongue produces positive reach");
+            Near(normalizedReach[2], normalizedReach[0], 5.0,
+                "Small tongue follows Large spatial ratio");
+            True(normalizedReach[1] > 0.0, "Normal tongue produces positive reach");
+            Near(normalizedReach[2], normalizedReach[1], 5.0,
+                "Normal tongue follows Large spatial ratio");
         }
 
         private static void GourmandRollReplay()
