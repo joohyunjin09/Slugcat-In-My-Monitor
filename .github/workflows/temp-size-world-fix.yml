@@ -120,18 +120,14 @@ jobs:
 
           replace_once(renderer,
           '''                        Vec2 next = Vec2.Lerp(previousFrame[segment],
-                                  current[segment], interpolation);
-                              graphics.DrawLine(color, (float)(0.65 * opacity),
-                                  previous.ToPointF(), next.ToPointF());''',
+                              current[segment], interpolation);''',
           '''                        Vec2 next = Vec2.Lerp(previousFrame[segment],
-                                  current[segment], interpolation);
-                              if (worldAnchored)
-                              {
-                                  previous = pose.ToCharacterRenderSpaceForWorld(previous);
-                                  next = pose.ToCharacterRenderSpaceForWorld(next);
-                              }
-                              graphics.DrawLine(color, (float)(0.65 * opacity),
-                                  previous.ToPointF(), next.ToPointF());''')
+                              current[segment], interpolation);
+                          if (worldAnchored)
+                          {
+                              previous = pose.ToCharacterRenderSpaceForWorld(previous);
+                              next = pose.ToCharacterRenderSpaceForWorld(next);
+                          }''')
 
           overlay = "src/RainWorldDesktopPet/UI/LayeredOverlayWindow.cs"
           replace_once(overlay,
@@ -154,8 +150,6 @@ jobs:
           '''                    Vec2 currentPoint = pose.ToRenderedStaticWorld(currentRope[point]);
                               Vec2 previousPoint = pose.ToRenderedStaticWorld(previousRope[point]);''')
 
-          # The workflow is only a transport for this one patch. Remove it from the
-          # branch before committing so the eventual squash merge contains code only.
           Path(".github/workflows/temp-size-world-fix.yml").unlink()
           '@ | Set-Content -Encoding UTF8 apply_size_world_fix.py
           python apply_size_world_fix.py
