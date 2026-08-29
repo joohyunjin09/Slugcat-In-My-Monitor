@@ -1,0 +1,347 @@
+name: Temporary food size render fix
+
+on:
+  push:
+    branches:
+      - fix/food-world-size-rendering
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch-build-push:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@v4
+        with:
+          ref: fix/food-world-size-rendering
+          fetch-depth: 0
+
+      - name: Patch food world and held render spaces
+        shell: pwsh
+        run: |
+          @'
+          from pathlib import Path
+
+          def read(path):
+              return Path(path).read_text(encoding="utf-8")
+
+          def write(path, text):
+              Path(path).write_text(text, encoding="utf-8", newline="")
+
+          manager_path = "src/RainWorldDesktopPet/Core/DesktopFoodManager.cs"
+          text = read(manager_path)
+          needle = "        public DesktopFood DraggedFood { get { return draggedFood; } }\n"
+          replacement = needle + "        internal DesktopFood HeldFoodForRender\n        {\n            get\n            {\n                return target != null && target.IsActive &&\n                    (target.State == DesktopFoodState.Held ||\n                        target.State == DesktopFoodState.Biting)\n                    ? target : null;\n            }\n        }\n"
+          if text.count(needle) != 1:
+              raise SystemExit("DesktopFoodManager insertion point mismatch")
+          text = text.replace(needle, replacement, 1)
+          write(manager_path, text)
+
+          renderer_path = "src/RainWorldDesktopPet/Graphics/SpriteRenderer.cs"
+          text = read(renderer_path)
+          start_marker = "        private void RenderFoodsCore(ISpriteCanvas graphics,\n"
+          end_marker = "        private void DrawEggBugEgg(ISpriteCanvas graphics, DesktopFood food,\n"
+          start = text.find(start_marker)
+          end = text.find(end_marker, start)
+          if start < 0 or end < 0:
+              raise SystemExit("SpriteRenderer food block markers not found")
+          new_block = r'''        private void RenderFoodsCore(ISpriteCanvas graphics,
+            DesktopFoodManager foodManager, RenderSpace renderSpace,
+            SlugcatPose pose, bool heldLayer)
+        {
+            if (pose == null) throw new ArgumentNullException("pose");
+            if (foodManager == null) return;
+
+            // Shared food belongs to desktop/world space until a Slugcat actually
+            // holds it. The manager that exposes the shared pool can change from
+            // frame to frame, so floor/dragged food must never inherit that
+            // manager's character scale or moving character origin.
+            IList<DesktopFood> foods = foodManager.Foods;
+            bool hasWorldFood = false;
+            for (int i = 0; i < foods.Count; i++)
+            {
+                DesktopFood candidate = foods[i];
+                if (!candidate.IsActive || IsFoodAttachedToSlugcat(candidate)) continue;
+                bool frontLayer = candidate.State == DesktopFoodState.Dragged;
+                if (frontLayer != heldLayer) continue;
+                hasWorldFood = true;
+                break;
+            }
+
+            if (hasWorldFood)
+            {
+                graphics.Save();
+                try
+                {
+                    ApplyFoodRenderTransform(graphics, pose, renderSpace, false);
+                    for (int i = 0; i < foods.Count; i++)
+                    {
+                        DesktopFood food = foods[i];
+                        if (!food.IsActive || IsFoodAttachedToSlugcat(food)) continue;
+                        bool frontLayer = food.State == DesktopFoodState.Dragged;
+                        if (frontLayer != heldLayer) continue;
+                        DrawFood(graphics, food, pose.TimeStacker);
+                    }
+                }
+                finally
+                {
+                    graphics.Restore();
+                }
+            }
+
+            // A held item is rendered by the manager that actually owns the
+            // interaction, not by whichever Slugcat happens to be the shared
+            // pool's display owner. This preserves the holder's selected size.
+            if (!heldLayer) return;
+            DesktopFood heldFood = foodManager.HeldFoodForRender;
+            if (heldFood == null) return;
+
+            graphics.Save();
+            try
+            {
+                ApplyFoodRenderTransform(graphics, pose, renderSpace, true);
+                DrawFood(graphics, heldFood, pose.TimeStacker);
+            }
+            finally
+            {
+                graphics.Restore();
+            }
+        }
+
+        internal static bool IsFoodAttachedToSlugcat(DesktopFood food)
+        {
+            return food != null && (food.State == DesktopFoodState.Held ||
+                food.State == DesktopFoodState.Biting);
+        }
+
+        internal static double ResolveFoodRenderScale(SlugcatPose pose,
+            bool attachedToSlugcat)
+        {
+            if (pose == null) throw new ArgumentNullException("pose");
+            return attachedToSlugcat
+                ? pose.CharacterRenderScale
+                : SimulationConstants.DesktopWorldScale;
+        }
+
+        internal static Vec2 ResolveFoodRenderPosition(SlugcatPose pose,
+            Vec2 position, bool attachedToSlugcat)
+        {
+            if (pose == null) throw new ArgumentNullException("pose");
+            return attachedToSlugcat
+                ? pose.ToRenderedWorld(position)
+                : pose.ToRenderedStaticWorld(position);
+        }
+
+        internal static Vec2 ResolveFoodRenderOffset(SlugcatPose pose,
+            RenderSpace renderSpace, bool attachedToSlugcat)
+        {
+            if (pose == null) throw new ArgumentNullException("pose");
+            if (renderSpace == null) throw new ArgumentNullException("renderSpace");
+            Vec2 offset = attachedToSlugcat ? pose.CharacterRenderOffset : Vec2.Zero;
+            return offset - renderSpace.WorldOrigin;
+        }
+
+        private static void ApplyFoodRenderTransform(ISpriteCanvas graphics,
+            SlugcatPose pose, RenderSpace renderSpace, bool attachedToSlugcat)
+        {
+            double scale = ResolveFoodRenderScale(pose, attachedToSlugcat);
+            Vec2 offset = ResolveFoodRenderOffset(pose, renderSpace,
+                attachedToSlugcat);
+            graphics.SetTransform((float)scale, 0.0f, 0.0f, (float)scale,
+                (float)offset.X, (float)offset.Y);
+        }
+
+        private void DrawFood(ISpriteCanvas graphics, DesktopFood food,
+            double interpolation)
+        {
+            Vec2 center = food.Chunk.RenderPosition(interpolation);
+            Vec2 direction = MathUtil.SlerpDirection(food.LastRotation,
+                food.Rotation, interpolation);
+            double angle = AimScreen(Vec2.Zero, direction);
+            if (food.Kind == DesktopFoodKind.EggBugEgg)
+            {
+                DrawEggBugEgg(graphics, food, center, direction, angle,
+                    interpolation);
+                return;
+            }
+
+            AtlasSprite ignored;
+            bool hasFront = atlas != null &&
+                atlas.TryGet(food.FrontElement, out ignored);
+            bool hasBack = atlas != null &&
+                atlas.TryGet(food.BackElement, out ignored);
+            if (hasFront)
+                DrawElement(graphics, food.FrontElement, center, angle,
+                    1.0, 1.0, 0.5, 0.5,
+                    FoodRenderPalette.DangleFruit.BaseColor);
+            else
+                FillCachedCircle(graphics, center, 8.0,
+                    FoodRenderPalette.DangleFruit.BaseColor);
+            if (hasBack)
+                DrawElement(graphics, food.BackElement, center, angle,
+                    1.0, 1.0, 0.5, 0.5,
+                    FoodRenderPalette.DangleFruit.PrimaryColor);
+            else
+                FillCachedCircle(graphics, center, 6.5,
+                    FoodRenderPalette.DangleFruit.PrimaryColor);
+        }
+
+'''
+          text = text[:start] + new_block + text[end:]
+          write(renderer_path, text)
+
+          overlay_path = "src/RainWorldDesktopPet/UI/LayeredOverlayWindow.cs"
+          text = read(overlay_path)
+          start_marker = "            for (int i = 0; i < loop.Foods.Foods.Count; i++)\n"
+          end_marker = "\n            // Keep Saint's active tongue in the same dynamic composition-bounds\n"
+          start = text.find(start_marker)
+          end = text.find(end_marker, start)
+          if start < 0 or end < 0:
+              raise SystemExit("LayeredOverlayWindow food bounds markers not found")
+          new_bounds = r'''            for (int i = 0; i < loop.Foods.Foods.Count; i++)
+            {
+                DesktopFood food = loop.Foods.Foods[i];
+                if (!food.IsActive || SpriteRenderer.IsFoodAttachedToSlugcat(food))
+                    continue;
+                Vec2 center = SpriteRenderer.ResolveFoodRenderPosition(pose,
+                    food.Chunk.RenderPosition(pose.TimeStacker), false);
+                double reach = food.VisualReach *
+                    SpriteRenderer.ResolveFoodRenderScale(pose, false);
+                content = RectangleF.Union(content, new RectangleF(
+                    (float)(center.X - reach), (float)(center.Y - reach),
+                    (float)(reach * 2.0), (float)(reach * 2.0)));
+            }
+            DesktopFood heldFood = loop.Foods.HeldFoodForRender;
+            if (heldFood != null)
+            {
+                Vec2 center = SpriteRenderer.ResolveFoodRenderPosition(pose,
+                    heldFood.Chunk.RenderPosition(pose.TimeStacker), true);
+                double reach = heldFood.VisualReach *
+                    SpriteRenderer.ResolveFoodRenderScale(pose, true);
+                content = RectangleF.Union(content, new RectangleF(
+                    (float)(center.X - reach), (float)(center.Y - reach),
+                    (float)(reach * 2.0), (float)(reach * 2.0)));
+            }
+'''
+          text = text[:start] + new_bounds + text[end:]
+          write(overlay_path, text)
+
+          tests_path = "tests/RainWorldDesktopPet.Tests/Program.cs"
+          text = read(tests_path)
+          registration = "            Run(\"Food fallback remains visible without a local atlas\",\n                FoodFallbackRendersWithoutAtlas);\n"
+          added_registration = registration + "            Run(\"World food keeps fixed size and position across Slugcat sizes\",\n                FoodWorldRenderingIgnoresSlugcatSizeAndMotion);\n            Run(\"Shared held food keeps the actual holder's render context\",\n                SharedHeldFoodKeepsOwningManager);\n"
+          if text.count(registration) != 1:
+              raise SystemExit("Food test registration point mismatch")
+          text = text.replace(registration, added_registration, 1)
+
+          method_marker = "        private static void FoodFallbackRendersWithoutAtlas()\n"
+          method_index = text.find(method_marker)
+          if method_index < 0:
+              raise SystemExit("Food test method insertion point not found")
+          new_tests = r'''        private static void FoodWorldRenderingIgnoresSlugcatSizeAndMotion()
+        {
+            Vec2 foodPosition = new Vec2(180.0, 90.0);
+            RenderSpace renderSpace = new RenderSpace(
+                new Rectangle(-120, 40, 900, 700));
+
+            SlugcatPose small = new SlugcatPose();
+            small.CharacterOrigin = new Vec2(70.0, 60.0);
+            small.CharacterRenderScale = SlugcatSizeSettings.SmallRenderScale;
+            SlugcatPose normalMoved = new SlugcatPose();
+            normalMoved.CharacterOrigin = new Vec2(240.0, 125.0);
+            normalMoved.CharacterRenderScale = SlugcatSizeSettings.NormalRenderScale;
+
+            Vec2 expectedWorld = DesktopWorldTransform.ToDesktop(foodPosition);
+            Vec2 smallWorld = SpriteRenderer.ResolveFoodRenderPosition(
+                small, foodPosition, false);
+            Vec2 normalWorld = SpriteRenderer.ResolveFoodRenderPosition(
+                normalMoved, foodPosition, false);
+            Near(0.0, Vec2.Distance(expectedWorld, smallWorld), 0.000001,
+                "small Slugcat cannot move world food away from its desktop position");
+            Near(0.0, Vec2.Distance(smallWorld, normalWorld), 0.000001,
+                "moving or resizing the selected Slugcat cannot move world food");
+            Near(SimulationConstants.DesktopWorldScale,
+                SpriteRenderer.ResolveFoodRenderScale(small, false), 0.000001,
+                "world food keeps the desktop-world scale for Small");
+            Near(SimulationConstants.DesktopWorldScale,
+                SpriteRenderer.ResolveFoodRenderScale(normalMoved, false), 0.000001,
+                "world food keeps the desktop-world scale for Normal");
+            Near(0.0, Vec2.Distance(
+                SpriteRenderer.ResolveFoodRenderOffset(small, renderSpace, false),
+                SpriteRenderer.ResolveFoodRenderOffset(normalMoved, renderSpace, false)),
+                0.000001,
+                "world food transform offset is independent of CharacterOrigin");
+
+            Near(SlugcatSizeSettings.SmallRenderScale,
+                SpriteRenderer.ResolveFoodRenderScale(small, true), 0.000001,
+                "held food uses the actual Small holder scale");
+            Near(SlugcatSizeSettings.NormalRenderScale,
+                SpriteRenderer.ResolveFoodRenderScale(normalMoved, true), 0.000001,
+                "held food uses the actual Normal holder scale");
+            True(Vec2.Distance(
+                    SpriteRenderer.ResolveFoodRenderPosition(small, foodPosition, true),
+                    SpriteRenderer.ResolveFoodRenderPosition(normalMoved,
+                        foodPosition, true)) > 1.0,
+                "character-attached food still follows its holder's local render space");
+        }
+
+        private static void SharedHeldFoodKeepsOwningManager()
+        {
+            DesktopFoodManager holder = new DesktopFoodManager(1771);
+            DesktopFoodManager displayOwner = new DesktopFoodManager(1772);
+            Slugcat slugcat = new Slugcat(new Vec2(100.0, 100.0));
+            slugcat.State.Grounded = true;
+            SlugcatGraphics graphics = new SlugcatGraphics(slugcat);
+            AttentionSystem attention = new AttentionSystem();
+            VirtualInput input;
+
+            True(holder.TryAddDangleFruit(slugcat.Center + new Vec2(8.0, 0.0)),
+                "holder receives a reachable fruit before joining the shared pool");
+            True(holder.TryProduceInput(slugcat, graphics, attention, out input) &&
+                holder.Target != null &&
+                holder.Target.State == DesktopFoodState.Held,
+                "the first manager actually owns a held edible");
+            DesktopFood held = holder.Target;
+
+            DesktopCollisionWorld world = new DesktopCollisionWorld(new WindowEnumerator());
+            world.Refresh(IntPtr.Zero);
+            holder.StepPhysics(world);
+            displayOwner.StepPhysics(world);
+
+            Equal(0, holder.Foods.Count,
+                "a different manager can become the shared world display owner");
+            Equal(1, displayOwner.Foods.Count,
+                "the shared display owner still exposes the world pool once");
+            True(ReferenceEquals(holder.HeldFoodForRender, held),
+                "held rendering remains attached to the manager that owns the food");
+            True(displayOwner.HeldFoodForRender == null,
+                "the display owner cannot borrow another Slugcat's held render context");
+        }
+
+'''
+          text = text[:method_index] + new_tests + text[method_index:]
+          write(tests_path, text)
+          '@ | python -
+
+      - name: Build Release and run tests
+        shell: powershell
+        run: .\build.ps1 -Configuration Release
+
+      - name: Check DMS validator syntax
+        shell: powershell
+        run: node --check tools/validate-dms-template.mjs
+
+      - name: Commit validated fix
+        shell: pwsh
+        run: |
+          Remove-Item .github/workflows/temp-food-size-render-fix.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "fix: keep world food independent of slugcat size"
+          git push origin HEAD:fix/food-world-size-rendering
