@@ -149,6 +149,17 @@ jobs:
               "Vec2 previousPoint = pose.ToRenderedWorld(previousRope[point]);",
               "Vec2 previousPoint = pose.ToRenderedStaticWorld(previousRope[point]);")
 
+          tests = "tests/RainWorldDesktopPet.Tests/Program.cs"
+          replace_once(tests,
+              "pose.CharacterRenderScale = 2.0;",
+              "pose.CharacterRenderScale = 2.0;\n            pose.CharacterOrigin = new Vec2(40.0, 30.0);")
+          replace_once(tests,
+              "Near(150.0, commands[0].CenterX, 0.0001, \"smoke local X\");",
+              "Near(100.0 * SimulationConstants.DesktopWorldScale - 50.0,\n                commands[0].CenterX, 0.0001, \"smoke world-anchored X\");")
+          replace_once(tests,
+              "Near(140.0, commands[0].CenterY, 0.0001, \"smoke local Y\");",
+              "Near(80.0 * SimulationConstants.DesktopWorldScale - 20.0,\n                commands[0].CenterY, 0.0001, \"smoke world-anchored Y\");")
+
           Path(".github/workflows/temp-size-world-fix.yml").unlink()
           '@ | Set-Content -Encoding UTF8 apply_size_world_fix.py
           python apply_size_world_fix.py
