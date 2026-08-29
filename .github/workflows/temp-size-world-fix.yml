@@ -118,37 +118,36 @@ jobs:
                           Vec2 direction = MathUtil.SlerpDirection(
                               spear.LastRotation, spear.Rotation, interpolation);''')
 
-          replace_once(renderer,
-          '''                        Vec2 next = Vec2.Lerp(previousFrame[segment],
-                              current[segment], interpolation);''',
-          '''                        Vec2 next = Vec2.Lerp(previousFrame[segment],
-                              current[segment], interpolation);
-                          if (worldAnchored)
-                          {
-                              previous = pose.ToCharacterRenderSpaceForWorld(previous);
-                              next = pose.ToCharacterRenderSpaceForWorld(next);
-                          }''')
+          next_line = "Vec2 next = Vec2.Lerp(previousFrame[segment],\n" + \
+              (" " * 28) + "current[segment], interpolation);"
+          next_with_anchor = next_line + "\n" + (" " * 24) + \
+              "if (worldAnchored)\n" + (" " * 24) + "{\n" + \
+              (" " * 28) + "previous = pose.ToCharacterRenderSpaceForWorld(previous);\n" + \
+              (" " * 28) + "next = pose.ToCharacterRenderSpaceForWorld(next);\n" + \
+              (" " * 24) + "}"
+          replace_once(renderer, next_line, next_with_anchor)
 
           overlay = "src/RainWorldDesktopPet/UI/LayeredOverlayWindow.cs"
-          replace_once(overlay,
-          '''                Vec2 center = pose.ToRenderedWorld(
-                              spear.Chunk.RenderPosition(pose.TimeStacker));''',
-          '''                Vec2 spearPosition = spear.Chunk.RenderPosition(pose.TimeStacker);
-                          Vec2 center = spear.Mode == DesktopSpearMode.Held
-                              ? pose.ToRenderedWorld(spearPosition)
-                              : pose.ToRenderedStaticWorld(spearPosition);''')
+          spear_bounds = "Vec2 center = pose.ToRenderedWorld(\n" + (" " * 20) + \
+              "spear.Chunk.RenderPosition(pose.TimeStacker));"
+          spear_bounds_new = "Vec2 spearPosition = spear.Chunk.RenderPosition(pose.TimeStacker);\n" + \
+              (" " * 16) + "Vec2 center = spear.Mode == DesktopSpearMode.Held\n" + \
+              (" " * 20) + "? pose.ToRenderedWorld(spearPosition)\n" + \
+              (" " * 20) + ": pose.ToRenderedStaticWorld(spearPosition);"
+          replace_once(overlay, spear_bounds, spear_bounds_new)
+
+          umbilical_bounds = "Vec2 rendered = pose.ToRenderedWorld(Vec2.Lerp(\n" + \
+              (" " * 24) + "spear.LastUmbilical[point], points[point], pose.TimeStacker));"
+          umbilical_bounds_new = "Vec2 rendered = pose.ToRenderedStaticWorld(Vec2.Lerp(\n" + \
+              (" " * 24) + "spear.LastUmbilical[point], points[point], pose.TimeStacker));"
+          replace_once(overlay, umbilical_bounds, umbilical_bounds_new)
 
           replace_once(overlay,
-          '''                    Vec2 rendered = pose.ToRenderedWorld(Vec2.Lerp(
-                                  spear.LastUmbilical[point], points[point], pose.TimeStacker));''',
-          '''                    Vec2 rendered = pose.ToRenderedStaticWorld(Vec2.Lerp(
-                                  spear.LastUmbilical[point], points[point], pose.TimeStacker));''')
-
+              "Vec2 currentPoint = pose.ToRenderedWorld(currentRope[point]);",
+              "Vec2 currentPoint = pose.ToRenderedStaticWorld(currentRope[point]);")
           replace_once(overlay,
-          '''                    Vec2 currentPoint = pose.ToRenderedWorld(currentRope[point]);
-                              Vec2 previousPoint = pose.ToRenderedWorld(previousRope[point]);''',
-          '''                    Vec2 currentPoint = pose.ToRenderedStaticWorld(currentRope[point]);
-                              Vec2 previousPoint = pose.ToRenderedStaticWorld(previousRope[point]);''')
+              "Vec2 previousPoint = pose.ToRenderedWorld(previousRope[point]);",
+              "Vec2 previousPoint = pose.ToRenderedStaticWorld(previousRope[point]);")
 
           Path(".github/workflows/temp-size-world-fix.yml").unlink()
           '@ | Set-Content -Encoding UTF8 apply_size_world_fix.py
