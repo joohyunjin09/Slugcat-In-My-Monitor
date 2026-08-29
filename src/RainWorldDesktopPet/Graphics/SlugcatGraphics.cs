@@ -246,9 +246,11 @@ namespace RainWorldDesktopPet.Graphics
                     extraction.SetTailNeedlePosition(tail.Segments[2].Position);
                     for (int i = 0; i < slugcat.Spears.Count; i++)
                     {
-                        if (slugcat.Spears[i].NeedleHasConnection)
-                            slugcat.Spears[i].SetConnectionAnchor(
-                                tail.Segments[2].Position);
+                        if (!slugcat.Spears[i].HasUmbilical) continue;
+                        slugcat.Spears[i].SetConnectionAnchor(
+                            tail.Segments[2].Position);
+                        slugcat.Spears[i].SetConnectionScale(
+                            slugcat.SizeMovementScale);
                     }
                 }
                 head.Velocity += extraction.ConsumeGraphicsHeadImpulse();
@@ -333,8 +335,10 @@ namespace RainWorldDesktopPet.Graphics
                 spearAbility.HeldSpear.HoldAt(arms[hand].End.Position,
                     heldDirection, arms[hand].End.Velocity);
                 spearAbility.HeldSpear.SetConnectionAnchor(
-                    tail.Segments.Length > 2 ? tail.Segments[2].Position :
-                    slugcat.BodyChunks[1].Position);
+            tail.Segments.Length > 2 ? tail.Segments[2].Position :
+            slugcat.BodyChunks[1].Position);
+        spearAbility.HeldSpear.SetConnectionScale(
+            slugcat.SizeMovementScale);
             }
             else if (spearAbility != null && spearAbility.ThrowFollowTicks > 0 &&
                 spearAbility.ThrownSpear != null && slugcat.State.Conscious)

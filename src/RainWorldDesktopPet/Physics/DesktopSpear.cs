@@ -36,6 +36,7 @@ namespace RainWorldDesktopPet.Physics
         private Vec2[] umbilicalVelocity;
         private double[] umbilicalLife;
         private double[] umbilicalLifeDecay;
+        private double connectionScale = 1.0;
 
         public DesktopSpear(Vec2 position)
             : this(position, 0)
@@ -125,6 +126,27 @@ namespace RainWorldDesktopPet.Physics
         public void SetConnectionAnchor(Vec2 position)
         {
             ConnectionAnchor = position;
+            // Graphics updates the tail after spear physics. Snap the live
+            // endpoint here so the visible tether never trails the tail hole.
+            if (umbilical != null && umbilical.Length > 0 &&
+                LifeOfUmbilicalSegment(0) > 0.0)
+            {
+                umbilical[0] = position;
+                umbilicalVelocity[0] = Vec2.Zero;
+            }
+        }
+
+        public void SetConnectionScale(double value)
+        {
+            if (value <= 0.0 || double.IsNaN(value) || double.IsInfinity(value))
+                throw new ArgumentOutOfRangeException("value");
+            connectionScale = value;
+            if (umbilical == null || umbilical.Length == 0) return;
+            int last = umbilical.Length - 1;
+            if (LifeOfUmbilicalSegment(last) <= 0.0) return;
+            umbilical[last] = Chunk.Position - Rotation *
+                (25.0 * connectionScale);
+            umbilicalVelocity[last] = Vec2.Zero;
         }
 
         public void HoldAt(Vec2 position, Vec2 direction)
@@ -405,7 +427,8 @@ namespace RainWorldDesktopPet.Physics
             }
             if (LifeOfUmbilicalSegment(last) > 0.0)
             {
-                umbilical[last] = Chunk.Position - Rotation * 25.0;
+                umbilical[last] = Chunk.Position - Rotation *
+                    (25.0 * connectionScale);
                 umbilicalVelocity[last] = Vec2.Zero;
             }
             if (anyAlive) return;

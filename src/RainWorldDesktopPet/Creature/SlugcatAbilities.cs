@@ -724,7 +724,7 @@ namespace RainWorldDesktopPet.Creature
         {
             Vec2 hips = Owner.BodyChunks[1].Position;
             Vec2 awayFromChest = (hips - Owner.BodyChunks[0].Position).Normalized;
-            return hips + awayFromChest * 8.0;
+            return hips + awayFromChest * (8.0 * Owner.SizeMovementScale);
         }
 
         public void SetTailNeedlePosition(Vec2 position)
@@ -780,6 +780,19 @@ namespace RainWorldDesktopPet.Creature
     public sealed class SaintAbilityController : DefaultAbilityController
     {
         private const int RopeSegments = 20;
+        // Existing values are the Large-size Saint baseline. Every spatial
+        // tongue distance below is converted by Owner.SizeMovementScale.
+        private const double LargeRequestedLength = 140.0;
+        private const double LargeIdealLength = 150.0;
+        private const double LargeMinimumIdealLength = 50.0;
+        private const double LargeMaximumIdealLength = 170.0;
+        private const double LargeElasticRopeLength = 200.0;
+        private const double LargeRopePadding = 80.0;
+        private const double LargeSafetyLength = 500.0;
+        private const double LargeShotOffset = 5.0;
+        private const double LargeShotSpeed = 70.0;
+        private const double LargeReturnDistance = 40.0;
+        private const double LargeAutoAimDistance = 230.0;
         private readonly Vec2[] rope = new Vec2[RopeSegments];
         private readonly Vec2[] lastRope = new Vec2[RopeSegments];
         private readonly Vec2[] ropeVelocity = new Vec2[RopeSegments];
@@ -790,8 +803,8 @@ namespace RainWorldDesktopPet.Creature
         private Vec2 lastPosition;
         private Vec2 velocity;
         private Vec2 anchor;
-        private double requestedLength = 140.0;
-        private double idealLength = 150.0;
+        private double requestedLength = LargeRequestedLength;
+        private double idealLength = LargeIdealLength;
         private double elastic = 1.0;
         private int attachedTicks;
         private bool returning;
@@ -814,7 +827,8 @@ namespace RainWorldDesktopPet.Creature
         internal Vec2[] RopeForRender { get { return rope; } }
         internal Vec2[] LastRopeForRender { get { return lastRope; } }
         public double RopeTotalLength { get { return desktopRope.TotalLength; } }
-        public double RequestedRopeLength { get { return requestedLength; } }
+        public double RequestedRopeLength { get { return ScaleLength(requestedLength); } }
+        public double MaximumTongueLength { get { return ScaleLength(LargeElasticRopeLength); } }
         public double LastElasticityExcess { get; private set; }
         public double LastElasticityTargetLength { get; private set; }
         public double LastElasticityRequestLength { get; private set; }
@@ -822,9 +836,10 @@ namespace RainWorldDesktopPet.Creature
         {
             get
             {
-                double stretch = MathUtil.Lerp(200.0,
-                    Math.Min(requestedLength, 200.0), 0.5) /
-                    (desktopRope.TotalLength + 80.0);
+                double totalRope = ScaleLength(LargeElasticRopeLength);
+                double stretch = MathUtil.Lerp(totalRope,
+                    Math.Min(ScaleLength(requestedLength), totalRope), 0.5) /
+                    (desktopRope.TotalLength + ScaleLength(LargeRopePadding));
                 stretch = Math.Pow(stretch, stretch >= 1.0 ? 0.4 : 1.6);
                 if (mode == SaintTongueMode.AttachedToTerrain)
                     stretch = MathUtil.Lerp(stretch, 1.0, 0.5);
@@ -858,7 +873,8 @@ namespace RainWorldDesktopPet.Creature
         public override string DebugState
         {
             get { return string.Format("tongue:{0} rope:{1:0}/{2:0}", mode,
-                Vec2.Distance(Owner.BodyChunks[0].Position, position), idealLength); }
+                Vec2.Distance(Owner.BodyChunks[0].Position, position),
+                ScaleLength(idealLength)); }
         }
 
         public override void UpdateAfterMovement(VirtualInput input, DesktopCollisionWorld world)
@@ -873,8 +889,12 @@ namespace RainWorldDesktopPet.Creature
                     FinishRetraction(mouth);
                     return;
                 }
-                if (input.Y < 0) idealLength = Math.Max(50.0, idealLength - 3.0);
-                if (input.Y > 0) idealLength = Math.Min(170.0, idealLength + 3.0);
+                if (input.Y < 0)
+            idealLength = Math.Max(LargeMinimumIdealLength,
+                idealLength - 3.0);
+        if (input.Y > 0)
+            idealLength = Math.Min(LargeMaximumIdealLength,
+                idealLength + 3.0);
                 if (input.JumpPressed && attachedTicks >= 2 &&
                     CanJumpReleaseAttachedTongue)
                 {
@@ -895,7 +915,7 @@ namespace RainWorldDesktopPet.Creature
                 requestedLength = MathUtil.MoveTowards(requestedLength, idealLength,
                     (1.0 - elastic) * 2.0);
                 double distance = desktopRope.TotalLength;
-                if (distance > 500.0 ||
+                if (distance > ScaleLength(LargeSafetyLength) ||
                     !world.ContainsSurface(attachedSurfaceId, attachedSurfaceKind, anchor, 5.0))
                 {
                     Release();
@@ -908,8 +928,8 @@ namespace RainWorldDesktopPet.Creature
                 lastPosition = position;
                 position += velocity;
                 requestedLength = Math.Max(0.0, requestedLength - 4.0);
-                velocity.Y += 0.9 - 0.8 *
-                    MathUtil.InverseLerp(0.0, 1.0, elastic);
+                velocity.Y += (0.9 - 0.8 *
+            MathUtil.InverseLerp(0.0, 1.0, elastic)) * TongueScale;
                 DesktopSurface hit;
                 Vec2 hitPoint;
                 if (FindFirstSurfaceHit(world, lastPosition, position, out hit, out hitPoint))
@@ -920,13 +940,14 @@ namespace RainWorldDesktopPet.Creature
                     attachedSurfaceId = hit.Id;
                     attachedSurfaceKind = hit.Kind;
                     attachedTicks = 0;
-                    requestedLength = Vec2.Distance(mouth, anchor);
+                    requestedLength = Vec2.Distance(mouth, anchor) /
+                        Math.Max(0.000001, TongueScale);
                     elastic = 1.0;
                     Owner.EmitSound("Tube_Worm_Tongue_Hit_Terrain", anchor, 1.0, 1.0, 4);
                 }
                 else
                 {
-                    if (returning && Vec2.Distance(mouth, position) < 40.0)
+                    if (returning && Vec2.Distance(mouth, position) < ScaleLength(LargeReturnDistance))
                         mode = SaintTongueMode.Retracted;
                     else if (Vec2.Dot((position - mouth).Normalized,
                         velocity.Normalized) < 0.0)
@@ -967,9 +988,9 @@ namespace RainWorldDesktopPet.Creature
             direction = (direction + Owner.BodyChunks[0].Velocity.Normalized * 0.2).Normalized;
             direction = AutoAim(world, mouth, direction);
             mode = SaintTongueMode.ShootingOut;
-            position = mouth + direction * 5.0;
-            velocity = direction * 70.0;
-            requestedLength = 140.0;
+            position = mouth + direction * ScaleLength(LargeShotOffset);
+            velocity = direction * ScaleLength(LargeShotSpeed);
+            requestedLength = LargeRequestedLength;
             elastic = 1.0;
             returning = false;
             Owner.EmitSound("Tube_Worm_Shoot_Tongue", mouth, 1.0, 1.0, 4);
@@ -1008,15 +1029,16 @@ namespace RainWorldDesktopPet.Creature
             FillRope(position, position, null);
         }
 
-        private static Vec2 AutoAim(DesktopCollisionWorld world, Vec2 from, Vec2 direction)
+        private Vec2 AutoAim(DesktopCollisionWorld world, Vec2 from, Vec2 direction)
         {
-            if (RayIsClear(world, from, from + direction * 230.0)) return direction;
+            double aimDistance = ScaleLength(LargeAutoAimDistance);
+            if (RayIsClear(world, from, from + direction * aimDistance)) return direction;
             for (int angle = 5; angle <= 25; angle += 5)
             {
                 Vec2 left = Rotate(direction, -angle * Math.PI / 180.0);
-                if (RayIsClear(world, from, from + left * 230.0)) return left;
+                if (RayIsClear(world, from, from + left * aimDistance)) return left;
                 Vec2 right = Rotate(direction, angle * Math.PI / 180.0);
-                if (RayIsClear(world, from, from + right * 230.0)) return right;
+                if (RayIsClear(world, from, from + right * aimDistance)) return right;
             }
             return direction;
         }
@@ -1138,9 +1160,9 @@ namespace RainWorldDesktopPet.Creature
             // relax toward the target as elasticity decays. A larger attached
             // factor prevents a visibly slack rope from pulling every tick.
             const double onRopePosition = 1.0;
-            const double totalRope = 200.0;
-            double requestRope = Math.Min(requestedLength,
-                onRopePosition * totalRope);
+        double totalRope = ScaleLength(LargeElasticRopeLength);
+        double requestRope = Math.Min(ScaleLength(requestedLength),
+            onRopePosition * totalRope);
             LastElasticityRequestLength = requestRope;
             double attachedFactor = MathUtil.Lerp(1.1, 0.7,
                 MathUtil.InverseLerp(0.5, 0.4,
@@ -1167,6 +1189,16 @@ namespace RainWorldDesktopPet.Creature
                 velocity += tongueDirection *
                     (excess * strength * (1.0 - terrainMassShare));
             }
+        }
+
+        private double TongueScale
+        {
+            get { return Owner.SizeMovementScale; }
+        }
+
+        private double ScaleLength(double largeSizeLength)
+        {
+            return largeSizeLength * TongueScale;
         }
 
         private static bool FindFirstSurfaceHit(DesktopCollisionWorld world, Vec2 from,

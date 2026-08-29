@@ -1921,8 +1921,8 @@ namespace RainWorldDesktopPet.Graphics
                             current[segment], interpolation);
                         if (worldAnchored)
                         {
-                            previous = pose.ToCharacterRenderSpaceForWorld(previous);
-                            next = pose.ToCharacterRenderSpaceForWorld(next);
+                            ResolveUmbilicalRenderEndpoints(pose, center, direction,
+                                segment, current.Length, ref previous, ref next);
                         }
                         graphics.DrawLine(color, (float)(0.65 * opacity),
                             previous.ToPointF(), next.ToPointF());
@@ -1951,6 +1951,21 @@ namespace RainWorldDesktopPet.Graphics
                         (center + direction * 13.0).ToPointF());
                 }
             }
+        }
+
+        internal static void ResolveUmbilicalRenderEndpoints(SlugcatPose pose,
+            Vec2 spearCenter, Vec2 spearDirection, int segment, int pointCount,
+            ref Vec2 previous, ref Vec2 next)
+        {
+            if (pose == null) throw new ArgumentNullException("pose");
+            if (segment == 1 && pose.Tail != null && pose.Tail.Length > 2)
+                previous = pose.Tail[2];
+            else
+                previous = pose.ToCharacterRenderSpaceForWorld(previous);
+            if (segment == pointCount - 1)
+                next = spearCenter - spearDirection * 25.0;
+            else
+                next = pose.ToCharacterRenderSpaceForWorld(next);
         }
 
         private static void FillCircle(ISpriteCanvas graphics, Vec2 center, double radius, Color color)
