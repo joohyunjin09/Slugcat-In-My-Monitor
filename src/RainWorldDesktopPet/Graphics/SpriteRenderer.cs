@@ -233,9 +233,10 @@ namespace RainWorldDesktopPet.Graphics
             try
             {
                 double scale = pose.CharacterRenderScale;
+                Vec2 offset = pose.CharacterRenderOffset;
                 graphics.SetTransform((float)scale, 0.0f, 0.0f, (float)scale,
-                    (float)-renderSpace.WorldOrigin.X,
-                    (float)-renderSpace.WorldOrigin.Y);
+                    (float)(offset.X - renderSpace.WorldOrigin.X),
+                    (float)(offset.Y - renderSpace.WorldOrigin.Y));
 
                 bool profileAtlasAvailable = IsProfileAtlasAvailable(pose.SelectedSlugcat);
                 DrawSpears(graphics, slugcat, pose, pose.TimeStacker, false);
@@ -1132,13 +1133,13 @@ namespace RainWorldDesktopPet.Graphics
 
         public void RenderFoods(System.Drawing.Graphics graphics,
             DesktopFoodManager foodManager, RenderSpace renderSpace,
-            double characterRenderScale, double interpolation, bool heldLayer)
+            SlugcatPose pose, bool heldLayer)
         {
             gdiCanvas.Begin(graphics);
             try
             {
                 RenderFoodsCore(gdiCanvas, foodManager, renderSpace,
-                    characterRenderScale, interpolation, heldLayer);
+                    pose, heldLayer);
             }
             finally
             {
@@ -1146,19 +1147,32 @@ namespace RainWorldDesktopPet.Graphics
             }
         }
 
-        internal void RenderFoodsGpu(GpuSpriteCanvas canvas,
+        // Kept for preview tooling and external callers that render food without
+        // an owning Slugcat pose. A zero origin preserves the former transform.
+        public void RenderFoods(System.Drawing.Graphics graphics,
             DesktopFoodManager foodManager, RenderSpace renderSpace,
             double characterRenderScale, double interpolation, bool heldLayer)
         {
+            SlugcatPose pose = new SlugcatPose();
+            pose.CharacterRenderScale = characterRenderScale;
+            pose.TimeStacker = interpolation;
+            RenderFoods(graphics, foodManager, renderSpace, pose, heldLayer);
+        }
+
+        internal void RenderFoodsGpu(GpuSpriteCanvas canvas,
+            DesktopFoodManager foodManager, RenderSpace renderSpace,
+            SlugcatPose pose, bool heldLayer)
+        {
             if (canvas == null) throw new ArgumentNullException("canvas");
             RenderFoodsCore(canvas, foodManager, renderSpace,
-                characterRenderScale, interpolation, heldLayer);
+                pose, heldLayer);
         }
 
         private void RenderFoodsCore(ISpriteCanvas graphics,
             DesktopFoodManager foodManager, RenderSpace renderSpace,
-            double characterRenderScale, double interpolation, bool heldLayer)
+            SlugcatPose pose, bool heldLayer)
         {
+            if (pose == null) throw new ArgumentNullException("pose");
             if (foodManager == null || foodManager.Foods.Count == 0) return;
             IList<DesktopFood> foods = foodManager.Foods;
             bool hasFoodInLayer = false;
@@ -1180,10 +1194,11 @@ namespace RainWorldDesktopPet.Graphics
             graphics.Save();
             try
             {
-                graphics.SetTransform((float)characterRenderScale,
-                    0.0f, 0.0f, (float)characterRenderScale,
-                    (float)-renderSpace.WorldOrigin.X,
-                    (float)-renderSpace.WorldOrigin.Y);
+                Vec2 offset = pose.CharacterRenderOffset;
+                graphics.SetTransform((float)pose.CharacterRenderScale,
+                    0.0f, 0.0f, (float)pose.CharacterRenderScale,
+                    (float)(offset.X - renderSpace.WorldOrigin.X),
+                    (float)(offset.Y - renderSpace.WorldOrigin.Y));
 
                 for (int i = 0; i < foods.Count; i++)
                 {
@@ -1194,14 +1209,14 @@ namespace RainWorldDesktopPet.Graphics
                         food.State == DesktopFoodState.Dragged;
                     if (held != heldLayer) continue;
 
-                    Vec2 center = food.Chunk.RenderPosition(interpolation);
+                    Vec2 center = food.Chunk.RenderPosition(pose.TimeStacker);
                     Vec2 direction = MathUtil.SlerpDirection(food.LastRotation,
-                        food.Rotation, interpolation);
+                        food.Rotation, pose.TimeStacker);
                     double angle = AimScreen(Vec2.Zero, direction);
                     if (food.Kind == DesktopFoodKind.EggBugEgg)
                     {
                         DrawEggBugEgg(graphics, food, center, direction, angle,
-                            interpolation);
+                            pose.TimeStacker);
                         continue;
                     }
                     AtlasSprite ignored;
@@ -1689,7 +1704,7 @@ namespace RainWorldDesktopPet.Graphics
                 double life = MathUtil.Lerp(effect.LastLife, effect.Life, interpolation);
                 Vec2 position = Vec2.Lerp(effect.LastPosition, effect.Position,
                     interpolation);
-                Vec2 center = position * renderScale - renderSpace.WorldOrigin;
+                Vec2 center = pose.ToRenderedWorld(position) - renderSpace.WorldOrigin;
                 if (effect.Kind == AbilityEffectKind.ExplosionLight)
                 {
                     double rootLife = Math.Sqrt(Math.Max(0.0, life));
@@ -1841,8 +1856,8 @@ namespace RainWorldDesktopPet.Graphics
                 }
                 else continue;
                 if (size <= 0.0001) continue;
-                Vec2 position = Vec2.Lerp(effect.LastPosition, effect.Position,
-                    interpolation) * renderScale;
+                Vec2 position = pose.ToRenderedWorld(Vec2.Lerp(effect.LastPosition,
+                    effect.Position, interpolation));
                 double half = size * 0.5 + 2.0;
                 if (!hasBounds)
                 {

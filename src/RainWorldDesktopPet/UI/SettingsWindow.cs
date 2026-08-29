@@ -14,6 +14,7 @@ namespace RainWorldDesktopPet.UI
         private readonly Button nextButton;
         private readonly Button removeButton;
         private readonly ComboBox characterSelector;
+        private readonly ComboBox sizeSelector;
         private readonly ComboBox languageSelector;
         private readonly CheckBox debugCheck;
         private readonly CheckBox pauseCheck;
@@ -90,11 +91,12 @@ namespace RainWorldDesktopPet.UI
                 Dock = DockStyle.Fill,
                 Padding = new Padding(8),
                 ColumnCount = 2,
-                RowCount = 2
+                RowCount = 3
             };
             appearanceLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 150));
             appearanceLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-            appearanceLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            appearanceLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
+            appearanceLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
             appearanceLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 38));
             appearanceLayout.Controls.Add(FieldLabel(T("캐릭터와 능력", "Character and Ability")), 0, 0);
             characterSelector = new ComboBox { Dock = DockStyle.Fill,
@@ -103,6 +105,19 @@ namespace RainWorldDesktopPet.UI
                 characterSelector.Items.Add(new CharacterChoice(SlugcatProfiles.All[i]));
             characterSelector.SelectedIndexChanged += CharacterChanged;
             appearanceLayout.Controls.Add(characterSelector, 1, 0);
+            appearanceLayout.Controls.Add(FieldLabel(T("크기", "Size")), 0, 1);
+            sizeSelector = new ComboBox { Dock = DockStyle.Fill,
+                DropDownStyle = ComboBoxStyle.DropDownList };
+            sizeSelector.Items.Add(new SizeChoice(SlugcatSize.Small,
+                T("작게 (1920×1080 원작 크기)",
+                    "Small (original size at 1920x1080)")));
+            sizeSelector.Items.Add(new SizeChoice(SlugcatSize.Normal,
+                T("보통 (작게와 크게의 중간)",
+                    "Normal (midpoint of small and large)")));
+            sizeSelector.Items.Add(new SizeChoice(SlugcatSize.Large,
+                T("크게 (2.2배, 기존 크기)", "Large (2.2x, previous size)")));
+            sizeSelector.SelectedIndexChanged += SlugcatSizeChanged;
+            appearanceLayout.Controls.Add(sizeSelector, 1, 1);
             FlowLayoutPanel appearanceActions = new FlowLayoutPanel
             {
                 Dock = DockStyle.Fill,
@@ -117,7 +132,7 @@ namespace RainWorldDesktopPet.UI
             appearanceActions.Controls.Add(editorButton);
             appearanceActions.Controls.Add(ActionButton(T("Workshop 새로 고침", "Refresh Workshop"), RefreshWorkshop));
             appearanceLayout.SetColumnSpan(appearanceActions, 2);
-            appearanceLayout.Controls.Add(appearanceActions, 0, 1);
+            appearanceLayout.Controls.Add(appearanceActions, 0, 2);
             appearanceGroup.Controls.Add(appearanceLayout);
             root.Controls.Add(appearanceGroup, 0, 1);
 
@@ -227,6 +242,15 @@ namespace RainWorldDesktopPet.UI
                         break;
                     }
                 }
+                for (int i = 0; i < sizeSelector.Items.Count; i++)
+                {
+                    SizeChoice choice = sizeSelector.Items[i] as SizeChoice;
+                    if (choice != null && choice.Id == app.SettingsSlugcatSize)
+                    {
+                        sizeSelector.SelectedIndex = i;
+                        break;
+                    }
+                }
                 statusLabel.Text = T("실행 중인 슬러그캣: " + names.Length +
                         "마리 · 트레이 아이콘을 왼쪽 클릭하면 이 창을 다시 열 수 있습니다.",
                     names.Length + " active Slugcat" + (names.Length == 1 ? string.Empty : "s") +
@@ -248,6 +272,15 @@ namespace RainWorldDesktopPet.UI
             CharacterChoice choice = characterSelector.SelectedItem as CharacterChoice;
             if (choice == null) return;
             app.SettingsSetSlugcat(choice.Id);
+            RefreshFromApp();
+        }
+
+        private void SlugcatSizeChanged(object sender, EventArgs e)
+        {
+            if (updating) return;
+            SizeChoice choice = sizeSelector.SelectedItem as SizeChoice;
+            if (choice == null) return;
+            app.SettingsSetSlugcatSize(choice.Id);
             RefreshFromApp();
         }
 
@@ -316,6 +349,15 @@ namespace RainWorldDesktopPet.UI
             public LanguageChoice(UiLanguage id, string name)
             { Id = id; Name = name; }
             public readonly UiLanguage Id;
+            public readonly string Name;
+            public override string ToString() { return Name; }
+        }
+
+        private sealed class SizeChoice
+        {
+            public SizeChoice(SlugcatSize id, string name)
+            { Id = id; Name = name; }
+            public readonly SlugcatSize Id;
             public readonly string Name;
             public override string ToString() { return Name; }
         }

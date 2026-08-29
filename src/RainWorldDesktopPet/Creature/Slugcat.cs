@@ -19,6 +19,7 @@ namespace RainWorldDesktopPet.Creature
         private readonly IList<DesktopSpear> spearView;
         private readonly Random spearImpactRandom = new Random(0x5BEA7);
         private ISlugcatAbilityController abilityController;
+        private double sizeMovementScale = 1.0;
 
         public Slugcat(Vec2 spawnPosition)
             : this(spawnPosition, SlugcatId.White)
@@ -66,6 +67,7 @@ namespace RainWorldDesktopPet.Creature
         public long LastTerrainImpactTick { get; private set; }
         public long TerrainImpactSequence { get; private set; }
         public long ImpactStunDeadlineTick { get { return impactStunDeadlineTick; } }
+        public double SizeMovementScale { get { return sizeMovementScale; } }
 
         public Vec2 Center { get { return (BodyChunks[0].Position + BodyChunks[1].Position) * 0.5; } }
 
@@ -129,7 +131,8 @@ namespace RainWorldDesktopPet.Creature
                     }
                     else
                     {
-                        BodyChunks[i].Integrate(SimulationConstants.GravityPerTick, SimulationConstants.AirFriction);
+                        BodyChunks[i].Integrate(SimulationConstants.GravityPerTick,
+                            SimulationConstants.AirFriction, sizeMovementScale);
                     }
                 }
             }
@@ -140,7 +143,7 @@ namespace RainWorldDesktopPet.Creature
                     // Player keeps base.gravity=.9 in WallClimb; that mode adds
                     // its own contact/slide forces after BodyChunk.Update.
                     BodyChunks[i].Integrate(SimulationConstants.GravityPerTick,
-                        SimulationConstants.AirFriction);
+                        SimulationConstants.AirFriction, sizeMovementScale);
                 }
             }
 
@@ -411,6 +414,16 @@ namespace RainWorldDesktopPet.Creature
         public bool HitTest(Vec2 point)
         {
             return PickChunk(point, 18.0) >= 0;
+        }
+
+        public void SetSizeScale(double value)
+        {
+            if (value <= 0.0 || double.IsNaN(value) || double.IsInfinity(value))
+                throw new ArgumentOutOfRangeException("value");
+
+            sizeMovementScale = value;
+            BodyChunks[0].SetRadius(SimulationConstants.MainChunkRadius * value);
+            BodyChunks[1].SetRadius(SimulationConstants.HipsChunkRadius * value);
         }
 
         public void SetSelectedSlugcat(SlugcatId id)

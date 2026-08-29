@@ -208,7 +208,20 @@ namespace RainWorldDesktopPet.Graphics
 
         public Vec2 ToRenderedWorld(Vec2 point)
         {
-            return DesktopWorldTransform.ToDesktop(point);
+            // Keep the interpolated physical hips chunk fixed while changing
+            // size. The origin deliberately excludes local animation offsets
+            // and makes the scaled hips collision bottom remain grounded.
+            return DesktopWorldTransform.ToDesktop(CharacterOrigin) +
+                (point - CharacterOrigin) * CharacterRenderScale;
+        }
+
+        public Vec2 CharacterRenderOffset
+        {
+            get
+            {
+                return DesktopWorldTransform.ToDesktop(CharacterOrigin) -
+                    CharacterOrigin * CharacterRenderScale;
+            }
         }
 
         private static void IncludeRendered(Vec2[] points, SlugcatPose pose,

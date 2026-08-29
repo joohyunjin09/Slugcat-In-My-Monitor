@@ -217,6 +217,12 @@ namespace RainWorldDesktopPet.Tests
             Run("Crawl face follows persistent body facing, not attention", CrawlFaceUsesBodyFacing);
             Run("Arm shoulders rotate from the interpolated body axis", ArmShouldersFollowBodyAxis);
             Run("CharacterRenderScale uniformly enlarges visual coordinates", UniformCharacterRenderScale);
+            Run("Size scaling changes collision bounds without vertical oscillation",
+                SizeScalingChangesPhysicalCollisionBoundsWithoutFloating);
+            Run("Scaled rendering stays anchored to physical ground while moving",
+                ScaledRenderingStaysAnchoredToPhysicalGroundWhileMoving);
+            Run("Scaled procedural body and tail retain the large-size cadence",
+                ProceduralSizeMotionMatchesLarge);
             Run("Expanded arm/leg/face debug overlay renders without mutation", ExpandedDebugOverlayRenders);
             Run("Mouse attention requires near clicks and refreshes its timeout", MouseAttentionClickCases);
             Run("Downpour visual profiles match local DLL constants", DownpourVisualProfilesMatchDllConstants);
@@ -3960,6 +3966,314 @@ namespace RainWorldDesktopPet.Tests
             Near(11.0, point.Y, 0.000001, "global scaled y");
             Near(2.20, SimulationConstants.CharacterRenderScale, 0.000001,
                 "configured desktop world scale");
+
+            Near((1080.0 / 768.0) / 2.2,
+                SlugcatSizeSettings.Multiplier(SlugcatSize.Small), 0.000001,
+                "small setting matches original Full HD rendering");
+            Near(((1080.0 / 768.0) + 2.2) * 0.5 / 2.2,
+                SlugcatSizeSettings.Multiplier(SlugcatSize.Normal), 0.000001,
+                "normal setting is the midpoint of small and large");
+            Near(1.0, SlugcatSizeSettings.Multiplier(SlugcatSize.Large),
+                0.000001, "large setting preserves the previous normal size");
+            Near(1.40625, SimulationConstants.CharacterRenderScale *
+                SlugcatSizeSettings.Multiplier(SlugcatSize.Small), 0.000001,
+                "small setting resolves to the original Full HD scale");
+            Near(1.803125, SimulationConstants.CharacterRenderScale *
+                SlugcatSizeSettings.Multiplier(SlugcatSize.Normal), 0.000001,
+                "normal setting resolves to the exact midpoint scale");
+
+            Vec2 normalOrigin = pose.ToRenderedWorld(pose.CharacterOrigin);
+            pose.CharacterRenderScale = SimulationConstants.CharacterRenderScale *
+                SlugcatSizeSettings.Multiplier(SlugcatSize.Small);
+            Vec2 smallOrigin = pose.ToRenderedWorld(pose.CharacterOrigin);
+            Vec2 smallPoint = pose.ToRenderedWorld(new Vec2(20.0, 5.0));
+            Near(normalOrigin.X, smallOrigin.X, 0.000001,
+                "small scale keeps the Slugcat anchor x fixed");
+            Near(normalOrigin.Y, smallOrigin.Y, 0.000001,
+                "small scale keeps the Slugcat anchor y fixed");
+            Near(36.0625, smallPoint.X, 0.000001,
+                "small scale uniformly contracts the x offset");
+            Near(14.96875, smallPoint.Y, 0.000001,
+                "small scale uniformly contracts the y offset");
+
+            pose.CharacterRenderScale = SimulationConstants.CharacterRenderScale *
+                SlugcatSizeSettings.Multiplier(SlugcatSize.Large);
+            Vec2 largeOrigin = pose.ToRenderedWorld(pose.CharacterOrigin);
+            Vec2 largePoint = pose.ToRenderedWorld(new Vec2(20.0, 5.0));
+            Near(normalOrigin.X, largeOrigin.X, 0.000001,
+                "large scale keeps the Slugcat anchor x fixed");
+            Near(normalOrigin.Y, largeOrigin.Y, 0.000001,
+                "large scale keeps the Slugcat anchor y fixed");
+            Near(44.0, largePoint.X, 0.000001,
+                "large scale uniformly expands the x offset");
+            Near(11.0, largePoint.Y, 0.000001,
+                "large scale uniformly expands the y offset");
+
+            BodyChunk speedSample = new BodyChunk(0, Vec2.Zero, 1.0, 1.0);
+            speedSample.Velocity = new Vec2(10.0, 0.0);
+            speedSample.Integrate(0.0, 1.0,
+                SlugcatSizeSettings.Multiplier(SlugcatSize.Normal));
+            Near(10.0 * (1.803125 / 2.2), speedSample.Position.X, 0.000001,
+                "normal size applies the same movement-speed compensation");
+        }
+
+        private static void SizeScalingChangesPhysicalCollisionBoundsWithoutFloating()
+        {
+            MonitorInfo monitor = new MonitorInfo("SIZE-MONITOR",
+                new Rectangle(0, 0, 1920, 1080),
+                new Rectangle(0, 0, 1920, 1040), true);
+            DesktopCollisionWorld world = CreateSyntheticWorld(
+                new[] { monitor }, new DesktopWindowSnapshot[0]);
+            double floor = DesktopWorldTransform.ToSimulationLength(monitor.FloorY);
+            Slugcat slugcat = new Slugcat(new Vec2(500.0,
+                floor - SimulationConstants.HipsChunkRadius));
+
+            for (int tick = 0; tick < 20; tick++)
+                slugcat.Step(new VirtualInput(), world, Vec2.Zero, Vec2.Zero);
+            True(slugcat.BodyChunks[1].ContactFloor,
+                "large hips start supported by the taskbar edge");
+
+            double connectionBefore = Vec2.Distance(slugcat.BodyChunks[0].Position,
+                slugcat.BodyChunks[1].Position);
+            Vec2 chestBeforeResize = slugcat.BodyChunks[0].Position;
+            Vec2 hipsBeforeResize = slugcat.BodyChunks[1].Position;
+            Vec2 chestLastBeforeResize = slugcat.BodyChunks[0].LastPosition;
+            Vec2 hipsLastBeforeResize = slugcat.BodyChunks[1].LastPosition;
+            double scale = SlugcatSizeSettings.Multiplier(SlugcatSize.Small);
+            slugcat.SetSizeScale(scale);
+            Near(SimulationConstants.MainChunkRadius * scale,
+                slugcat.BodyChunks[0].Radius, 0.000001,
+                "small size changes the chest collision radius");
+            Near(SimulationConstants.HipsChunkRadius * scale,
+                slugcat.BodyChunks[1].Radius, 0.000001,
+                "small size changes the hips collision radius");
+            Near(0.0, Vec2.Distance(chestBeforeResize,
+                slugcat.BodyChunks[0].Position), 0.000001,
+                "size selection does not reposition the chest");
+            Near(0.0, Vec2.Distance(hipsBeforeResize,
+                slugcat.BodyChunks[1].Position), 0.000001,
+                "size selection does not reposition the hips");
+            Near(0.0, Vec2.Distance(chestLastBeforeResize,
+                slugcat.BodyChunks[0].LastPosition), 0.000001,
+                "size selection does not rewrite chest interpolation history");
+            Near(0.0, Vec2.Distance(hipsLastBeforeResize,
+                slugcat.BodyChunks[1].LastPosition), 0.000001,
+                "size selection does not rewrite hips interpolation history");
+            Near(connectionBefore, Vec2.Distance(slugcat.BodyChunks[0].Position,
+                slugcat.BodyChunks[1].Position), 0.000001,
+                "resizing preserves the connected body layout");
+
+            double minimumBottom = double.MaxValue;
+            double maximumBottom = double.MinValue;
+            for (int tick = 0; tick < 120; tick++)
+            {
+                slugcat.Step(new VirtualInput(1, 0, false, false), world,
+                    Vec2.Zero, Vec2.Zero);
+                if (tick < 20) continue;
+                double bottom = slugcat.BodyChunks[1].Position.Y +
+                    slugcat.BodyChunks[1].Radius;
+                minimumBottom = Math.Min(minimumBottom, bottom);
+                maximumBottom = Math.Max(maximumBottom, bottom);
+            }
+            True(maximumBottom - minimumBottom < 0.05,
+                "small grounded movement does not vertically oscillate");
+            True(floor - maximumBottom >= -0.05 && floor - maximumBottom < 1.0,
+                "small moving hips retain only the original connection-solver contact gap");
+        }
+
+        private static void ScaledRenderingStaysAnchoredToPhysicalGroundWhileMoving()
+        {
+            SizeRenderAnchorCase(1920, 1080, SlugcatSize.Normal);
+            SizeRenderAnchorCase(1920, 1080, SlugcatSize.Small);
+            SizeRenderAnchorCase(2880, 1800, SlugcatSize.Normal);
+            SizeRenderAnchorCase(2880, 1800, SlugcatSize.Small);
+        }
+
+        private static void ProceduralSizeMotionMatchesLarge()
+        {
+            SlugcatSize[] sizes = { SlugcatSize.Large, SlugcatSize.Normal,
+                SlugcatSize.Small };
+            double baselineAverageTilt = 0.0;
+            double baselineMaximumTilt = 0.0;
+            double baselinePoseTilt = 0.0;
+            double baselineAverageWaistBend = 0.0;
+            double baselineMaximumWaistBend = 0.0;
+            double baselineTailRoot = 0.0;
+            double baselineHeadTrail = 0.0;
+            double baselineLegsTrail = 0.0;
+            double baselineChestDrawTrail = 0.0;
+            double baselineHipsDrawTrail = 0.0;
+            int baselineTailTurnTicks = -1;
+            for (int sizeIndex = 0; sizeIndex < sizes.Length; sizeIndex++)
+            {
+                MonitorInfo monitor = new MonitorInfo("DIAG",
+                    new Rectangle(0, 0, 2880, 1800),
+                    new Rectangle(0, 0, 2880, 1760), true);
+                DesktopCollisionWorld world = CreateSyntheticWorld(
+                    new[] { monitor }, new DesktopWindowSnapshot[0]);
+                double floor = DesktopWorldTransform.ToSimulationLength(monitor.FloorY);
+                Slugcat slugcat = new Slugcat(new Vec2(600.0,
+                    floor - SimulationConstants.HipsChunkRadius));
+                SlugcatGraphics graphics = new SlugcatGraphics(slugcat);
+                AttentionSystem attention = new AttentionSystem();
+                for (int tick = 0; tick < 20; tick++)
+                {
+                    slugcat.Step(new VirtualInput(), world, Vec2.Zero, Vec2.Zero);
+                    graphics.Step(attention, world);
+                }
+                slugcat.SetSizeScale(SlugcatSizeSettings.Multiplier(sizes[sizeIndex]));
+                double tiltSum = 0.0;
+                double lagSum = 0.0;
+                double maximumTilt = 0.0;
+                double poseTiltSum = 0.0;
+                double waistBendSum = 0.0;
+                double maximumWaistBend = 0.0;
+                double headTrailSum = 0.0;
+                double legsTrailSum = 0.0;
+                double chestDrawTrailSum = 0.0;
+                double hipsDrawTrailSum = 0.0;
+                int tailTurnTicks = -1;
+                for (int tick = 0; tick < 200; tick++)
+                {
+                    int direction = tick < 100 ? 1 : -1;
+                    slugcat.Step(new VirtualInput(direction, 0, false, false), world,
+                        Vec2.Zero, Vec2.Zero);
+                    graphics.Step(attention, world);
+                    if (tick < 40) continue;
+                    SlugcatPose diagnosticPose = graphics.BuildPose(0.5, attention,
+                        tick, false);
+                    Vec2 axis = (slugcat.BodyChunks[0].Position -
+                        slugcat.BodyChunks[1].Position).Normalized;
+                    double tilt = Math.Abs(axis.X);
+                    tiltSum += tilt;
+                    maximumTilt = Math.Max(maximumTilt, tilt);
+                    lagSum += Vec2.Distance(graphics.Tail.Segments[0].Position,
+                        slugcat.BodyChunks[1].Position);
+                    Vec2 poseAxis = (diagnosticPose.Chest -
+                        diagnosticPose.Hips).Normalized;
+                    poseTiltSum += Math.Abs(poseAxis.X);
+                    Vec2 torsoDown = (diagnosticPose.Hips -
+                        diagnosticPose.Chest).Normalized;
+                    Vec2 hipsDown = (diagnosticPose.Tail[0] -
+                        diagnosticPose.Chest).Normalized;
+                    double waistBend = Math.Acos(MathUtil.Clamp(
+                        Vec2.Dot(torsoDown, hipsDown), -1.0, 1.0));
+                    waistBendSum += waistBend;
+                    maximumWaistBend = Math.Max(maximumWaistBend, waistBend);
+                    headTrailSum += (diagnosticPose.Head.X -
+                        diagnosticPose.ChunkRender[0].X) * direction;
+                    legsTrailSum += (diagnosticPose.Legs.X -
+                        diagnosticPose.ChunkRender[1].X) * direction;
+                    chestDrawTrailSum += (diagnosticPose.Chest.X -
+                        diagnosticPose.ChunkRender[0].X) * direction;
+                    hipsDrawTrailSum += (diagnosticPose.Hips.X -
+                        diagnosticPose.ChunkRender[1].X) * direction;
+                    if (tick >= 100 && tailTurnTicks < 0 &&
+                        graphics.Tail.Segments[graphics.Tail.Segments.Length - 1].Position.X >
+                        slugcat.BodyChunks[1].Position.X)
+                        tailTurnTicks = tick - 100;
+                }
+                double averageTilt = tiltSum / 160.0;
+                double averageTailRoot = lagSum / 160.0;
+                double averagePoseTilt = poseTiltSum / 160.0;
+                double averageWaistBend = waistBendSum / 160.0;
+                double averageHeadTrail = headTrailSum / 160.0;
+                double averageLegsTrail = legsTrailSum / 160.0;
+                double averageChestDrawTrail = chestDrawTrailSum / 160.0;
+                double averageHipsDrawTrail = hipsDrawTrailSum / 160.0;
+                if (sizeIndex == 0)
+                {
+                    baselineAverageTilt = averageTilt;
+                    baselineMaximumTilt = maximumTilt;
+                    baselinePoseTilt = averagePoseTilt;
+                    baselineAverageWaistBend = averageWaistBend;
+                    baselineMaximumWaistBend = maximumWaistBend;
+                    baselineTailRoot = averageTailRoot;
+                    baselineHeadTrail = averageHeadTrail;
+                    baselineLegsTrail = averageLegsTrail;
+                    baselineChestDrawTrail = averageChestDrawTrail;
+                    baselineHipsDrawTrail = averageHipsDrawTrail;
+                    baselineTailTurnTicks = tailTurnTicks;
+                    continue;
+                }
+
+                True(Math.Abs(averageTilt - baselineAverageTilt) < 0.03,
+                    sizes[sizeIndex] + " average standing tilt matches Large");
+                True(Math.Abs(maximumTilt - baselineMaximumTilt) < 0.04,
+                    sizes[sizeIndex] + " maximum standing tilt matches Large");
+                True(Math.Abs(averagePoseTilt - baselinePoseTilt) < 0.035,
+                    sizes[sizeIndex] + " rendered torso tilt matches Large");
+                True(Math.Abs(averageWaistBend - baselineAverageWaistBend) < 0.02,
+                    sizes[sizeIndex] + " average rendered waist bend matches Large");
+                True(Math.Abs(maximumWaistBend - baselineMaximumWaistBend) < 0.02,
+                    sizes[sizeIndex] + " maximum rendered waist bend matches Large");
+                True(Math.Abs(averageTailRoot - baselineTailRoot) < 0.55,
+                    sizes[sizeIndex] + " tail root remains connected to the hips");
+                True(Math.Abs(averageHeadTrail - baselineHeadTrail) < 0.1,
+                    sizes[sizeIndex] + " head follows its host chunk like Large");
+                True(Math.Abs(averageLegsTrail - baselineLegsTrail) < 0.75,
+                    sizes[sizeIndex] + " legs remain within one canonical pixel of Large");
+                True(Math.Abs(averageChestDrawTrail - baselineChestDrawTrail) < 0.15,
+                    sizes[sizeIndex] + " torso draw position follows its chunk like Large");
+                True(Math.Abs(averageHipsDrawTrail - baselineHipsDrawTrail) < 0.01,
+                    sizes[sizeIndex] + " hips draw position follows its chunk like Large");
+                True(Math.Abs(tailTurnTicks - baselineTailTurnTicks) <= 1,
+                    sizes[sizeIndex] + " tail direction-change response matches Large");
+            }
+        }
+
+        private static void SizeRenderAnchorCase(int width, int height,
+            SlugcatSize size)
+        {
+            int workHeight = height - 40;
+            MonitorInfo monitor = new MonitorInfo("SIZE-RENDER-" + width,
+                new Rectangle(0, 0, width, height),
+                new Rectangle(0, 0, width, workHeight), true);
+            DesktopCollisionWorld world = CreateSyntheticWorld(
+                new[] { monitor }, new DesktopWindowSnapshot[0]);
+            double floor = DesktopWorldTransform.ToSimulationLength(monitor.FloorY);
+            Slugcat slugcat = new Slugcat(new Vec2(width * 0.25,
+                floor - SimulationConstants.HipsChunkRadius));
+            SlugcatGraphics graphics = new SlugcatGraphics(slugcat);
+            AttentionSystem attention = new AttentionSystem();
+
+            for (int tick = 0; tick < 20; tick++)
+            {
+                slugcat.Step(new VirtualInput(), world, Vec2.Zero, Vec2.Zero);
+                graphics.Step(attention, world);
+            }
+            double multiplier = SlugcatSizeSettings.Multiplier(size);
+            slugcat.SetSizeScale(multiplier);
+
+            double minimumBottom = double.MaxValue;
+            double maximumBottom = double.MinValue;
+            for (int tick = 0; tick < 160; tick++)
+            {
+                slugcat.Step(new VirtualInput(1, 0, false, false), world,
+                    Vec2.Zero, Vec2.Zero);
+                graphics.Step(attention, world);
+                if (tick < 40) continue;
+
+                SlugcatPose pose = graphics.BuildPose(0.5, attention, tick, false);
+                pose.CharacterRenderScale = SimulationConstants.CharacterRenderScale *
+                    multiplier;
+                Vec2 physicalOrigin = pose.ChunkRender[1];
+                Near(0.0, Vec2.Distance(physicalOrigin, pose.CharacterOrigin),
+                    0.000001, size + " render scale uses the physical hips anchor at " +
+                    width + "x" + height);
+
+                double renderedBottom = pose.ToRenderedWorld(pose.ChunkRender[1]).Y +
+                    SimulationConstants.HipsChunkRadius * pose.CharacterRenderScale;
+                minimumBottom = Math.Min(minimumBottom, renderedBottom);
+                maximumBottom = Math.Max(maximumBottom, renderedBottom);
+            }
+
+            True(maximumBottom - minimumBottom < 0.05,
+                size + " rendered collision bottom does not bob at " + width + "x" + height);
+            True(monitor.FloorY - maximumBottom >= -0.05 &&
+                monitor.FloorY - maximumBottom < 1.5,
+                size + " rendered contact gap stays within the original solver range at " +
+                width + "x" + height);
         }
 
         private static void ExpandedDebugOverlayRenders()

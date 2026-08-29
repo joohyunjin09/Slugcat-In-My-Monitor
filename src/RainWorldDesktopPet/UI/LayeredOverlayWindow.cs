@@ -409,14 +409,12 @@ namespace RainWorldDesktopPet.UI
                             if (batchUsesDebug)
                                 loop.Renderer.RenderFoods(surface.Graphics,
                                     loop.Foods, renderSpace,
-                                    poseBuffer[loopIndex].CharacterRenderScale,
-                                    poseBuffer[loopIndex].TimeStacker,
+                                    poseBuffer[loopIndex],
                                     layer == OverlayRenderLayer.HeldFood);
                             else
                                 loop.Renderer.RenderFoodsGpu(gpuCanvas,
                                     loop.Foods, renderSpace,
-                                    poseBuffer[loopIndex].CharacterRenderScale,
-                                    poseBuffer[loopIndex].TimeStacker,
+                                    poseBuffer[loopIndex],
                                     layer == OverlayRenderLayer.HeldFood);
                         }
                     }
@@ -700,7 +698,8 @@ namespace RainWorldDesktopPet.UI
             for (int i = 0; i < loop.Slugcat.Spears.Count; i++)
             {
                 DesktopSpear spear = loop.Slugcat.Spears[i];
-                Vec2 center = spear.Chunk.RenderPosition(pose.TimeStacker) * scale;
+                Vec2 center = pose.ToRenderedWorld(
+                    spear.Chunk.RenderPosition(pose.TimeStacker));
                 RectangleF spearBounds = new RectangleF((float)(center.X - 28.0),
                     (float)(center.Y - 28.0), 56.0f, 56.0f);
                 content = RectangleF.Union(content, spearBounds);
@@ -708,8 +707,8 @@ namespace RainWorldDesktopPet.UI
                 Vec2[] points = spear.Umbilical;
                 for (int point = 0; point < points.Length; point++)
                 {
-                    Vec2 rendered = Vec2.Lerp(spear.LastUmbilical[point],
-                        points[point], pose.TimeStacker) * scale;
+                    Vec2 rendered = pose.ToRenderedWorld(Vec2.Lerp(
+                        spear.LastUmbilical[point], points[point], pose.TimeStacker));
                     content = RectangleF.Union(content, new RectangleF(
                         (float)(rendered.X - 2.0), (float)(rendered.Y - 2.0),
                         4.0f, 4.0f));
@@ -719,7 +718,8 @@ namespace RainWorldDesktopPet.UI
             {
                 DesktopFood food = loop.Foods.Foods[i];
                 if (!food.IsActive) continue;
-                Vec2 center = food.Chunk.RenderPosition(pose.TimeStacker) * scale;
+                Vec2 center = pose.ToRenderedWorld(
+                    food.Chunk.RenderPosition(pose.TimeStacker));
                 double reach = food.VisualReach * scale;
                 content = RectangleF.Union(content, new RectangleF(
                     (float)(center.X - reach), (float)(center.Y - reach),
@@ -741,8 +741,8 @@ namespace RainWorldDesktopPet.UI
                 int ropePointCount = Math.Min(currentRope.Length, previousRope.Length);
                 for (int point = 0; point < ropePointCount; point++)
                 {
-                    Vec2 currentPoint = currentRope[point] * scale;
-                    Vec2 previousPoint = previousRope[point] * scale;
+                    Vec2 currentPoint = pose.ToRenderedWorld(currentRope[point]);
+                    Vec2 previousPoint = pose.ToRenderedWorld(previousRope[point]);
                     content = RectangleF.Union(content, new RectangleF(
                         (float)(currentPoint.X - 8.0), (float)(currentPoint.Y - 8.0),
                         16.0f, 16.0f));
@@ -1068,20 +1068,20 @@ namespace RainWorldDesktopPet.UI
                     DesktopFood food = loop.Foods.Foods[foodIndex];
                     if (!food.IsActive || !food.IsDraggable) continue;
                     circles[circleCount++] = new MouseHookHitCircle(
-                        DesktopWorldTransform.ToDesktop(food.Chunk.Position),
-                        DesktopWorldTransform.ToDesktopLength(food.VisualReach + 5.0));
+                        loop.ToRenderedScreen(food.Chunk.Position),
+                        loop.ToRenderedScreenLength(food.VisualReach + 5.0));
                 }
                 for (int chunkIndex = 0;
                     chunkIndex < loop.Slugcat.BodyChunks.Length; chunkIndex++)
                 {
                     BodyChunk chunk = loop.Slugcat.BodyChunks[chunkIndex];
                     circles[circleCount++] = new MouseHookHitCircle(
-                        DesktopWorldTransform.ToDesktop(chunk.Position),
-                        DesktopWorldTransform.ToDesktopLength(chunk.Radius + 14.0));
+                        loop.ToRenderedScreen(chunk.Position),
+                        loop.ToRenderedScreenLength(chunk.Radius + 14.0));
                 }
                 circles[circleCount++] = new MouseHookHitCircle(
-                    DesktopWorldTransform.ToDesktop(loop.Graphics.Head.Position),
-                    DesktopWorldTransform.ToDesktopLength(17.0));
+                    loop.ToRenderedScreen(loop.Graphics.Head.Position),
+                    loop.ToRenderedScreenLength(17.0));
                 // HitTest scans targets from the end. Publish Slugcat 1 at
                 // the end so pointer priority matches its frontmost render order.
                 int targetIndex = gameLoops.Count - 1 - i;
@@ -1389,6 +1389,8 @@ namespace RainWorldDesktopPet.UI
         }
         internal SlugcatId SettingsSlugcatId
         { get { return gameLoop == null ? startSlugcat : gameLoop.SelectedSlugcat.Id; } }
+        internal SlugcatSize SettingsSlugcatSize
+        { get { return gameLoop == null ? SlugcatSize.Large : gameLoop.Size; } }
         internal void SettingsSelectSlugcat(int index)
         {
             if (index >= 0 && index < gameLoops.Count) SelectSlugcat(gameLoops[index]);
@@ -1404,6 +1406,13 @@ namespace RainWorldDesktopPet.UI
             RefreshSlugcatSelectionMenu();
             RefreshActiveSlugcatsMenu();
             if (skinEditor != null && !skinEditor.IsDisposed) skinEditor.RefreshFromGame();
+        }
+
+        internal void SettingsSetSlugcatSize(SlugcatSize size)
+        {
+            if (gameLoop == null) return;
+            gameLoop.SetSize(size);
+            PublishMouseHitSnapshot();
         }
 
         internal void SettingsSetLanguage(UiLanguage language)
