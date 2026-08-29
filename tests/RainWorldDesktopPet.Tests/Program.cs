@@ -91,6 +91,8 @@ namespace RainWorldDesktopPet.Tests
                 EggBugEggTailMatchesOriginalProceduralAnimation);
             Run("Blue Fruit and Eggbug Egg can be repositioned with the mouse",
                 FoodItemsSupportMouseDragging);
+            Run("Food placement pointer stays in world space for Small and Normal",
+                FoodPlacementPointerIgnoresSlugcatVisualScale);
             Run("Food manager clear resets every interaction flag",
                 FoodClearResetsInteractionState);
             Run("Food fallback remains visible without a local atlas",
@@ -1156,6 +1158,38 @@ namespace RainWorldDesktopPet.Tests
                 "held rendering remains attached to the manager that owns the food");
             True(displayOwner.HeldFoodForRender == null,
                 "the display owner cannot borrow another Slugcat's held render context");
+        }
+
+        private static void FoodPlacementPointerIgnoresSlugcatVisualScale()
+        {
+            Vec2 cursor = new Vec2(410.0, 215.0);
+            Vec2 slugcatCenter = new Vec2(120.0, 95.0);
+            SlugcatSize[] sizes = { SlugcatSize.Small, SlugcatSize.Normal };
+
+            for (int i = 0; i < sizes.Length; i++)
+            {
+                double multiplier = SlugcatSizeSettings.Multiplier(sizes[i]);
+                Vec2 worldPointer;
+                Vec2 characterPointer;
+                GameLoop.ResolvePointerSpaces(cursor, slugcatCenter, multiplier,
+                    out worldPointer, out characterPointer);
+
+                Near(0.0, Vec2.Distance(cursor, worldPointer), 0.000001,
+                    sizes[i] + " food placement keeps the raw desktop pointer");
+                True(Vec2.Distance(worldPointer, characterPointer) > 1.0,
+                    sizes[i] + " character pointer remains separately size-adjusted");
+
+                DesktopFoodManager manager = new DesktopFoodManager(9300 + i);
+                True(manager.TryAddDangleFruit(cursor),
+                    sizes[i] + " test food can be created at cursor position");
+                True(manager.TryBeginDrag(cursor),
+                    sizes[i] + " test food can enter mouse drag");
+                manager.MoveDraggedFood(worldPointer);
+                Near(0.0, Vec2.Distance(cursor,
+                    manager.DraggedFood.Chunk.Position), 0.000001,
+                    sizes[i] + " dragged food stays under the real cursor");
+                manager.EndDrag(Vec2.Zero);
+            }
         }
 
         private static void FoodFallbackRendersWithoutAtlas()

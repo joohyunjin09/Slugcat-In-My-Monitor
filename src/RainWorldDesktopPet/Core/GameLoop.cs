@@ -227,9 +227,15 @@ namespace RainWorldDesktopPet.Core
             double elapsed = lastTime <= 0.0 ? SimulationConstants.LogicStepSeconds : now - lastTime;
             lastTime = now;
             mouse.Sample(elapsed);
-            Vec2 visualPointer = PointerToSimulation(mouse.Position);
+            Vec2 worldPointer;
+            Vec2 visualPointer;
+            ResolvePointerSpaces(mouse.Position, Slugcat.Center,
+                VisualSizeMultiplier, out worldPointer, out visualPointer);
             Vec2 visualPointerVelocity = mouse.Velocity / VisualSizeMultiplier;
-            Foods.MoveDraggedFood(visualPointer);
+            // Food is a desktop/world object while it is being positioned.
+            // Never feed it the character-local pointer that is scaled around
+            // Slugcat.Center for Small/Normal visual sizes.
+            Foods.MoveDraggedFood(worldPointer);
             if (Paused)
             {
                 mouse.ConsumeClick();
@@ -382,18 +388,24 @@ namespace RainWorldDesktopPet.Core
 
         public bool HitTest(Vec2 screenPoint)
         {
-            Vec2 simulationPoint = PointerToSimulation(
-                DesktopWorldTransform.ToSimulation(screenPoint));
-            return Foods.HitTest(simulationPoint) ||
+            Vec2 worldPoint;
+            Vec2 simulationPoint;
+            ResolvePointerSpaces(DesktopWorldTransform.ToSimulation(screenPoint),
+                Slugcat.Center, VisualSizeMultiplier, out worldPoint,
+                out simulationPoint);
+            return Foods.HitTest(worldPoint) ||
                 Slugcat.HitTest(simulationPoint) ||
                 Vec2.Distance(simulationPoint, Graphics.Head.Position) < 17.0;
         }
 
         public bool BeginGrab(Vec2 screenPoint)
         {
-            Vec2 simulationPoint = PointerToSimulation(
-                DesktopWorldTransform.ToSimulation(screenPoint));
-            if (Foods.TryBeginDrag(simulationPoint)) return true;
+            Vec2 worldPoint;
+            Vec2 simulationPoint;
+            ResolvePointerSpaces(DesktopWorldTransform.ToSimulation(screenPoint),
+                Slugcat.Center, VisualSizeMultiplier, out worldPoint,
+                out simulationPoint);
+            if (Foods.TryBeginDrag(worldPoint)) return true;
             if (Slugcat.Grab(simulationPoint)) return true;
             if (Vec2.Distance(simulationPoint, Graphics.Head.Position) < 17.0)
             {
@@ -404,10 +416,15 @@ namespace RainWorldDesktopPet.Core
 
         public void EndGrab()
         {
-            Vec2 pointerVelocity = mouse.Velocity / VisualSizeMultiplier;
-            if (Foods.EndDrag(Vec2.ClampMagnitude(pointerVelocity /
-                SimulationConstants.LogicTicksPerSecond, 25.0))) return;
-            Slugcat.Release(pointerVelocity);
+            // Food drag velocity is already in unscaled desktop-world simulation
+            // units. Character dragging alone needs the inverse visual-size scale.
+            if (Foods.IsDragging)
+            {
+                Foods.EndDrag(Vec2.ClampMagnitude(mouse.Velocity /
+                    SimulationConstants.LogicTicksPerSecond, 25.0));
+                return;
+            }
+            Slugcat.Release(mouse.Velocity / VisualSizeMultiplier);
         }
 
         public void SetSize(SlugcatSize value)
@@ -433,8 +450,24 @@ namespace RainWorldDesktopPet.Core
 
         private Vec2 PointerToSimulation(Vec2 normalSimulationPoint)
         {
-            return Slugcat.Center + (normalSimulationPoint - Slugcat.Center) /
-                VisualSizeMultiplier;
+            Vec2 worldPointer;
+            Vec2 characterPointer;
+            ResolvePointerSpaces(normalSimulationPoint, Slugcat.Center,
+                VisualSizeMultiplier, out worldPointer, out characterPointer);
+            return characterPointer;
+        }
+
+        internal static void ResolvePointerSpaces(Vec2 normalSimulationPoint,
+            Vec2 characterCenter, double visualSizeMultiplier,
+            out Vec2 worldPointer, out Vec2 characterPointer)
+        {
+            if (visualSizeMultiplier <= 0.0 ||
+                double.IsNaN(visualSizeMultiplier) ||
+                double.IsInfinity(visualSizeMultiplier))
+                throw new ArgumentOutOfRangeException("visualSizeMultiplier");
+            worldPointer = normalSimulationPoint;
+            characterPointer = characterCenter +
+                (normalSimulationPoint - characterCenter) / visualSizeMultiplier;
         }
 
         private void RecoverFromDesktopEscape()
