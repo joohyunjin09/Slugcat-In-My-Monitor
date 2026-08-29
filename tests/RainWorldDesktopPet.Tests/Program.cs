@@ -95,6 +95,10 @@ namespace RainWorldDesktopPet.Tests
                 FoodClearResetsInteractionState);
             Run("Food fallback remains visible without a local atlas",
                 FoodFallbackRendersWithoutAtlas);
+            Run("World food keeps fixed size and position across Slugcat sizes",
+                FoodWorldRenderingIgnoresSlugcatSizeAndMotion);
+            Run("Shared held food keeps the actual holder's render context",
+                SharedHeldFoodKeepsOwningManager);
             Run("Renderer color-resource caches remain bounded",
                 RendererColorResourceCachesRemainBounded);
             Run("Food palettes preserve Blue Fruit layers and normal Eggbug hue",
@@ -1072,6 +1076,86 @@ namespace RainWorldDesktopPet.Tests
                 "clear resets the interaction state");
             True(!manager.LastSpawnAccepted,
                 "clear cannot expose a stale accepted-spawn result");
+        }
+
+        private static void FoodWorldRenderingIgnoresSlugcatSizeAndMotion()
+        {
+            Vec2 foodPosition = new Vec2(180.0, 90.0);
+            RenderSpace renderSpace = new RenderSpace(
+                new Rectangle(-120, 40, 900, 700));
+
+            SlugcatPose small = new SlugcatPose();
+            small.CharacterOrigin = new Vec2(70.0, 60.0);
+            small.CharacterRenderScale = SlugcatSizeSettings.SmallRenderScale;
+            SlugcatPose normalMoved = new SlugcatPose();
+            normalMoved.CharacterOrigin = new Vec2(240.0, 125.0);
+            normalMoved.CharacterRenderScale = SlugcatSizeSettings.NormalRenderScale;
+
+            Vec2 expectedWorld = DesktopWorldTransform.ToDesktop(foodPosition);
+            Vec2 smallWorld = SpriteRenderer.ResolveFoodRenderPosition(
+                small, foodPosition, false);
+            Vec2 normalWorld = SpriteRenderer.ResolveFoodRenderPosition(
+                normalMoved, foodPosition, false);
+            Near(0.0, Vec2.Distance(expectedWorld, smallWorld), 0.000001,
+                "small Slugcat cannot move world food away from its desktop position");
+            Near(0.0, Vec2.Distance(smallWorld, normalWorld), 0.000001,
+                "moving or resizing the selected Slugcat cannot move world food");
+            Near(SimulationConstants.DesktopWorldScale,
+                SpriteRenderer.ResolveFoodRenderScale(small, false), 0.000001,
+                "world food keeps the desktop-world scale for Small");
+            Near(SimulationConstants.DesktopWorldScale,
+                SpriteRenderer.ResolveFoodRenderScale(normalMoved, false), 0.000001,
+                "world food keeps the desktop-world scale for Normal");
+            Near(0.0, Vec2.Distance(
+                SpriteRenderer.ResolveFoodRenderOffset(small, renderSpace, false),
+                SpriteRenderer.ResolveFoodRenderOffset(normalMoved, renderSpace, false)),
+                0.000001,
+                "world food transform offset is independent of CharacterOrigin");
+
+            Near(SlugcatSizeSettings.SmallRenderScale,
+                SpriteRenderer.ResolveFoodRenderScale(small, true), 0.000001,
+                "held food uses the actual Small holder scale");
+            Near(SlugcatSizeSettings.NormalRenderScale,
+                SpriteRenderer.ResolveFoodRenderScale(normalMoved, true), 0.000001,
+                "held food uses the actual Normal holder scale");
+            True(Vec2.Distance(
+                    SpriteRenderer.ResolveFoodRenderPosition(small, foodPosition, true),
+                    SpriteRenderer.ResolveFoodRenderPosition(normalMoved,
+                        foodPosition, true)) > 1.0,
+                "character-attached food still follows its holder's local render space");
+        }
+
+        private static void SharedHeldFoodKeepsOwningManager()
+        {
+            DesktopFoodManager holder = new DesktopFoodManager(1771);
+            DesktopFoodManager displayOwner = new DesktopFoodManager(1772);
+            Slugcat slugcat = new Slugcat(new Vec2(100.0, 100.0));
+            slugcat.State.Grounded = true;
+            SlugcatGraphics graphics = new SlugcatGraphics(slugcat);
+            AttentionSystem attention = new AttentionSystem();
+            VirtualInput input;
+
+            True(holder.TryAddDangleFruit(slugcat.Center + new Vec2(8.0, 0.0)),
+                "holder receives a reachable fruit before joining the shared pool");
+            True(holder.TryProduceInput(slugcat, graphics, attention, out input) &&
+                holder.Target != null &&
+                holder.Target.State == DesktopFoodState.Held,
+                "the first manager actually owns a held edible");
+            DesktopFood held = holder.Target;
+
+            DesktopCollisionWorld world = new DesktopCollisionWorld(new WindowEnumerator());
+            world.Refresh(IntPtr.Zero);
+            holder.StepPhysics(world);
+            displayOwner.StepPhysics(world);
+
+            Equal(0, holder.Foods.Count,
+                "a different manager can become the shared world display owner");
+            Equal(1, displayOwner.Foods.Count,
+                "the shared display owner still exposes the world pool once");
+            True(ReferenceEquals(holder.HeldFoodForRender, held),
+                "held rendering remains attached to the manager that owns the food");
+            True(displayOwner.HeldFoodForRender == null,
+                "the display owner cannot borrow another Slugcat's held render context");
         }
 
         private static void FoodFallbackRendersWithoutAtlas()
