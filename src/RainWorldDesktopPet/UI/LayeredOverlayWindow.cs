@@ -719,10 +719,23 @@ namespace RainWorldDesktopPet.UI
             for (int i = 0; i < loop.Foods.Foods.Count; i++)
             {
                 DesktopFood food = loop.Foods.Foods[i];
-                if (!food.IsActive) continue;
-                Vec2 center = pose.ToRenderedWorld(
-                    food.Chunk.RenderPosition(pose.TimeStacker));
-                double reach = food.VisualReach * scale;
+                if (!food.IsActive || SpriteRenderer.IsFoodAttachedToSlugcat(food))
+                    continue;
+                Vec2 center = SpriteRenderer.ResolveFoodRenderPosition(pose,
+                    food.Chunk.RenderPosition(pose.TimeStacker), false);
+                double reach = food.VisualReach *
+                    SpriteRenderer.ResolveFoodRenderScale(pose, false);
+                content = RectangleF.Union(content, new RectangleF(
+                    (float)(center.X - reach), (float)(center.Y - reach),
+                    (float)(reach * 2.0), (float)(reach * 2.0)));
+            }
+            DesktopFood heldFood = loop.Foods.HeldFoodForRender;
+            if (heldFood != null)
+            {
+                Vec2 center = SpriteRenderer.ResolveFoodRenderPosition(pose,
+                    heldFood.Chunk.RenderPosition(pose.TimeStacker), true);
+                double reach = heldFood.VisualReach *
+                    SpriteRenderer.ResolveFoodRenderScale(pose, true);
                 content = RectangleF.Union(content, new RectangleF(
                     (float)(center.X - reach), (float)(center.Y - reach),
                     (float)(reach * 2.0), (float)(reach * 2.0)));

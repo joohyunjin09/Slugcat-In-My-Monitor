@@ -1173,77 +1173,140 @@ namespace RainWorldDesktopPet.Graphics
             SlugcatPose pose, bool heldLayer)
         {
             if (pose == null) throw new ArgumentNullException("pose");
-            if (foodManager == null || foodManager.Foods.Count == 0) return;
+            if (foodManager == null) return;
+
+            // Shared food belongs to desktop/world space until a Slugcat actually
+            // holds it. The manager that exposes the shared pool can change from
+            // frame to frame, so floor/dragged food must never inherit that
+            // manager's character scale or moving character origin.
             IList<DesktopFood> foods = foodManager.Foods;
-            bool hasFoodInLayer = false;
+            bool hasWorldFood = false;
             for (int i = 0; i < foods.Count; i++)
             {
                 DesktopFood candidate = foods[i];
-                if (!candidate.IsActive) continue;
-                bool held = candidate.State == DesktopFoodState.Held ||
-                    candidate.State == DesktopFoodState.Biting ||
-                    candidate.State == DesktopFoodState.Dragged;
-                if (held != heldLayer) continue;
-                hasFoodInLayer = true;
+                if (!candidate.IsActive || IsFoodAttachedToSlugcat(candidate)) continue;
+                bool frontLayer = candidate.State == DesktopFoodState.Dragged;
+                if (frontLayer != heldLayer) continue;
+                hasWorldFood = true;
                 break;
             }
-            // Rendering is called once behind and once in front of the
-            // Slugcat. Most frames have food in only one layer, so avoid a
-            // Matrix allocation and graphics state change for the empty pass.
-            if (!hasFoodInLayer) return;
+
+            if (hasWorldFood)
+            {
+                graphics.Save();
+                try
+                {
+                    ApplyFoodRenderTransform(graphics, pose, renderSpace, false);
+                    for (int i = 0; i < foods.Count; i++)
+                    {
+                        DesktopFood food = foods[i];
+                        if (!food.IsActive || IsFoodAttachedToSlugcat(food)) continue;
+                        bool frontLayer = food.State == DesktopFoodState.Dragged;
+                        if (frontLayer != heldLayer) continue;
+                        DrawFood(graphics, food, pose.TimeStacker);
+                    }
+                }
+                finally
+                {
+                    graphics.Restore();
+                }
+            }
+
+            // A held item is rendered by the manager that actually owns the
+            // interaction, not by whichever Slugcat happens to be the shared
+            // pool's display owner. This preserves the holder's selected size.
+            if (!heldLayer) return;
+            DesktopFood heldFood = foodManager.HeldFoodForRender;
+            if (heldFood == null) return;
+
             graphics.Save();
             try
             {
-                Vec2 offset = pose.CharacterRenderOffset;
-                graphics.SetTransform((float)pose.CharacterRenderScale,
-                    0.0f, 0.0f, (float)pose.CharacterRenderScale,
-                    (float)(offset.X - renderSpace.WorldOrigin.X),
-                    (float)(offset.Y - renderSpace.WorldOrigin.Y));
-
-                for (int i = 0; i < foods.Count; i++)
-                {
-                    DesktopFood food = foods[i];
-                    if (!food.IsActive) continue;
-                    bool held = food.State == DesktopFoodState.Held ||
-                        food.State == DesktopFoodState.Biting ||
-                        food.State == DesktopFoodState.Dragged;
-                    if (held != heldLayer) continue;
-
-                    Vec2 center = food.Chunk.RenderPosition(pose.TimeStacker);
-                    Vec2 direction = MathUtil.SlerpDirection(food.LastRotation,
-                        food.Rotation, pose.TimeStacker);
-                    double angle = AimScreen(Vec2.Zero, direction);
-                    if (food.Kind == DesktopFoodKind.EggBugEgg)
-                    {
-                        DrawEggBugEgg(graphics, food, center, direction, angle,
-                            pose.TimeStacker);
-                        continue;
-                    }
-                    AtlasSprite ignored;
-                    bool hasFront = atlas != null &&
-                        atlas.TryGet(food.FrontElement, out ignored);
-                    bool hasBack = atlas != null &&
-                        atlas.TryGet(food.BackElement, out ignored);
-                    if (hasFront)
-                        DrawElement(graphics, food.FrontElement, center, angle,
-                            1.0, 1.0, 0.5, 0.5,
-                            FoodRenderPalette.DangleFruit.BaseColor);
-                    else
-                        FillCachedCircle(graphics, center, 8.0,
-                            FoodRenderPalette.DangleFruit.BaseColor);
-                    if (hasBack)
-                        DrawElement(graphics, food.BackElement, center, angle,
-                            1.0, 1.0, 0.5, 0.5,
-                            FoodRenderPalette.DangleFruit.PrimaryColor);
-                    else
-                        FillCachedCircle(graphics, center, 6.5,
-                            FoodRenderPalette.DangleFruit.PrimaryColor);
-                }
+                ApplyFoodRenderTransform(graphics, pose, renderSpace, true);
+                DrawFood(graphics, heldFood, pose.TimeStacker);
             }
             finally
             {
                 graphics.Restore();
             }
+        }
+
+        internal static bool IsFoodAttachedToSlugcat(DesktopFood food)
+        {
+            return food != null && (food.State == DesktopFoodState.Held ||
+                food.State == DesktopFoodState.Biting);
+        }
+
+        internal static double ResolveFoodRenderScale(SlugcatPose pose,
+            bool attachedToSlugcat)
+        {
+            if (pose == null) throw new ArgumentNullException("pose");
+            return attachedToSlugcat
+                ? pose.CharacterRenderScale
+                : SimulationConstants.DesktopWorldScale;
+        }
+
+        internal static Vec2 ResolveFoodRenderPosition(SlugcatPose pose,
+            Vec2 position, bool attachedToSlugcat)
+        {
+            if (pose == null) throw new ArgumentNullException("pose");
+            return attachedToSlugcat
+                ? pose.ToRenderedWorld(position)
+                : pose.ToRenderedStaticWorld(position);
+        }
+
+        internal static Vec2 ResolveFoodRenderOffset(SlugcatPose pose,
+            RenderSpace renderSpace, bool attachedToSlugcat)
+        {
+            if (pose == null) throw new ArgumentNullException("pose");
+            if (renderSpace == null) throw new ArgumentNullException("renderSpace");
+            Vec2 offset = attachedToSlugcat ? pose.CharacterRenderOffset : Vec2.Zero;
+            return offset - renderSpace.WorldOrigin;
+        }
+
+        private static void ApplyFoodRenderTransform(ISpriteCanvas graphics,
+            SlugcatPose pose, RenderSpace renderSpace, bool attachedToSlugcat)
+        {
+            double scale = ResolveFoodRenderScale(pose, attachedToSlugcat);
+            Vec2 offset = ResolveFoodRenderOffset(pose, renderSpace,
+                attachedToSlugcat);
+            graphics.SetTransform((float)scale, 0.0f, 0.0f, (float)scale,
+                (float)offset.X, (float)offset.Y);
+        }
+
+        private void DrawFood(ISpriteCanvas graphics, DesktopFood food,
+            double interpolation)
+        {
+            Vec2 center = food.Chunk.RenderPosition(interpolation);
+            Vec2 direction = MathUtil.SlerpDirection(food.LastRotation,
+                food.Rotation, interpolation);
+            double angle = AimScreen(Vec2.Zero, direction);
+            if (food.Kind == DesktopFoodKind.EggBugEgg)
+            {
+                DrawEggBugEgg(graphics, food, center, direction, angle,
+                    interpolation);
+                return;
+            }
+
+            AtlasSprite ignored;
+            bool hasFront = atlas != null &&
+                atlas.TryGet(food.FrontElement, out ignored);
+            bool hasBack = atlas != null &&
+                atlas.TryGet(food.BackElement, out ignored);
+            if (hasFront)
+                DrawElement(graphics, food.FrontElement, center, angle,
+                    1.0, 1.0, 0.5, 0.5,
+                    FoodRenderPalette.DangleFruit.BaseColor);
+            else
+                FillCachedCircle(graphics, center, 8.0,
+                    FoodRenderPalette.DangleFruit.BaseColor);
+            if (hasBack)
+                DrawElement(graphics, food.BackElement, center, angle,
+                    1.0, 1.0, 0.5, 0.5,
+                    FoodRenderPalette.DangleFruit.PrimaryColor);
+            else
+                FillCachedCircle(graphics, center, 6.5,
+                    FoodRenderPalette.DangleFruit.PrimaryColor);
         }
 
         private void DrawEggBugEgg(ISpriteCanvas graphics, DesktopFood food,
