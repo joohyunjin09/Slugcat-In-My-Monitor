@@ -7,7 +7,7 @@ namespace RainWorldDesktopPet.Physics
     {
         private readonly double baseRadius;
         private readonly double baseLength;
-        private double geometryScale = 1.0;
+        private double lengthScale = 1.0;
 
         public TailSegment(Vec2 position, double radius, double length, double affectPrevious)
         {
@@ -24,18 +24,18 @@ namespace RainWorldDesktopPet.Physics
         public Vec2 Position;
         public Vec2 LastPosition;
         public Vec2 Velocity;
-        public double Radius { get { return baseRadius * geometryScale; } }
-        public double Length { get { return baseLength * geometryScale; } }
-        public double GeometryScale { get { return geometryScale; } }
+        public double Radius { get { return baseRadius; } }
+        public double Length { get { return baseLength * lengthScale; } }
+        public double LengthScale { get { return lengthScale; } }
         public readonly double AffectPrevious;
         public double Stretched;
         public double LastStretched;
 
-        public void SetGeometryScale(double value)
+        public void SetLengthScale(double value)
         {
             if (value <= 0.0 || double.IsNaN(value) || double.IsInfinity(value))
                 throw new ArgumentOutOfRangeException("value");
-            geometryScale = value;
+            lengthScale = value;
         }
 
         public void BeginUpdate()
