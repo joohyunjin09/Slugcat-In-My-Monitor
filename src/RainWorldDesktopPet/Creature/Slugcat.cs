@@ -488,7 +488,7 @@ namespace RainWorldDesktopPet.Creature
             {
                 // Windows simulation Y points down. Move the chunk centre by the
                 // lost/gained radius so its collision bottom stays on the exact
-                // same floor while size or pup mode changes.
+                // same floor while the explicit desktop size changes.
                 Vec2 floorCompensation = new Vec2(0.0, oldHipsRadius - hipsRadius);
                 for (int i = 0; i < BodyChunks.Length; i++)
                 {
