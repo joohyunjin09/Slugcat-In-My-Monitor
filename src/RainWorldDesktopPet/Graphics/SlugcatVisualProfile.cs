@@ -293,19 +293,20 @@ namespace RainWorldDesktopPet.Graphics
 
         public double ResolveBodyScale(SlugcatAppearance appearance)
         {
-            double baseScale = UsesVariantBodyProportions && appearance != null
+            // PlayerGraphics' RenderAsPup branch does not use the 17->12 body
+            // connection ratio as a sprite-width multiplier. Keep the authored
+            // BodyA profile width here; pup-specific scaleX is a separate
+            // DrawSprites branch in the original game.
+            return UsesVariantBodyProportions && appearance != null
                 ? appearance.BodyWidthScale : BodyScale;
-            // Rain World RenderAsPup still uses the original BodyA/HipsA player
-            // atlas. Juvenile appearance comes from PlayerGraphics proportions,
-            // so keep the real local atlas and scale its authored torso width.
-            return baseScale * (appearance == null ? 1.0 : appearance.PupScale);
         }
 
         public double ResolveHipsScale(SlugcatAppearance appearance)
         {
-            double baseScale = UsesVariantBodyProportions && appearance != null
+            // As with BodyA, the original HipsA pup width is not obtained by
+            // uniformly multiplying the adult sprite by 12/17.
+            return UsesVariantBodyProportions && appearance != null
                 ? appearance.HipsWidthScale : HipsScale;
-            return baseScale * (appearance == null ? 1.0 : appearance.PupScale);
         }
     }
 
