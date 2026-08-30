@@ -762,7 +762,7 @@ namespace RainWorldDesktopPet.Graphics
             double bodyWidth = pose.VisualBodyScale + MathUtil.Lerp(-0.05, 0.05, pose.Breath) * verticality;
 
             Vec2 bodyPosition = pose.Chest + new Vec2(0.0, -0.5 * pose.Breath * (1.0 - verticality));
-            DrawElement(graphics, pose.BodyElement, bodyPosition, bodyAngle, bodyWidth, 1.0,
+            DrawElement(graphics, pose.BodyElement, bodyPosition, bodyAngle, bodyWidth, pose.VisualBodyScaleY,
                 0.5, 0.7894737, pose.VisualBodyColor, SelectTorsoSide(pose));
         }
 

@@ -252,6 +252,10 @@ namespace RainWorldDesktopPet.Tests
                 SlugpupGeometryMatchesPlayerGraphics);
             Run("Slugpup draw pose uses PlayerGraphics' compact body offsets",
                 SlugpupDrawPoseMatchesPlayerGraphics);
+            Run("Slugpup hips do not inherit desktop attention offsets",
+                SlugpupHipsIgnoreDesktopAttention);
+            Run("Slugpup held items use the PlayerGraphics compact hand anchor",
+                SlugpupHeldItemsUseOriginalHandAnchor);
             Run("Every visual profile remains valid through movement and stun states", AllVisualProfilesRemainStableAcrossStates);
             AbilityParityReplayTests.Register(Run);
 
@@ -3734,8 +3738,69 @@ namespace RainWorldDesktopPet.Tests
                 "pup compact upper-body draw position");
             Near(0.0, Vec2.Distance(expectedHips, pose.Hips), 0.000001,
                 "pup compact lower-body draw position");
+            Near(0.5, pose.VisualBodyScaleY, 0.000001,
+                "PlayerGraphics.InitiateSprites halves the RenderAsPup BodyA height");
             True(pose.Chest.Y > rawChest.Y,
                 "pup draw chest moves down toward the hips instead of retaining adult height");
+        }
+
+        private static void SlugpupHipsIgnoreDesktopAttention()
+        {
+            DesktopCollisionWorld world = new DesktopCollisionWorld(new WindowEnumerator());
+            world.Refresh(IntPtr.Zero);
+            Slugcat slugcat = new Slugcat(new Vec2(320.0, 220.0), SlugcatId.White);
+            slugcat.SetPupAppearance(true);
+            slugcat.State.BodyMode = BodyModeIndex.Stand;
+            slugcat.State.AnimationFrame = 0;
+            slugcat.State.Facing = 1;
+            Vec2 rawChest = slugcat.BodyChunks[0].Position;
+            Vec2 rawHips = slugcat.BodyChunks[1].Position;
+            AttentionSystem attention = new AttentionSystem();
+            attention.SetTarget(AttentionKind.Mouse, rawChest + new Vec2(40.0, -7.0));
+            attention.Step();
+            SlugcatGraphics graphics = new SlugcatGraphics(slugcat);
+            graphics.Step(attention, world);
+            SlugcatPose pose = graphics.BuildPose(1.0, attention, 1, false);
+
+            // PlayerGraphics only offsets drawPositions for an actual in-room
+            // object relationship. Desktop mouse attention may move the head,
+            // but must not pull the body anchor that drives the Hips sprite.
+            Vec2 expectedChest = Vec2.Lerp(rawChest, rawHips, 0.475) +
+                new Vec2(0.0, -1.5);
+            Vec2 expectedHips = rawHips + new Vec2(-0.375, -2.0);
+            Near(0.0, Vec2.Distance(expectedChest, pose.Chest), 0.000001,
+                "attention leaves the compact pup chest anchor unchanged");
+            Near(0.0, Vec2.Distance(expectedHips, pose.Hips), 0.000001,
+                "attention leaves the compact pup hips anchor unchanged");
+        }
+
+        private static void SlugpupHeldItemsUseOriginalHandAnchor()
+        {
+            DesktopCollisionWorld world = new DesktopCollisionWorld(new WindowEnumerator());
+            world.Refresh(IntPtr.Zero);
+            Slugcat slugcat = new Slugcat(new Vec2(320.0, 220.0), SlugcatId.White);
+            slugcat.SetPupAppearance(true);
+            slugcat.State.BodyMode = BodyModeIndex.Stand;
+            slugcat.State.Facing = -1;
+            slugcat.State.Grounded = true;
+            SlugcatGraphics graphics = new SlugcatGraphics(slugcat);
+            DesktopFoodManager manager = new DesktopFoodManager(7029);
+            AttentionSystem attention = new AttentionSystem();
+            VirtualInput input;
+
+            True(manager.TryAddDangleFruit(slugcat.Center + new Vec2(8.0, 0.0)) &&
+                manager.TryProduceInput(slugcat, graphics, attention, out input),
+                "a pup can take a reachable item into its held grasp");
+            manager.PrepareHeldHandPose(slugcat, graphics);
+
+            // SlugcatHand.Update's MSC Slugpup grasp branch uses
+            // Player.ThrowDirection * 3 for either hand, not the adult -20/+20.
+            Near(-3.0, graphics.Arms[0].RelativeHuntPosition.X, 0.000001,
+                "pup held item uses the compact ThrowDirection x anchor");
+            Near(12.0, graphics.Arms[0].RelativeHuntPosition.Y, 0.000001,
+                "pup held item keeps the original y-up -12 hand height in screen space");
+            True(graphics.Arms[0].Mode == LimbMode.HuntRelativePosition,
+                "held item is applied before the hand's graphics update");
         }
 
         private static void AllVisualProfilesRemainStableAcrossStates()

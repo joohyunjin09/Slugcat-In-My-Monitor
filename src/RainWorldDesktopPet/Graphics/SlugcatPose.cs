@@ -180,6 +180,10 @@ namespace RainWorldDesktopPet.Graphics
         public string BodyElement = "BodyA";
         public string HipsElement = "HipsA";
         public double VisualBodyScale = 1.0;
+        // PlayerGraphics.InitiateSprites: RenderAsPup sets BodyA.scaleY = 0.5.
+        // Keep this sprite-space value separate from the character profile's
+        // horizontal body scale so the HipsA anchor remains source-authentic.
+        public double VisualBodyScaleY = 1.0;
         public double VisualHipsScale = 1.0;
         public double VisualHeadScale = 1.0;
         public double ArmShoulderScale = 1.0;
