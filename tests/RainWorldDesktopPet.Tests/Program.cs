@@ -146,6 +146,8 @@ namespace RainWorldDesktopPet.Tests
             Run("DMS sprites beside the executable are discovered", DmsSpritesBesideExecutableAreDiscovered);
             Run("Customize colors reach each rendered sprite part", PartColorsReachRenderedPose);
             Run("Rain World locator validates an explicit installation", LocatorValidatesExplicitPath);
+            Run("Slugpup availability follows the More Slugcats install marker",
+                SlugpupAvailabilityFollowsMoreSlugcatsInstallMarker);
             Run("Required autonomous behavior states are present", RequiredBehaviorsExist);
             Run("Jump and DropDown utility states are reachable", UtilityActionsAreReachable);
             Run("Exploration intent makes free jumps reachable", ExplorationJumpIsReachable);
@@ -242,6 +244,18 @@ namespace RainWorldDesktopPet.Tests
             Run("PlayerGraphics arm reflection matches y-up signed distance",
                 ArmScaleReflectionMatchesFutileCoordinates);
             Run("Skin face and head families follow PlayerGraphics branches", SkinFaceFamiliesMatchPlayerGraphics);
+            Run("Slugpup uses the original HeadC and PFace atlas families",
+                SlugpupUsesOriginalAtlasFamilies);
+            Run("DMS maps generic skin frames onto Slugpup sprite families",
+                DmsSlugpupAliasesUseGenericFrames);
+            Run("Slugpup keeps Player BodyChunk radii and halves tail lengths",
+                SlugpupGeometryMatchesPlayerGraphics);
+            Run("Slugpup draw pose uses PlayerGraphics' compact body offsets",
+                SlugpupDrawPoseMatchesPlayerGraphics);
+            Run("Slugpup hips do not inherit desktop attention offsets",
+                SlugpupHipsIgnoreDesktopAttention);
+            Run("Slugpup held items use the PlayerGraphics compact hand anchor",
+                SlugpupHeldItemsUseOriginalHandAnchor);
             Run("Every visual profile remains valid through movement and stun states", AllVisualProfilesRemainStableAcrossStates);
             AbilityParityReplayTests.Register(Run);
 
@@ -274,6 +288,12 @@ namespace RainWorldDesktopPet.Tests
             Vec2 spawn = DesktopWorldTransform.ToSimulation(new Vec2(
                 work.Left + work.Width * 0.5, work.Bottom)) - new Vec2(0.0, 9.0);
             Slugcat slugcat = new Slugcat(spawn, variant);
+            bool renderAsPup = scenario.StartsWith("pup-", StringComparison.OrdinalIgnoreCase);
+            if (renderAsPup)
+            {
+                slugcat.SetPupAppearance(true);
+                scenario = scenario.Substring("pup-".Length);
+            }
             DesktopPetAI ai = new DesktopPetAI(22);
             double attentionX = scenario == "crawl-right" ? -120.0 : 120.0;
             ai.Attention.SetTarget(AttentionKind.Mouse, slugcat.Center + new Vec2(attentionX, -55.0));
@@ -333,6 +353,7 @@ namespace RainWorldDesktopPet.Tests
             Console.WriteLine("Preview written to " + Path.GetFullPath(outputPath));
             Console.WriteLine(loader.Status);
             Console.WriteLine("Scenario " + scenario);
+            Console.WriteLine("Slugpup " + renderAsPup);
             Console.WriteLine("Skin " + skin);
             Console.WriteLine("DMS " + (dmsSkinId ?? "none"));
         }
@@ -397,8 +418,16 @@ namespace RainWorldDesktopPet.Tests
 
                         DmsSkinDefinition template = dms.Find("dressmyslugcat.template");
                         if (template != null)
+                        {
                             True(template.TryGetSprite("FaceC0", "Artificer", DmsSpriteSide.None,
                                 out sprite), "Artificer FaceC sprites must map to the generic FaceA family");
+                            True(template.TryGetSprite("HeadC0", "Slugpup", DmsSpriteSide.None,
+                                out sprite), "Slugpup HeadC sprites must map to the generic DMS HeadA family");
+                            True(template.TryGetSprite("PFaceA0", "Slugpup", DmsSpriteSide.None,
+                                out sprite), "Slugpup PFaceA sprites must map to the generic DMS FaceA family");
+                            True(template.TryGetSprite("PFaceB0", "Slugpup", DmsSpriteSide.None,
+                                out sprite), "Slugpup PFaceB sprites must map to the generic DMS FaceB family");
+                        }
 
                         DmsSkinDefinition bow = dms.Find("InanimateSwagsanity.Bow");
                         if (bow != null)
@@ -2338,6 +2367,29 @@ namespace RainWorldDesktopPet.Tests
             }
         }
 
+        private static void SlugpupAvailabilityFollowsMoreSlugcatsInstallMarker()
+        {
+            string root = Path.Combine(Path.GetTempPath(),
+                "slugcat-more-slugcats-test-" + Guid.NewGuid().ToString("N"));
+            try
+            {
+                RainWorldInstallation installation = new RainWorldInstallation(root);
+                True(!installation.HasMoreSlugcatsExpansion,
+                    "missing More Slugcats modinfo must disable Slugpup");
+
+                Directory.CreateDirectory(Path.GetDirectoryName(
+                    installation.MoreSlugcatsModInfoPath));
+                File.WriteAllText(installation.MoreSlugcatsModInfoPath,
+                    "{ \"id\": \"moreslugcats\" }");
+                True(installation.HasMoreSlugcatsExpansion,
+                    "canonical More Slugcats modinfo must enable Slugpup");
+            }
+            finally
+            {
+                if (Directory.Exists(root)) Directory.Delete(root, true);
+            }
+        }
+
         private static void RequiredBehaviorsExist()
         {
             string[] names =
@@ -3320,6 +3372,19 @@ namespace RainWorldDesktopPet.Tests
                     True(set.TryGet("FaceC" + i, out face), "Artificer right face " + i);
                     True(set.TryGet("FaceD" + i, out face), "Artificer left face " + i);
                     True(set.TryGet("FaceE" + i, out face), "Sofanthiel face " + i);
+                    True(set.TryGet("PFaceA" + i, out face), "original slugpup awake face " + i);
+                    True(face.Atlas.ImagePath.EndsWith("#rainworldmsc",
+                        StringComparison.OrdinalIgnoreCase), "PFaceA uses the installed MSC atlas");
+                    True(set.TryGet("PFaceB" + i, out face), "original slugpup blink face " + i);
+                    True(face.Atlas.ImagePath.EndsWith("#rainworldmsc",
+                        StringComparison.OrdinalIgnoreCase), "PFaceB uses the installed MSC atlas");
+                }
+                for (int i = 0; i < 18; i++)
+                {
+                    AtlasSprite head;
+                    True(set.TryGet("HeadC" + i, out head), "original slugpup head " + i);
+                    True(head.Atlas.ImagePath.EndsWith("#rainworldmsc",
+                        StringComparison.OrdinalIgnoreCase), "HeadC uses the installed MSC atlas");
                 }
                 AtlasSprite specialFace;
                 True(set.TryGet("FaceDead", out specialFace), "dead face element");
@@ -3554,6 +3619,188 @@ namespace RainWorldDesktopPet.Tests
                 "Saint head uses HeadB in every movement state");
             True(state.FaceElement.StartsWith("FaceB", StringComparison.Ordinal),
                 "Saint normal face uses the closed-eye FaceB family");
+        }
+
+        private static void SlugpupUsesOriginalAtlasFamilies()
+        {
+            SlugcatPose pose = new SlugcatPose
+            {
+                Chest = new Vec2(0.0, 0.0),
+                Hips = new Vec2(0.0, 17.0),
+                Head = new Vec2(0.0, -8.0),
+                Facing = 1,
+                Conscious = true,
+                LookDirection = Vec2.Right,
+                RenderAsPup = true
+            };
+            OriginalFaceState state = SpriteRenderer.ResolveOriginalFaceState(pose);
+            True(state.HeadElement.StartsWith("HeadC", StringComparison.Ordinal),
+                "PlayerGraphics.RenderAsPup selects HeadC");
+            True(state.FaceElement.StartsWith("PFaceA", StringComparison.Ordinal),
+                "PlayerGraphics.DefaultFaceSprite selects PFaceA while awake");
+            pose.Blink = true;
+            state = SpriteRenderer.ResolveOriginalFaceState(pose);
+            True(state.HeadElement.StartsWith("HeadC", StringComparison.Ordinal),
+                "blink does not replace the slugpup HeadC family");
+            True(state.FaceElement.StartsWith("PFaceB", StringComparison.Ordinal),
+                "PlayerGraphics.DefaultFaceSprite selects PFaceB while blinking");
+            pose.Blink = false;
+            pose.SelectedSlugcat = SlugcatId.White;
+            pose.CurrentSkin = SlugcatSkin.Saint;
+            state = SpriteRenderer.ResolveOriginalFaceState(pose);
+            True(state.FaceElement.StartsWith("PFaceB", StringComparison.Ordinal),
+                "PlayerGraphics.SaintFaceCondition keeps a Saint-skin slugpup's eyes closed");
+
+            pose.CurrentSkin = SlugcatSkin.Artificer;
+            state = SpriteRenderer.ResolveOriginalFaceState(pose);
+            True(state.FaceElement.StartsWith("PFaceA", StringComparison.Ordinal),
+                "PlayerGraphics keeps an awake Artificer slugpup on PFaceA, not FaceC or FaceD");
+            pose.Blink = true;
+            state = SpriteRenderer.ResolveOriginalFaceState(pose);
+            True(state.FaceElement.StartsWith("PFaceB", StringComparison.Ordinal),
+                "PlayerGraphics keeps a blinking Artificer slugpup on PFaceB");
+
+            pose.Conscious = false;
+            state = SpriteRenderer.ResolveOriginalFaceState(pose);
+            True(state.FaceElement == "FaceStunned",
+                "PlayerGraphics keeps the shared stunned face for a slugpup");
+        }
+
+        private static void DmsSlugpupAliasesUseGenericFrames()
+        {
+            SlugcatPose pose = new SlugcatPose
+            {
+                OriginalSlugcatId = "Saint",
+                RenderAsPup = true
+            };
+            True(string.Equals("Slugpup", SpriteRenderer.ResolveDmsSlugcatId(pose),
+                StringComparison.Ordinal), "a pup uses DMS's Slugpup replacement-map identity");
+            True(string.Equals("HeadA17", DmsSpriteGroups.ToGenericElement("HeadC17", "Slugpup"),
+                StringComparison.Ordinal), "DMS maps the original HeadC family to its generic HeadA sheet");
+            True(string.Equals("FaceA8", DmsSpriteGroups.ToGenericElement("PFaceA8", "Slugpup"),
+                StringComparison.Ordinal), "DMS maps the awake PFaceA family to its generic FaceA sheet");
+            True(string.Equals("FaceB6", DmsSpriteGroups.ToGenericElement("PFaceB6", "Slugpup"),
+                StringComparison.Ordinal), "DMS maps the closed-eye PFaceB family to its generic FaceB sheet");
+
+            pose.RenderAsPup = false;
+            True(string.Equals("Saint", SpriteRenderer.ResolveDmsSlugcatId(pose),
+                StringComparison.Ordinal), "adult rendering retains its selected DMS character identity");
+        }
+
+        private static void SlugpupGeometryMatchesPlayerGraphics()
+        {
+            Slugcat slugcat = new Slugcat(Vec2.Zero, SlugcatId.White);
+            double adultChestRadius = slugcat.BodyChunks[0].Radius;
+            double adultHipsRadius = slugcat.BodyChunks[1].Radius;
+            slugcat.SetPupAppearance(true);
+            Near(12.0, slugcat.BodyConnection.Distance, 0.000001,
+                "Player.setPupStatus uses a 12-unit BodyChunkConnection");
+            Near(adultChestRadius, slugcat.BodyChunks[0].Radius, 0.000001,
+                "Player.setPupStatus does not rescale the chest BodyChunk");
+            Near(adultHipsRadius, slugcat.BodyChunks[1].Radius, 0.000001,
+                "Player.setPupStatus does not rescale the hips BodyChunk");
+
+            ProceduralTail tail = new ProceduralTail(Vec2.Zero,
+                SlugcatGraphicsProfiles.White.Tail);
+            double adultRadius = tail.Segments[0].Radius;
+            double adultLength = tail.Segments[0].Length;
+            tail.SetPupGeometry(true, Vec2.Zero);
+            Near(adultRadius, tail.Segments[0].Radius, 0.000001,
+                "PlayerGraphics keeps the normal pup tail radius");
+            Near(adultLength * 0.5, tail.Segments[0].Length, 0.000001,
+                "PlayerGraphics halves the pup tail connection length");
+        }
+
+        private static void SlugpupDrawPoseMatchesPlayerGraphics()
+        {
+            DesktopCollisionWorld world = new DesktopCollisionWorld(new WindowEnumerator());
+            world.Refresh(IntPtr.Zero);
+            Slugcat slugcat = new Slugcat(new Vec2(320.0, 220.0), SlugcatId.White);
+            slugcat.SetPupAppearance(true);
+            slugcat.State.BodyMode = BodyModeIndex.Stand;
+            slugcat.State.AnimationFrame = 0;
+            slugcat.State.Facing = 1;
+            Vec2 rawChest = slugcat.BodyChunks[0].Position;
+            Vec2 rawHips = slugcat.BodyChunks[1].Position;
+            AttentionSystem attention = new AttentionSystem();
+            attention.SetTarget(AttentionKind.RandomPoint,
+                rawChest + new Vec2(0.0, -7.0));
+            SlugcatGraphics graphics = new SlugcatGraphics(slugcat);
+            graphics.Step(attention, world);
+            SlugcatPose pose = graphics.BuildPose(1.0, attention, 1, false);
+
+            // PlayerGraphics.Update: Lerp(chest, hips,
+            // 0.35 + (0.25 - 0.5 * 0.25)), then the RenderAsPup Stand offsets.
+            Vec2 expectedChest = Vec2.Lerp(rawChest, rawHips, 0.475) +
+                new Vec2(0.0, -1.5);
+            Vec2 expectedHips = rawHips + new Vec2(-0.375, -2.0);
+            Near(0.0, Vec2.Distance(expectedChest, pose.Chest), 0.000001,
+                "pup compact upper-body draw position");
+            Near(0.0, Vec2.Distance(expectedHips, pose.Hips), 0.000001,
+                "pup compact lower-body draw position");
+            Near(0.5, pose.VisualBodyScaleY, 0.000001,
+                "PlayerGraphics.InitiateSprites halves the RenderAsPup BodyA height");
+            True(pose.Chest.Y > rawChest.Y,
+                "pup draw chest moves down toward the hips instead of retaining adult height");
+        }
+
+        private static void SlugpupHipsIgnoreDesktopAttention()
+        {
+            DesktopCollisionWorld world = new DesktopCollisionWorld(new WindowEnumerator());
+            world.Refresh(IntPtr.Zero);
+            Slugcat slugcat = new Slugcat(new Vec2(320.0, 220.0), SlugcatId.White);
+            slugcat.SetPupAppearance(true);
+            slugcat.State.BodyMode = BodyModeIndex.Stand;
+            slugcat.State.AnimationFrame = 0;
+            slugcat.State.Facing = 1;
+            Vec2 rawChest = slugcat.BodyChunks[0].Position;
+            Vec2 rawHips = slugcat.BodyChunks[1].Position;
+            AttentionSystem attention = new AttentionSystem();
+            attention.SetTarget(AttentionKind.Mouse, rawChest + new Vec2(40.0, -7.0));
+            attention.Step();
+            SlugcatGraphics graphics = new SlugcatGraphics(slugcat);
+            graphics.Step(attention, world);
+            SlugcatPose pose = graphics.BuildPose(1.0, attention, 1, false);
+
+            // PlayerGraphics only offsets drawPositions for an actual in-room
+            // object relationship. Desktop mouse attention may move the head,
+            // but must not pull the body anchor that drives the Hips sprite.
+            Vec2 expectedChest = Vec2.Lerp(rawChest, rawHips, 0.475) +
+                new Vec2(0.0, -1.5);
+            Vec2 expectedHips = rawHips + new Vec2(-0.375, -2.0);
+            Near(0.0, Vec2.Distance(expectedChest, pose.Chest), 0.000001,
+                "attention leaves the compact pup chest anchor unchanged");
+            Near(0.0, Vec2.Distance(expectedHips, pose.Hips), 0.000001,
+                "attention leaves the compact pup hips anchor unchanged");
+        }
+
+        private static void SlugpupHeldItemsUseOriginalHandAnchor()
+        {
+            DesktopCollisionWorld world = new DesktopCollisionWorld(new WindowEnumerator());
+            world.Refresh(IntPtr.Zero);
+            Slugcat slugcat = new Slugcat(new Vec2(320.0, 220.0), SlugcatId.White);
+            slugcat.SetPupAppearance(true);
+            slugcat.State.BodyMode = BodyModeIndex.Stand;
+            slugcat.State.Facing = -1;
+            slugcat.State.Grounded = true;
+            SlugcatGraphics graphics = new SlugcatGraphics(slugcat);
+            DesktopFoodManager manager = new DesktopFoodManager(7029);
+            AttentionSystem attention = new AttentionSystem();
+            VirtualInput input;
+
+            True(manager.TryAddDangleFruit(slugcat.Center + new Vec2(8.0, 0.0)) &&
+                manager.TryProduceInput(slugcat, graphics, attention, out input),
+                "a pup can take a reachable item into its held grasp");
+            manager.PrepareHeldHandPose(slugcat, graphics);
+
+            // SlugcatHand.Update's MSC Slugpup grasp branch uses
+            // Player.ThrowDirection * 3 for either hand, not the adult -20/+20.
+            Near(-3.0, graphics.Arms[0].RelativeHuntPosition.X, 0.000001,
+                "pup held item uses the compact ThrowDirection x anchor");
+            Near(12.0, graphics.Arms[0].RelativeHuntPosition.Y, 0.000001,
+                "pup held item keeps the original y-up -12 hand height in screen space");
+            True(graphics.Arms[0].Mode == LimbMode.HuntRelativePosition,
+                "held item is applied before the hand's graphics update");
         }
 
         private static void AllVisualProfilesRemainStableAcrossStates()

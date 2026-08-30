@@ -296,6 +296,7 @@ namespace RainWorldDesktopPet.Core
                     mouseAttention.Suppress(now, visualPointer, Graphics.Head.Position);
                 if (DebugEnabled)
                     parityDiagnostics.ObserveSurfaceState(Slugcat, World, input, simulationTick);
+                Foods.PrepareHeldHandPose(Slugcat, Graphics);
                 Graphics.Step(AI.Attention, AI.OriginalAttentionTarget,
                     AI.MouseAttentionActive && Slugcat.State.Conscious &&
                         !Slugcat.State.Dead && Slugcat.State.StunCounter < 1,

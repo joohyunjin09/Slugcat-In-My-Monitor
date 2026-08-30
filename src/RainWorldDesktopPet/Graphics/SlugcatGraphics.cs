@@ -226,8 +226,6 @@ namespace RainWorldDesktopPet.Graphics
             if (slugcat.State.BodyMode == BodyModeIndex.Stand)
             {
                 if (slugcat.LastInput.X == 0) head.Velocity -= lookDirection * 0.5;
-                upper -= lookDirection * 2.0;
-                drawPositions[0, 0] = upper;
             }
             else
             {
@@ -264,7 +262,9 @@ namespace RainWorldDesktopPet.Graphics
             head.Update();
             world.PushOutOfTerrain(head, slugcat.BodyChunks[0].Position);
             Vec2 neckDirection = bodyUp * 3.0;
-            if (slugcat.State.BodyMode == BodyModeIndex.Crawl) neckDirection.X *= 2.5;
+            // PlayerGraphics skips the adult crawl neck widening for RenderAsPup.
+            if (slugcat.State.BodyMode == BodyModeIndex.Crawl && !slugcat.PupAppearance)
+                neckDirection.X *= 2.5;
             Vec2 headTarget = Vec2.Lerp(upper, lower, 0.2) + neckDirection;
             headTargetPosition = headTarget;
             head.ConnectToPoint(headTarget, 3.0, false, 0.2,
@@ -305,7 +305,7 @@ namespace RainWorldDesktopPet.Graphics
                 if (!arms[hand].MovementEngagedThisTick &&
                     slugcat.State.Animation != AnimationIndex.Sleep)
                 {
-                    Vec2 relative = new Vec2(-20.0 + 40.0 * hand, 12.0);
+                    Vec2 relative = OriginalHeldItemHandTarget(hand);
                     if (spearDirection != 0.0 &&
                         slugcat.State.BodyMode == BodyModeIndex.Stand)
                     {
@@ -411,12 +411,43 @@ namespace RainWorldDesktopPet.Graphics
                 verticalRaise = MathUtil.Lerp(2.0, 4.0, progress);
                 horizontalSpread = MathUtil.Lerp(1.0, 1.2, progress);
             }
+            Vec2 relative = OriginalHeldItemHandTarget(handIndex);
             hand.Mode = LimbMode.HuntRelativePosition;
             hand.RelativeHuntPosition = new Vec2(
-                (-20.0 + 40.0 * handIndex) * scale * horizontalSpread,
-                12.0 * scale - verticalRaise);
+                relative.X * scale * horizontalSpread,
+                relative.Y * scale - verticalRaise);
             hand.GripSurfaceId = 0;
             hand.RetractCounter = Math.Max(0, hand.RetractCounter - 10);
+        }
+
+        // SlugcatHand.Update uses the normal -20/+20 hand spread for an adult
+        // grasp, but the MSC Slugpup branch instead keeps either grasp at
+        // Player.ThrowDirection * 3.  This is a source pose rule, not a
+        // size multiplier: it is what makes the pup hold an item close to its
+        // compact body.
+        private Vec2 OriginalHeldItemHandTarget(int handIndex)
+        {
+            double x = slugcat.PupAppearance
+                ? OriginalThrowDirection() * 3.0
+                : -20.0 + 40.0 * handIndex;
+            // Rain World's y-up -12 becomes +12 in the desktop y-down space.
+            return new Vec2(x, 12.0);
+        }
+
+        // Player.ThrowDirection: prefer the current horizontal input while
+        // upright/compact, otherwise follow the horizontal chunk ordering.
+        private int OriginalThrowDirection()
+        {
+            double chestMinusHips = slugcat.BodyChunks[0].Position.X -
+                slugcat.BodyChunks[1].Position.X;
+            if (slugcat.State.BodyMode == BodyModeIndex.Default ||
+                Math.Abs(chestMinusHips) < 15.0)
+            {
+                return slugcat.LastInput.X != 0
+                    ? slugcat.LastInput.X
+                    : (slugcat.State.Facing == 0 ? 1 : slugcat.State.Facing);
+            }
+            return chestMinusHips < 0.0 ? -1 : 1;
         }
 
         // A held item must not replace a crawl hand's low planted pose with the
@@ -494,13 +525,27 @@ namespace RainWorldDesktopPet.Graphics
             int facing = slugcat.State.Facing;
             Vec2 upper = drawPositions[0, 0];
             Vec2 lower = drawPositions[1, 0];
+            bool renderAsPup = slugcat.PupAppearance;
+
+            if (renderAsPup)
+            {
+                // PlayerGraphics.Update moves drawPositions[0, 0] toward the
+                // hips before any body-mode offsets.  A normal Player has no
+                // NPCStats here, so the DLL evaluates the source expression
+                // 0.35 + (0.25 - 0.5 * 0.25) = 0.475.  This is a graphics
+                // pose adjustment, not a whole-character scale change.
+                upper = Vec2.Lerp(upper, lower, 0.475);
+            }
             if (slugcat.State.BodyMode == BodyModeIndex.Stand)
             {
                 double cycle = frame / 6.0 * Math.PI * 2.0;
-                upper.X += facing * 6.0 * MathUtil.Clamp(Math.Abs(slugcat.BodyChunks[1].Velocity.X) - 0.2, 0.0, 1.0);
-                upper.Y -= Math.Cos(cycle) * 2.0;
-                lower.X -= facing * (1.5 - frame / 6.0);
-                lower.Y -= 2.0 + Math.Sin(cycle) * 4.0;
+                upper.X += facing * (renderAsPup ? 2.0 : 6.0) *
+                    MathUtil.Clamp(Math.Abs(slugcat.BodyChunks[1].Velocity.X) - 0.2,
+                        0.0, 1.0);
+                upper.Y -= Math.Cos(cycle) * (renderAsPup ? 1.5 : 2.0);
+                lower.X -= facing * (1.5 - frame / 6.0) *
+                    (renderAsPup ? 0.25 : 1.0);
+                lower.Y -= 2.0 + Math.Sin(cycle) * (renderAsPup ? 2.0 : 4.0);
             }
             else if (slugcat.State.BodyMode == BodyModeIndex.Crawl)
             {
@@ -548,6 +593,7 @@ namespace RainWorldDesktopPet.Graphics
             pose.SimulationTick = simulationTick;
             pose.TimeStacker = timeStacker;
             pose.SelectedSlugcat = slugcat.SelectedSlugcat.Id;
+            pose.RenderAsPup = slugcat.PupAppearance;
             SlugcatVisualProfile compatibilityProfile =
                 SlugcatVisualProfiles.FromGraphics(graphicsProfile);
             pose.CurrentSkin = compatibilityProfile.Skin;
@@ -584,6 +630,7 @@ namespace RainWorldDesktopPet.Graphics
             pose.BodyElement = graphicsProfile.BodyElement;
             pose.HipsElement = graphicsProfile.HipsElement;
             pose.VisualBodyScale = compatibilityProfile.ResolveBodyScale(slugcat.Appearance);
+            pose.VisualBodyScaleY = slugcat.PupAppearance ? 0.5 : 1.0;
             pose.VisualHipsScale = compatibilityProfile.ResolveHipsScale(slugcat.Appearance);
             pose.VisualHeadScale = graphicsProfile.HeadScale;
             pose.ArmShoulderScale = graphicsProfile.ArmShoulderScale;
