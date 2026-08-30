@@ -60,6 +60,8 @@ namespace RainWorldDesktopPet.Tests
             }
 
             Run("FixedTimeStep uses 40 Hz independently of render rate", FixedStepUsesFortyHertz);
+            Run("Resume timing reset discards a one-hour suspended interval",
+                ResumeTimingResetDiscardsSuspendedInterval);
             Run("Desktop world transform scales original X/Y travel uniformly", DesktopWorldTransformScalesTravelUniformly);
             Run("Original horizontal acceleration and friction match input order", OriginalHorizontalInputParity);
             Run("Crawl reversal uses Player's 0.75 dynamicRunSpeed branch",
@@ -89,10 +91,16 @@ namespace RainWorldDesktopPet.Tests
                 EggBugEggTailMatchesOriginalProceduralAnimation);
             Run("Blue Fruit and Eggbug Egg can be repositioned with the mouse",
                 FoodItemsSupportMouseDragging);
+            Run("Food placement pointer stays in world space for Small and Normal",
+                FoodPlacementPointerIgnoresSlugcatVisualScale);
             Run("Food manager clear resets every interaction flag",
                 FoodClearResetsInteractionState);
             Run("Food fallback remains visible without a local atlas",
                 FoodFallbackRendersWithoutAtlas);
+            Run("World food keeps fixed size and position across Slugcat sizes",
+                FoodWorldRenderingIgnoresSlugcatSizeAndMotion);
+            Run("Shared held food keeps the actual holder's render context",
+                SharedHeldFoodKeepsOwningManager);
             Run("Renderer color-resource caches remain bounded",
                 RendererColorResourceCachesRemainBounded);
             Run("Food palettes preserve Blue Fruit layers and normal Eggbug hue",
@@ -120,11 +128,21 @@ namespace RainWorldDesktopPet.Tests
             Run("Dragging passes through window walls", DraggingPassesThroughWindowWalls);
             Run("Slugcat dragging blocks desktop pointer interactions",
                 SlugcatDraggingBlocksDesktopInteractions);
+            Run("Suspend and resume power events use the recovery path",
+                PowerTransitionEventsUseRecoveryPath);
+            Run("Interactive process power policy disables both throttles",
+                InteractivePowerPolicyDisablesThrottles);
+            Run("Resume recovery rejects duplicate events and invalid refresh rates",
+                ResumeRecoveryGuardsInvalidInputs);
             Run("Mouse hook hit snapshots preserve click-through and topmost order",
                 MouseHookHitSnapshotsPreserveInputRules);
+            Run("World food mouse hit circles ignore Slugcat visual size",
+                WorldFoodMouseHitCirclesIgnoreSlugcatVisualSize);
             Run("AI produces VirtualInput without moving physics directly", AiDoesNotMoveCreature);
             Run("Futile atlas metadata parses frame geometry", AtlasMetadataParses);
             Run("DMS part atlas overrides and restores original sprites", DmsPartAtlasOverrideRestoresBase);
+            Run("DMS preserves authored source palettes over user colours", DmsAuthoredColorIsPreservedUntilCustomized);
+            Run("V5 presets preserve the exact DMS skin ID", V5PresetSkinIdParses);
             Run("DMS sprites beside the executable are discovered", DmsSpritesBesideExecutableAreDiscovered);
             Run("Customize colors reach each rendered sprite part", PartColorsReachRenderedPose);
             Run("Rain World locator validates an explicit installation", LocatorValidatesExplicitPath);
@@ -181,6 +199,8 @@ namespace RainWorldDesktopPet.Tests
             Run("Ten-second idle/walk/turn/jump graphics stay connected", LongGraphicsScenarioStaysConnected);
             Run("Five-minute varied-window soak preserves sprite integrity", FiveMinuteVariedWindowSpriteIntegrity);
             Run("Graphics bounds include procedural extremities", GraphicsBoundsIncludeExtremities);
+            Run("Offscreen render content is clipped to the virtual desktop",
+                OffscreenRenderContentIsClipped);
             Run("Overlapping Slugcats share one bounded composition upload",
                 OverlappingSlugcatsShareCompositionUpload);
             Run("Render order keeps held food above Slugcat 1 through 8",
@@ -207,6 +227,12 @@ namespace RainWorldDesktopPet.Tests
             Run("Crawl face follows persistent body facing, not attention", CrawlFaceUsesBodyFacing);
             Run("Arm shoulders rotate from the interpolated body axis", ArmShouldersFollowBodyAxis);
             Run("CharacterRenderScale uniformly enlarges visual coordinates", UniformCharacterRenderScale);
+            Run("Size scaling changes collision bounds without vertical oscillation",
+                SizeScalingChangesPhysicalCollisionBoundsWithoutFloating);
+            Run("Scaled rendering stays anchored to physical ground while moving",
+                ScaledRenderingStaysAnchoredToPhysicalGroundWhileMoving);
+            Run("Scaled procedural body and tail retain the large-size cadence",
+                ProceduralSizeMotionMatchesLarge);
             Run("Expanded arm/leg/face debug overlay renders without mutation", ExpandedDebugOverlayRenders);
             Run("Mouse attention requires near clicks and refreshes its timeout", MouseAttentionClickCases);
             Run("Downpour visual profiles match local DLL constants", DownpourVisualProfilesMatchDllConstants);
@@ -1058,6 +1084,118 @@ namespace RainWorldDesktopPet.Tests
                 "clear cannot expose a stale accepted-spawn result");
         }
 
+        private static void FoodWorldRenderingIgnoresSlugcatSizeAndMotion()
+        {
+            Vec2 foodPosition = new Vec2(180.0, 90.0);
+            RenderSpace renderSpace = new RenderSpace(
+                new Rectangle(-120, 40, 900, 700));
+
+            SlugcatPose small = new SlugcatPose();
+            small.CharacterOrigin = new Vec2(70.0, 60.0);
+            small.CharacterRenderScale = SlugcatSizeSettings.SmallRenderScale;
+            SlugcatPose normalMoved = new SlugcatPose();
+            normalMoved.CharacterOrigin = new Vec2(240.0, 125.0);
+            normalMoved.CharacterRenderScale = SlugcatSizeSettings.NormalRenderScale;
+
+            Vec2 expectedWorld = DesktopWorldTransform.ToDesktop(foodPosition);
+            Vec2 smallWorld = SpriteRenderer.ResolveFoodRenderPosition(
+                small, foodPosition, false);
+            Vec2 normalWorld = SpriteRenderer.ResolveFoodRenderPosition(
+                normalMoved, foodPosition, false);
+            Near(0.0, Vec2.Distance(expectedWorld, smallWorld), 0.000001,
+                "small Slugcat cannot move world food away from its desktop position");
+            Near(0.0, Vec2.Distance(smallWorld, normalWorld), 0.000001,
+                "moving or resizing the selected Slugcat cannot move world food");
+            Near(SimulationConstants.DesktopWorldScale,
+                SpriteRenderer.ResolveFoodRenderScale(small, false), 0.000001,
+                "world food keeps the desktop-world scale for Small");
+            Near(SimulationConstants.DesktopWorldScale,
+                SpriteRenderer.ResolveFoodRenderScale(normalMoved, false), 0.000001,
+                "world food keeps the desktop-world scale for Normal");
+            Near(0.0, Vec2.Distance(
+                SpriteRenderer.ResolveFoodRenderOffset(small, renderSpace, false),
+                SpriteRenderer.ResolveFoodRenderOffset(normalMoved, renderSpace, false)),
+                0.000001,
+                "world food transform offset is independent of CharacterOrigin");
+
+            Near(SlugcatSizeSettings.SmallRenderScale,
+                SpriteRenderer.ResolveFoodRenderScale(small, true), 0.000001,
+                "held food uses the actual Small holder scale");
+            Near(SlugcatSizeSettings.NormalRenderScale,
+                SpriteRenderer.ResolveFoodRenderScale(normalMoved, true), 0.000001,
+                "held food uses the actual Normal holder scale");
+            True(Vec2.Distance(
+                    SpriteRenderer.ResolveFoodRenderPosition(small, foodPosition, true),
+                    SpriteRenderer.ResolveFoodRenderPosition(normalMoved,
+                        foodPosition, true)) > 1.0,
+                "character-attached food still follows its holder's local render space");
+        }
+
+        private static void SharedHeldFoodKeepsOwningManager()
+        {
+            DesktopFoodManager holder = new DesktopFoodManager(1771);
+            DesktopFoodManager displayOwner = new DesktopFoodManager(1772);
+            Slugcat slugcat = new Slugcat(new Vec2(100.0, 100.0));
+            slugcat.State.Grounded = true;
+            SlugcatGraphics graphics = new SlugcatGraphics(slugcat);
+            AttentionSystem attention = new AttentionSystem();
+            VirtualInput input;
+
+            True(holder.TryAddDangleFruit(slugcat.Center + new Vec2(8.0, 0.0)),
+                "holder receives a reachable fruit before joining the shared pool");
+            True(holder.TryProduceInput(slugcat, graphics, attention, out input) &&
+                holder.Target != null &&
+                holder.Target.State == DesktopFoodState.Held,
+                "the first manager actually owns a held edible");
+            DesktopFood held = holder.Target;
+
+            DesktopCollisionWorld world = new DesktopCollisionWorld(new WindowEnumerator());
+            world.Refresh(IntPtr.Zero);
+            holder.StepPhysics(world);
+            displayOwner.StepPhysics(world);
+
+            Equal(0, holder.Foods.Count,
+                "a different manager can become the shared world display owner");
+            Equal(1, displayOwner.Foods.Count,
+                "the shared display owner still exposes the world pool once");
+            True(ReferenceEquals(holder.HeldFoodForRender, held),
+                "held rendering remains attached to the manager that owns the food");
+            True(displayOwner.HeldFoodForRender == null,
+                "the display owner cannot borrow another Slugcat's held render context");
+        }
+
+        private static void FoodPlacementPointerIgnoresSlugcatVisualScale()
+        {
+            Vec2 cursor = new Vec2(410.0, 215.0);
+            Vec2 slugcatCenter = new Vec2(120.0, 95.0);
+            SlugcatSize[] sizes = { SlugcatSize.Small, SlugcatSize.Normal };
+
+            for (int i = 0; i < sizes.Length; i++)
+            {
+                double multiplier = SlugcatSizeSettings.Multiplier(sizes[i]);
+                Vec2 worldPointer;
+                Vec2 characterPointer;
+                GameLoop.ResolvePointerSpaces(cursor, slugcatCenter, multiplier,
+                    out worldPointer, out characterPointer);
+
+                Near(0.0, Vec2.Distance(cursor, worldPointer), 0.000001,
+                    sizes[i] + " food placement keeps the raw desktop pointer");
+                True(Vec2.Distance(worldPointer, characterPointer) > 1.0,
+                    sizes[i] + " character pointer remains separately size-adjusted");
+
+                DesktopFoodManager manager = new DesktopFoodManager(9300 + i);
+                True(manager.TryAddDangleFruit(cursor),
+                    sizes[i] + " test food can be created at cursor position");
+                True(manager.TryBeginDrag(cursor),
+                    sizes[i] + " test food can enter mouse drag");
+                manager.MoveDraggedFood(worldPointer);
+                Near(0.0, Vec2.Distance(cursor,
+                    manager.DraggedFood.Chunk.Position), 0.000001,
+                    sizes[i] + " dragged food stays under the real cursor");
+                manager.EndDrag(Vec2.Zero);
+            }
+        }
+
         private static void FoodFallbackRendersWithoutAtlas()
         {
             using (Bitmap bitmap = new Bitmap(260, 130,
@@ -1265,6 +1403,23 @@ namespace RainWorldDesktopPet.Tests
             int count = 0;
             while (step.ConsumeStep()) count++;
             Equal(4, count, "0.1 seconds must contain four 40 Hz ticks");
+        }
+
+        private static void ResumeTimingResetDiscardsSuspendedInterval()
+        {
+            FixedTimeStep step = new FixedTimeStep(
+                SimulationConstants.LogicStepSeconds);
+            step.AddElapsed(60.0 * 60.0);
+            step.Reset();
+            Near(0.0, step.AccumulatorSeconds, 0.0000001,
+                "resume must discard the hour spent asleep");
+            True(!step.ConsumeStep(),
+                "no catch-up simulation tick may survive the resume reset");
+            step.AddElapsed(SimulationConstants.LogicStepSeconds);
+            True(step.ConsumeStep(),
+                "normal 40 Hz simulation must continue immediately after resume");
+            True(!step.ConsumeStep(),
+                "resume must not introduce an extra simulation tick");
         }
 
         private static void DesktopWorldTransformScalesTravelUniformly()
@@ -1775,6 +1930,115 @@ namespace RainWorldDesktopPet.Tests
                 "a click outside every Slugcat must reach the underlying application");
         }
 
+        private static void PowerTransitionEventsUseRecoveryPath()
+        {
+            True(LayeredOverlayWindow.IsSuspendPowerEvent(
+                    NativeMethods.PBT_APMSUSPEND),
+                "PBT_APMSUSPEND must stop the renderer before sleep");
+            True(LayeredOverlayWindow.IsResumePowerEvent(
+                    NativeMethods.PBT_APMRESUMEAUTOMATIC),
+                "automatic resume must reset rendering state");
+            True(LayeredOverlayWindow.IsResumePowerEvent(
+                    NativeMethods.PBT_APMRESUMESUSPEND),
+                "interactive resume must reset rendering state");
+            True(LayeredOverlayWindow.IsResumePowerEvent(
+                    NativeMethods.PBT_APMRESUMECRITICAL),
+                "critical resume must reset rendering state");
+            True(!LayeredOverlayWindow.IsResumePowerEvent(0x000A),
+                "a battery-status change must not rebuild composition surfaces");
+        }
+
+        private static void InteractivePowerPolicyDisablesThrottles()
+        {
+            NativeMethods.ProcessPowerThrottlingState state =
+                NativeMethods.CreateInteractivePowerThrottlingState();
+            True(state.Version ==
+                    NativeMethods.PROCESS_POWER_THROTTLING_CURRENT_VERSION,
+                "power throttling state must use the current structure version");
+            uint expectedMask =
+                NativeMethods.PROCESS_POWER_THROTTLING_EXECUTION_SPEED |
+                NativeMethods.PROCESS_POWER_THROTTLING_IGNORE_TIMER_RESOLUTION;
+            True(state.ControlMask == expectedMask,
+                "the app must explicitly control EcoQoS and timer-resolution throttling");
+            True(state.StateMask == 0,
+                "clearing StateMask must disable both selected throttling mechanisms");
+        }
+
+        private static void ResumeRecoveryGuardsInvalidInputs()
+        {
+            const long frequency = 1000;
+            True(LayeredOverlayWindow.ShouldProcessPowerResume(
+                    long.MinValue, 10000, frequency),
+                "the first resume event must always run recovery");
+            True(!LayeredOverlayWindow.ShouldProcessPowerResume(
+                    10000, 10001, frequency),
+                "automatic and interactive resume events must coalesce");
+            True(LayeredOverlayWindow.ShouldProcessPowerResume(
+                    10000, 16000, frequency),
+                "a later resume transition must not remain suppressed");
+
+            Near(60.0, LayeredOverlayWindow.NormalizeRefreshRate(0.0), 0.0,
+                "a missing refresh rate must recover to 60 Hz");
+            Near(60.0, LayeredOverlayWindow.NormalizeRefreshRate(10.0), 0.0,
+                "a transitional low refresh rate must not throttle rendering");
+            Near(60.0, LayeredOverlayWindow.NormalizeRefreshRate(double.NaN), 0.0,
+                "an invalid refresh rate must not reach the timer interval");
+            Near(144.0, LayeredOverlayWindow.NormalizeRefreshRate(144.0), 0.0,
+                "a valid high-refresh monitor must preserve its cadence");
+        }
+
+        private static void OffscreenRenderContentIsClipped()
+        {
+            Rectangle desktop = new Rectangle(-120, 0, 3000, 1800);
+            RectangleF visible;
+            True(LayeredOverlayWindow.TryClipVisibleContent(
+                    new RectangleF(-10000.0f, -5000.0f, 20000.0f, 10000.0f),
+                    desktop, out visible),
+                "an oversized render span must retain its visible portion");
+            Near(desktop.Left, visible.Left, 0.0, "clipped render left");
+            Near(desktop.Top, visible.Top, 0.0, "clipped render top");
+            Near(desktop.Right, visible.Right, 0.0, "clipped render right");
+            Near(desktop.Bottom, visible.Bottom, 0.0, "clipped render bottom");
+
+            True(!LayeredOverlayWindow.TryClipVisibleContent(
+                    new RectangleF(20000.0f, 20000.0f, 100.0f, 100.0f),
+                    desktop, out visible),
+                "fully offscreen content must not allocate a distant surface");
+            True(!LayeredOverlayWindow.TryClipVisibleContent(
+                    new RectangleF(float.NaN, 0.0f, 20.0f, 20.0f),
+                    desktop, out visible),
+                "non-finite physics coordinates must not reach DirectComposition");
+        }
+
+        private static void WorldFoodMouseHitCirclesIgnoreSlugcatVisualSize()
+        {
+            Vec2 foodPosition = new Vec2(180.0, 92.0);
+            double foodReach = 13.0;
+            Vec2 expectedCenter = DesktopWorldTransform.ToDesktop(foodPosition);
+            double expectedRadius = DesktopWorldTransform.ToDesktopLength(foodReach);
+
+            Vec2 actualCenter = LayeredOverlayWindow.ResolveWorldFoodHitCenter(
+                foodPosition);
+            double actualRadius = LayeredOverlayWindow.ResolveWorldFoodHitRadius(
+                foodReach);
+            Near(0.0, Vec2.Distance(expectedCenter, actualCenter), 0.000001,
+                "world food mouse hit center matches the rendered desktop position");
+            Near(expectedRadius, actualRadius, 0.000001,
+                "world food mouse hit radius matches the rendered desktop size");
+
+            Vec2 characterCenter = new Vec2(70.0, 55.0);
+            Vec2 smallCharacterMapped = DesktopWorldTransform.ToDesktop(
+                characterCenter + (foodPosition - characterCenter) *
+                    SlugcatSizeSettings.SmallMultiplier);
+            Vec2 normalCharacterMapped = DesktopWorldTransform.ToDesktop(
+                characterCenter + (foodPosition - characterCenter) *
+                    SlugcatSizeSettings.NormalMultiplier);
+            True(Vec2.Distance(actualCenter, smallCharacterMapped) > 1.0,
+                "Small Slugcat character scaling must not move the world-food hit circle");
+            True(Vec2.Distance(actualCenter, normalCharacterMapped) > 1.0,
+                "Normal Slugcat character scaling must not move the world-food hit circle");
+        }
+
         private static void MouseHookHitSnapshotsPreserveInputRules()
         {
             object lowerSlugcat = new object();
@@ -1918,6 +2182,96 @@ namespace RainWorldDesktopPet.Tests
             {
                 if (Directory.Exists(root)) Directory.Delete(root, true);
             }
+        }
+
+        private static void DmsAuthoredColorIsPreservedUntilCustomized()
+        {
+            DmsSkinDefinition skin = new DmsSkinDefinition();
+            Color profileColor = Color.FromArgb(255, 74, 132, 201);
+            Equal(profileColor.ToArgb(), skin.ResolveTint("BodyA", "White", profileColor,
+                false).ToArgb(), "a monochrome DMS sheet inherits the Slugcat colour");
+            Equal(profileColor.ToArgb(), skin.ResolveTint("BodyA", "White", profileColor,
+                true).ToArgb(), "a monochrome DMS part remains tintable");
+
+            using (RainWorldAtlas authoredAtlas = new RainWorldAtlas("authored.png",
+                new Bitmap(2, 1), new Dictionary<string, AtlasElement>
+                {
+                    { "BodyA", new AtlasElement { Name = "BodyA", Frame = new Rectangle(0, 0, 2, 1) } }
+                }))
+            {
+                authoredAtlas.Image.SetPixel(0, 0, Color.White);
+                authoredAtlas.Image.SetPixel(1, 0, Color.FromArgb(255, 220, 45, 60));
+                AtlasSprite authoredSprite = new AtlasSprite
+                {
+                    Atlas = authoredAtlas,
+                    Element = authoredAtlas.Elements["BodyA"]
+                };
+                Equal(Color.White.ToArgb(), skin.ResolveTint(authoredSprite, "BodyA", "White",
+                    profileColor, true).ToArgb(),
+                    "an authored DMS palette wins over an explicit colour");
+
+                Color authoredTailBaseColor = Color.FromArgb(255, 191, 68, 92);
+                Equal(Color.White.ToArgb(), skin.ResolveTailTint(authoredSprite, authoredTailBaseColor, true).ToArgb(),
+                    "an authored DMS tail palette wins over an explicit colour");
+            }
+
+            Color metadataColor = Color.FromArgb(255, 42, 205, 110);
+            skin.DefaultColors["BODY"] = metadataColor;
+            Equal(metadataColor.ToArgb(), skin.ResolveTint("BodyA", "White", profileColor,
+                false).ToArgb(), "DMS metadata colour remains the default for greyscale sheets");
+            Equal(metadataColor.ToArgb(), skin.ResolveTint("BodyA", "White", profileColor,
+                true).ToArgb(), "DMS metadata colour wins over an explicit colour");
+
+            Color customColor = Color.FromArgb(255, 224, 95, 75);
+            skin.DefaultColors["BODY"] = Color.White;
+            Equal(customColor.ToArgb(), skin.ResolveTint("BodyA", "White", customColor,
+                true).ToArgb(), "a white DMS metadata mask inherits an explicit colour");
+            Equal(profileColor.ToArgb(), skin.ResolveTint("BodyA", "White", profileColor,
+                false).ToArgb(), "a white DMS metadata mask inherits the Slugcat colour");
+
+            using (Bitmap monochrome = new Bitmap(2, 1))
+            using (Bitmap authored = new Bitmap(2, 1))
+            {
+                monochrome.SetPixel(0, 0, Color.White);
+                monochrome.SetPixel(1, 0, Color.FromArgb(255, 80, 80, 80));
+                authored.SetPixel(0, 0, Color.White);
+                authored.SetPixel(1, 0, Color.FromArgb(255, 220, 45, 60));
+                True(!DmsSkinDefinition.HasAuthoredColor(monochrome,
+                    new Rectangle(0, 0, 2, 1)),
+                    "neutral DMS art inherits the Slugcat colour");
+                True(DmsSkinDefinition.HasAuthoredColor(authored,
+                    new Rectangle(0, 0, 2, 1)),
+                    "coloured DMS art keeps its authored palette");
+            }
+
+            Color tailBaseColor = Color.FromArgb(255, 191, 68, 92);
+            Equal(tailBaseColor.ToArgb(), skin.ResolveTailTint(null, tailBaseColor, false).ToArgb(),
+                "a DMS tail follows the selected Slugcat colour by default");
+            Color tailMetadataColor = Color.FromArgb(255, 201, 171, 43);
+            skin.DefaultTail.Color = tailMetadataColor;
+            Equal(tailMetadataColor.ToArgb(), skin.ResolveTailTint(null, tailBaseColor, false).ToArgb(),
+                "DMS tail metadata remains the default when provided");
+            Equal(tailMetadataColor.ToArgb(), skin.ResolveTailTint(null, tailBaseColor, true).ToArgb(),
+                "DMS tail metadata wins over an explicit colour");
+            skin.DefaultTail.Color = Color.White;
+            Equal(tailBaseColor.ToArgb(), skin.ResolveTailTint(null, tailBaseColor, false).ToArgb(),
+                "a white DMS tail metadata mask inherits the Slugcat colour");
+        }
+
+        private static void V5PresetSkinIdParses()
+        {
+            string part;
+            string id;
+            int colorStart;
+            True(SkinEditorWindow.TrySplitPresetPart(
+                "HEAD=homeobox.raincoatriv,FF91CCF0,0", out part, out id, out colorStart),
+                "V5 part field must parse");
+            True(string.Equals("HEAD", part, StringComparison.Ordinal), "V5 part name");
+            True(string.Equals("homeobox.raincoatriv", id, StringComparison.Ordinal),
+                "V5 DMS skin ID must exclude its ARGB and flag");
+            True(string.Equals("FF91CCF0,0",
+                "HEAD=homeobox.raincoatriv,FF91CCF0,0".Substring(colorStart + 1), StringComparison.Ordinal),
+                "V5 colour data begins after the DMS skin ID");
         }
 
         private static void DmsSpritesBesideExecutableAreDiscovered()
@@ -3530,6 +3884,7 @@ namespace RainWorldDesktopPet.Tests
             slugcat.AddEffect(smoke);
             SlugcatPose pose = new SlugcatPose();
             pose.CharacterRenderScale = 2.0;
+            pose.CharacterOrigin = new Vec2(40.0, 30.0);
             pose.TimeStacker = 1.0;
             DirectCompositionHost.GpuSmokeEffect[] commands =
                 new DirectCompositionHost.GpuSmokeEffect[4];
@@ -3539,8 +3894,10 @@ namespace RainWorldDesktopPet.Tests
                     new RenderSpace(new Rectangle(50, 20, 400, 300)), commands,
                     ref count);
             Equal(1, count, "smoke command count");
-            Near(150.0, commands[0].CenterX, 0.0001, "smoke local X");
-            Near(140.0, commands[0].CenterY, 0.0001, "smoke local Y");
+            Near(100.0 * SimulationConstants.DesktopWorldScale - 50.0,
+                commands[0].CenterX, 0.0001, "smoke world-anchored X");
+            Near(80.0 * SimulationConstants.DesktopWorldScale - 20.0,
+                commands[0].CenterY, 0.0001, "smoke world-anchored Y");
             True(commands[0].BackSize > commands[0].FrontSize,
                 "back smoke quad should be larger than front smoke quad");
             True(commands[0].BackAlpha > commands[0].FrontAlpha,
@@ -3853,6 +4210,314 @@ namespace RainWorldDesktopPet.Tests
             Near(11.0, point.Y, 0.000001, "global scaled y");
             Near(2.20, SimulationConstants.CharacterRenderScale, 0.000001,
                 "configured desktop world scale");
+
+            Near((1080.0 / 768.0) / 2.2,
+                SlugcatSizeSettings.Multiplier(SlugcatSize.Small), 0.000001,
+                "small setting matches original Full HD rendering");
+            Near(((1080.0 / 768.0) + 2.2) * 0.5 / 2.2,
+                SlugcatSizeSettings.Multiplier(SlugcatSize.Normal), 0.000001,
+                "normal setting is the midpoint of small and large");
+            Near(1.0, SlugcatSizeSettings.Multiplier(SlugcatSize.Large),
+                0.000001, "large setting preserves the previous normal size");
+            Near(1.40625, SimulationConstants.CharacterRenderScale *
+                SlugcatSizeSettings.Multiplier(SlugcatSize.Small), 0.000001,
+                "small setting resolves to the original Full HD scale");
+            Near(1.803125, SimulationConstants.CharacterRenderScale *
+                SlugcatSizeSettings.Multiplier(SlugcatSize.Normal), 0.000001,
+                "normal setting resolves to the exact midpoint scale");
+
+            Vec2 normalOrigin = pose.ToRenderedWorld(pose.CharacterOrigin);
+            pose.CharacterRenderScale = SimulationConstants.CharacterRenderScale *
+                SlugcatSizeSettings.Multiplier(SlugcatSize.Small);
+            Vec2 smallOrigin = pose.ToRenderedWorld(pose.CharacterOrigin);
+            Vec2 smallPoint = pose.ToRenderedWorld(new Vec2(20.0, 5.0));
+            Near(normalOrigin.X, smallOrigin.X, 0.000001,
+                "small scale keeps the Slugcat anchor x fixed");
+            Near(normalOrigin.Y, smallOrigin.Y, 0.000001,
+                "small scale keeps the Slugcat anchor y fixed");
+            Near(36.0625, smallPoint.X, 0.000001,
+                "small scale uniformly contracts the x offset");
+            Near(14.96875, smallPoint.Y, 0.000001,
+                "small scale uniformly contracts the y offset");
+
+            pose.CharacterRenderScale = SimulationConstants.CharacterRenderScale *
+                SlugcatSizeSettings.Multiplier(SlugcatSize.Large);
+            Vec2 largeOrigin = pose.ToRenderedWorld(pose.CharacterOrigin);
+            Vec2 largePoint = pose.ToRenderedWorld(new Vec2(20.0, 5.0));
+            Near(normalOrigin.X, largeOrigin.X, 0.000001,
+                "large scale keeps the Slugcat anchor x fixed");
+            Near(normalOrigin.Y, largeOrigin.Y, 0.000001,
+                "large scale keeps the Slugcat anchor y fixed");
+            Near(44.0, largePoint.X, 0.000001,
+                "large scale uniformly expands the x offset");
+            Near(11.0, largePoint.Y, 0.000001,
+                "large scale uniformly expands the y offset");
+
+            BodyChunk speedSample = new BodyChunk(0, Vec2.Zero, 1.0, 1.0);
+            speedSample.Velocity = new Vec2(10.0, 0.0);
+            speedSample.Integrate(0.0, 1.0,
+                SlugcatSizeSettings.Multiplier(SlugcatSize.Normal));
+            Near(10.0 * (1.803125 / 2.2), speedSample.Position.X, 0.000001,
+                "normal size applies the same movement-speed compensation");
+        }
+
+        private static void SizeScalingChangesPhysicalCollisionBoundsWithoutFloating()
+        {
+            MonitorInfo monitor = new MonitorInfo("SIZE-MONITOR",
+                new Rectangle(0, 0, 1920, 1080),
+                new Rectangle(0, 0, 1920, 1040), true);
+            DesktopCollisionWorld world = CreateSyntheticWorld(
+                new[] { monitor }, new DesktopWindowSnapshot[0]);
+            double floor = DesktopWorldTransform.ToSimulationLength(monitor.FloorY);
+            Slugcat slugcat = new Slugcat(new Vec2(500.0,
+                floor - SimulationConstants.HipsChunkRadius));
+
+            for (int tick = 0; tick < 20; tick++)
+                slugcat.Step(new VirtualInput(), world, Vec2.Zero, Vec2.Zero);
+            True(slugcat.BodyChunks[1].ContactFloor,
+                "large hips start supported by the taskbar edge");
+
+            double connectionBefore = Vec2.Distance(slugcat.BodyChunks[0].Position,
+                slugcat.BodyChunks[1].Position);
+            Vec2 chestBeforeResize = slugcat.BodyChunks[0].Position;
+            Vec2 hipsBeforeResize = slugcat.BodyChunks[1].Position;
+            Vec2 chestLastBeforeResize = slugcat.BodyChunks[0].LastPosition;
+            Vec2 hipsLastBeforeResize = slugcat.BodyChunks[1].LastPosition;
+            double scale = SlugcatSizeSettings.Multiplier(SlugcatSize.Small);
+            slugcat.SetSizeScale(scale);
+            Near(SimulationConstants.MainChunkRadius * scale,
+                slugcat.BodyChunks[0].Radius, 0.000001,
+                "small size changes the chest collision radius");
+            Near(SimulationConstants.HipsChunkRadius * scale,
+                slugcat.BodyChunks[1].Radius, 0.000001,
+                "small size changes the hips collision radius");
+            Near(0.0, Vec2.Distance(chestBeforeResize,
+                slugcat.BodyChunks[0].Position), 0.000001,
+                "size selection does not reposition the chest");
+            Near(0.0, Vec2.Distance(hipsBeforeResize,
+                slugcat.BodyChunks[1].Position), 0.000001,
+                "size selection does not reposition the hips");
+            Near(0.0, Vec2.Distance(chestLastBeforeResize,
+                slugcat.BodyChunks[0].LastPosition), 0.000001,
+                "size selection does not rewrite chest interpolation history");
+            Near(0.0, Vec2.Distance(hipsLastBeforeResize,
+                slugcat.BodyChunks[1].LastPosition), 0.000001,
+                "size selection does not rewrite hips interpolation history");
+            Near(connectionBefore, Vec2.Distance(slugcat.BodyChunks[0].Position,
+                slugcat.BodyChunks[1].Position), 0.000001,
+                "resizing preserves the connected body layout");
+
+            double minimumBottom = double.MaxValue;
+            double maximumBottom = double.MinValue;
+            for (int tick = 0; tick < 120; tick++)
+            {
+                slugcat.Step(new VirtualInput(1, 0, false, false), world,
+                    Vec2.Zero, Vec2.Zero);
+                if (tick < 20) continue;
+                double bottom = slugcat.BodyChunks[1].Position.Y +
+                    slugcat.BodyChunks[1].Radius;
+                minimumBottom = Math.Min(minimumBottom, bottom);
+                maximumBottom = Math.Max(maximumBottom, bottom);
+            }
+            True(maximumBottom - minimumBottom < 0.05,
+                "small grounded movement does not vertically oscillate");
+            True(floor - maximumBottom >= -0.05 && floor - maximumBottom < 1.0,
+                "small moving hips retain only the original connection-solver contact gap");
+        }
+
+        private static void ScaledRenderingStaysAnchoredToPhysicalGroundWhileMoving()
+        {
+            SizeRenderAnchorCase(1920, 1080, SlugcatSize.Normal);
+            SizeRenderAnchorCase(1920, 1080, SlugcatSize.Small);
+            SizeRenderAnchorCase(2880, 1800, SlugcatSize.Normal);
+            SizeRenderAnchorCase(2880, 1800, SlugcatSize.Small);
+        }
+
+        private static void ProceduralSizeMotionMatchesLarge()
+        {
+            SlugcatSize[] sizes = { SlugcatSize.Large, SlugcatSize.Normal,
+                SlugcatSize.Small };
+            double baselineAverageTilt = 0.0;
+            double baselineMaximumTilt = 0.0;
+            double baselinePoseTilt = 0.0;
+            double baselineAverageWaistBend = 0.0;
+            double baselineMaximumWaistBend = 0.0;
+            double baselineTailRoot = 0.0;
+            double baselineHeadTrail = 0.0;
+            double baselineLegsTrail = 0.0;
+            double baselineChestDrawTrail = 0.0;
+            double baselineHipsDrawTrail = 0.0;
+            int baselineTailTurnTicks = -1;
+            for (int sizeIndex = 0; sizeIndex < sizes.Length; sizeIndex++)
+            {
+                MonitorInfo monitor = new MonitorInfo("DIAG",
+                    new Rectangle(0, 0, 2880, 1800),
+                    new Rectangle(0, 0, 2880, 1760), true);
+                DesktopCollisionWorld world = CreateSyntheticWorld(
+                    new[] { monitor }, new DesktopWindowSnapshot[0]);
+                double floor = DesktopWorldTransform.ToSimulationLength(monitor.FloorY);
+                Slugcat slugcat = new Slugcat(new Vec2(600.0,
+                    floor - SimulationConstants.HipsChunkRadius));
+                SlugcatGraphics graphics = new SlugcatGraphics(slugcat);
+                AttentionSystem attention = new AttentionSystem();
+                for (int tick = 0; tick < 20; tick++)
+                {
+                    slugcat.Step(new VirtualInput(), world, Vec2.Zero, Vec2.Zero);
+                    graphics.Step(attention, world);
+                }
+                slugcat.SetSizeScale(SlugcatSizeSettings.Multiplier(sizes[sizeIndex]));
+                double tiltSum = 0.0;
+                double lagSum = 0.0;
+                double maximumTilt = 0.0;
+                double poseTiltSum = 0.0;
+                double waistBendSum = 0.0;
+                double maximumWaistBend = 0.0;
+                double headTrailSum = 0.0;
+                double legsTrailSum = 0.0;
+                double chestDrawTrailSum = 0.0;
+                double hipsDrawTrailSum = 0.0;
+                int tailTurnTicks = -1;
+                for (int tick = 0; tick < 200; tick++)
+                {
+                    int direction = tick < 100 ? 1 : -1;
+                    slugcat.Step(new VirtualInput(direction, 0, false, false), world,
+                        Vec2.Zero, Vec2.Zero);
+                    graphics.Step(attention, world);
+                    if (tick < 40) continue;
+                    SlugcatPose diagnosticPose = graphics.BuildPose(0.5, attention,
+                        tick, false);
+                    Vec2 axis = (slugcat.BodyChunks[0].Position -
+                        slugcat.BodyChunks[1].Position).Normalized;
+                    double tilt = Math.Abs(axis.X);
+                    tiltSum += tilt;
+                    maximumTilt = Math.Max(maximumTilt, tilt);
+                    lagSum += Vec2.Distance(graphics.Tail.Segments[0].Position,
+                        slugcat.BodyChunks[1].Position);
+                    Vec2 poseAxis = (diagnosticPose.Chest -
+                        diagnosticPose.Hips).Normalized;
+                    poseTiltSum += Math.Abs(poseAxis.X);
+                    Vec2 torsoDown = (diagnosticPose.Hips -
+                        diagnosticPose.Chest).Normalized;
+                    Vec2 hipsDown = (diagnosticPose.Tail[0] -
+                        diagnosticPose.Chest).Normalized;
+                    double waistBend = Math.Acos(MathUtil.Clamp(
+                        Vec2.Dot(torsoDown, hipsDown), -1.0, 1.0));
+                    waistBendSum += waistBend;
+                    maximumWaistBend = Math.Max(maximumWaistBend, waistBend);
+                    headTrailSum += (diagnosticPose.Head.X -
+                        diagnosticPose.ChunkRender[0].X) * direction;
+                    legsTrailSum += (diagnosticPose.Legs.X -
+                        diagnosticPose.ChunkRender[1].X) * direction;
+                    chestDrawTrailSum += (diagnosticPose.Chest.X -
+                        diagnosticPose.ChunkRender[0].X) * direction;
+                    hipsDrawTrailSum += (diagnosticPose.Hips.X -
+                        diagnosticPose.ChunkRender[1].X) * direction;
+                    if (tick >= 100 && tailTurnTicks < 0 &&
+                        graphics.Tail.Segments[graphics.Tail.Segments.Length - 1].Position.X >
+                        slugcat.BodyChunks[1].Position.X)
+                        tailTurnTicks = tick - 100;
+                }
+                double averageTilt = tiltSum / 160.0;
+                double averageTailRoot = lagSum / 160.0;
+                double averagePoseTilt = poseTiltSum / 160.0;
+                double averageWaistBend = waistBendSum / 160.0;
+                double averageHeadTrail = headTrailSum / 160.0;
+                double averageLegsTrail = legsTrailSum / 160.0;
+                double averageChestDrawTrail = chestDrawTrailSum / 160.0;
+                double averageHipsDrawTrail = hipsDrawTrailSum / 160.0;
+                if (sizeIndex == 0)
+                {
+                    baselineAverageTilt = averageTilt;
+                    baselineMaximumTilt = maximumTilt;
+                    baselinePoseTilt = averagePoseTilt;
+                    baselineAverageWaistBend = averageWaistBend;
+                    baselineMaximumWaistBend = maximumWaistBend;
+                    baselineTailRoot = averageTailRoot;
+                    baselineHeadTrail = averageHeadTrail;
+                    baselineLegsTrail = averageLegsTrail;
+                    baselineChestDrawTrail = averageChestDrawTrail;
+                    baselineHipsDrawTrail = averageHipsDrawTrail;
+                    baselineTailTurnTicks = tailTurnTicks;
+                    continue;
+                }
+
+                True(Math.Abs(averageTilt - baselineAverageTilt) < 0.03,
+                    sizes[sizeIndex] + " average standing tilt matches Large");
+                True(Math.Abs(maximumTilt - baselineMaximumTilt) < 0.04,
+                    sizes[sizeIndex] + " maximum standing tilt matches Large");
+                True(Math.Abs(averagePoseTilt - baselinePoseTilt) < 0.035,
+                    sizes[sizeIndex] + " rendered torso tilt matches Large");
+                True(Math.Abs(averageWaistBend - baselineAverageWaistBend) < 0.02,
+                    sizes[sizeIndex] + " average rendered waist bend matches Large");
+                True(Math.Abs(maximumWaistBend - baselineMaximumWaistBend) < 0.02,
+                    sizes[sizeIndex] + " maximum rendered waist bend matches Large");
+                True(Math.Abs(averageTailRoot - baselineTailRoot) < 0.55,
+                    sizes[sizeIndex] + " tail root remains connected to the hips");
+                True(Math.Abs(averageHeadTrail - baselineHeadTrail) < 0.1,
+                    sizes[sizeIndex] + " head follows its host chunk like Large");
+                True(Math.Abs(averageLegsTrail - baselineLegsTrail) < 0.75,
+                    sizes[sizeIndex] + " legs remain within one canonical pixel of Large");
+                True(Math.Abs(averageChestDrawTrail - baselineChestDrawTrail) < 0.15,
+                    sizes[sizeIndex] + " torso draw position follows its chunk like Large");
+                True(Math.Abs(averageHipsDrawTrail - baselineHipsDrawTrail) < 0.01,
+                    sizes[sizeIndex] + " hips draw position follows its chunk like Large");
+                True(Math.Abs(tailTurnTicks - baselineTailTurnTicks) <= 1,
+                    sizes[sizeIndex] + " tail direction-change response matches Large");
+            }
+        }
+
+        private static void SizeRenderAnchorCase(int width, int height,
+            SlugcatSize size)
+        {
+            int workHeight = height - 40;
+            MonitorInfo monitor = new MonitorInfo("SIZE-RENDER-" + width,
+                new Rectangle(0, 0, width, height),
+                new Rectangle(0, 0, width, workHeight), true);
+            DesktopCollisionWorld world = CreateSyntheticWorld(
+                new[] { monitor }, new DesktopWindowSnapshot[0]);
+            double floor = DesktopWorldTransform.ToSimulationLength(monitor.FloorY);
+            Slugcat slugcat = new Slugcat(new Vec2(width * 0.25,
+                floor - SimulationConstants.HipsChunkRadius));
+            SlugcatGraphics graphics = new SlugcatGraphics(slugcat);
+            AttentionSystem attention = new AttentionSystem();
+
+            for (int tick = 0; tick < 20; tick++)
+            {
+                slugcat.Step(new VirtualInput(), world, Vec2.Zero, Vec2.Zero);
+                graphics.Step(attention, world);
+            }
+            double multiplier = SlugcatSizeSettings.Multiplier(size);
+            slugcat.SetSizeScale(multiplier);
+
+            double minimumBottom = double.MaxValue;
+            double maximumBottom = double.MinValue;
+            for (int tick = 0; tick < 160; tick++)
+            {
+                slugcat.Step(new VirtualInput(1, 0, false, false), world,
+                    Vec2.Zero, Vec2.Zero);
+                graphics.Step(attention, world);
+                if (tick < 40) continue;
+
+                SlugcatPose pose = graphics.BuildPose(0.5, attention, tick, false);
+                pose.CharacterRenderScale = SimulationConstants.CharacterRenderScale *
+                    multiplier;
+                Vec2 physicalOrigin = pose.ChunkRender[1];
+                Near(0.0, Vec2.Distance(physicalOrigin, pose.CharacterOrigin),
+                    0.000001, size + " render scale uses the physical hips anchor at " +
+                    width + "x" + height);
+
+                double renderedBottom = pose.ToRenderedWorld(pose.ChunkRender[1]).Y +
+                    SimulationConstants.HipsChunkRadius * pose.CharacterRenderScale;
+                minimumBottom = Math.Min(minimumBottom, renderedBottom);
+                maximumBottom = Math.Max(maximumBottom, renderedBottom);
+            }
+
+            True(maximumBottom - minimumBottom < 0.05,
+                size + " rendered collision bottom does not bob at " + width + "x" + height);
+            True(monitor.FloorY - maximumBottom >= -0.05 &&
+                monitor.FloorY - maximumBottom < 1.5,
+                size + " rendered contact gap stays within the original solver range at " +
+                width + "x" + height);
         }
 
         private static void ExpandedDebugOverlayRenders()

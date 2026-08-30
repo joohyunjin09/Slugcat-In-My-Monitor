@@ -37,6 +37,7 @@ namespace RainWorldDesktopPet.Core
         private readonly WorkshopLog workshopLog;
         private WorkshopCatalog workshopCatalog;
         private DmsSkinCatalog dmsSkins;
+        private SlugcatSize size = SlugcatSize.Large;
         private readonly Dictionary<string, string> dmsPartSelections =
             new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
@@ -133,6 +134,8 @@ namespace RainWorldDesktopPet.Core
         public SlugcatAppearance Appearance { get { return Slugcat.Appearance; } }
         public SlugcatSkin Skin { get { return Graphics.VisualProfile.Skin; } }
         public int OffscreenRecoveryCount { get; private set; }
+        public SlugcatSize Size { get { return size; } }
+        public double VisualSizeMultiplier { get { return SlugcatSizeSettings.Multiplier(size); } }
 
         public bool TryGetAtlasSprite(string name, bool original, out AtlasSprite sprite)
         {
@@ -174,6 +177,7 @@ namespace RainWorldDesktopPet.Core
         }
 
         public Color GetPartColor(string part) { return Graphics.GetPartColor(part); }
+        public bool HasCustomPartColor(string part) { return Graphics.HasCustomPartColor(part); }
         public void SetPartColor(string part, Color color) { Graphics.SetPartColor(part, color); }
         public void ClearPartColors() { Graphics.ClearPartColors(); }
         public WorkshopCatalog WorkshopCatalog { get { return workshopCatalog; } }
@@ -192,6 +196,19 @@ namespace RainWorldDesktopPet.Core
                 DmsSpriteSide.None, out sprite)) return true;
             return atlas != null && atlas.TryGet(element, out sprite);
         }
+
+        public Color GetDmsPartPreviewTint(string part)
+        {
+            Color fallback = GetPartColor(part);
+            DmsSkinDefinition skin = Renderer.GetDmsPart(part);
+            string element = DmsSpriteGroups.PreviewElement(part);
+            AtlasSprite sprite;
+            return skin == null || string.IsNullOrEmpty(element) ||
+                !skin.TryGetSprite(element, CurrentSlugcatId(), DmsSpriteSide.None, out sprite)
+                ? fallback
+                : skin.ResolveTint(sprite, element, CurrentSlugcatId(), fallback,
+                    Graphics.HasCustomPartColor(part));
+        }
         public DmsSkinDefinition ActiveDmsSkin { get { return Renderer.ActiveDmsSkin; } }
 
         public void RecordRenderFrame(double displayRefreshRate)
@@ -205,13 +222,34 @@ namespace RainWorldDesktopPet.Core
             renderMetricClock.Restart();
         }
 
+        public void ResetFrameTiming()
+        {
+            // Keep the clock monotonic for AI and mouse-attention timestamps,
+            // but discard the long suspended interval before the next update.
+            lastTime = clock.Elapsed.TotalSeconds;
+            fixedTimeStep.Reset();
+            surfaceRefreshAccumulator = 0.0;
+            simulationStepsLastFrame = 0;
+            renderFramesInSample = 0;
+            renderFramesPerSecond = 0.0;
+            renderMetricClock.Restart();
+        }
+
         public void Advance(IntPtr overlayHandle)
         {
             double now = clock.Elapsed.TotalSeconds;
             double elapsed = lastTime <= 0.0 ? SimulationConstants.LogicStepSeconds : now - lastTime;
             lastTime = now;
             mouse.Sample(elapsed);
-            Foods.MoveDraggedFood(mouse.Position);
+            Vec2 worldPointer;
+            Vec2 visualPointer;
+            ResolvePointerSpaces(mouse.Position, Slugcat.Center,
+                VisualSizeMultiplier, out worldPointer, out visualPointer);
+            Vec2 visualPointerVelocity = mouse.Velocity / VisualSizeMultiplier;
+            // Food is a desktop/world object while it is being positioned.
+            // Never feed it the character-local pointer that is scaled around
+            // Slugcat.Center for Small/Normal visual sizes.
+            Foods.MoveDraggedFood(worldPointer);
             if (Paused)
             {
                 mouse.ConsumeClick();
@@ -239,11 +277,11 @@ namespace RainWorldDesktopPet.Core
                     Slugcat.State.StunCounter > 0)
                 {
                     mouse.ConsumeClick();
-                    mouseAttention.Suppress(now, mouse.Position, Graphics.Head.Position);
+                    mouseAttention.Suppress(now, visualPointer, Graphics.Head.Position);
                 }
                 else
                 {
-                    mouseAttention.Update(now, mouse.Position, mouse.ConsumeClick(), Graphics.Head.Position);
+                    mouseAttention.Update(now, visualPointer, mouse.ConsumeClick(), Graphics.Head.Position);
                 }
                 VirtualInput input = Slugcat.IsGrabbed
                     ? VirtualInput.Neutral
@@ -251,11 +289,11 @@ namespace RainWorldDesktopPet.Core
                 VirtualInput foodInput;
                 if (!Slugcat.IsGrabbed && Foods.TryProduceInput(Slugcat, Graphics,
                     AI.Attention, out foodInput)) input = foodInput;
-                Slugcat.Step(input, World, mouse.Position, mouse.Velocity);
+                Slugcat.Step(input, World, visualPointer, visualPointerVelocity);
                 RecoverFromDesktopEscape();
                 if (!Slugcat.State.Conscious || Slugcat.State.Dead ||
                     Slugcat.State.StunCounter > 0)
-                    mouseAttention.Suppress(now, mouse.Position, Graphics.Head.Position);
+                    mouseAttention.Suppress(now, visualPointer, Graphics.Head.Position);
                 if (DebugEnabled)
                     parityDiagnostics.ObserveSurfaceState(Slugcat, World, input, simulationTick);
                 Graphics.Step(AI.Attention, AI.OriginalAttentionTarget,
@@ -299,6 +337,9 @@ namespace RainWorldDesktopPet.Core
         {
             SlugcatPose pose = Graphics.BuildPose(Interpolation, AI.Attention,
                 simulationTick, DebugEnabled);
+            pose.CharacterRenderScale = SimulationConstants.CharacterRenderScale *
+                VisualSizeMultiplier;
+            pose.UpdateGraphicsBounds();
             pose.LogicTicksPerSecond = SimulationConstants.LogicTicksPerSecond;
             pose.LogicStepSeconds = fixedTimeStep.StepSeconds;
             pose.AccumulatorSeconds = fixedTimeStep.AccumulatorSeconds;
@@ -361,16 +402,24 @@ namespace RainWorldDesktopPet.Core
 
         public bool HitTest(Vec2 screenPoint)
         {
-            Vec2 simulationPoint = DesktopWorldTransform.ToSimulation(screenPoint);
-            return Foods.HitTest(simulationPoint) ||
+            Vec2 worldPoint;
+            Vec2 simulationPoint;
+            ResolvePointerSpaces(DesktopWorldTransform.ToSimulation(screenPoint),
+                Slugcat.Center, VisualSizeMultiplier, out worldPoint,
+                out simulationPoint);
+            return Foods.HitTest(worldPoint) ||
                 Slugcat.HitTest(simulationPoint) ||
                 Vec2.Distance(simulationPoint, Graphics.Head.Position) < 17.0;
         }
 
         public bool BeginGrab(Vec2 screenPoint)
         {
-            Vec2 simulationPoint = DesktopWorldTransform.ToSimulation(screenPoint);
-            if (Foods.TryBeginDrag(simulationPoint)) return true;
+            Vec2 worldPoint;
+            Vec2 simulationPoint;
+            ResolvePointerSpaces(DesktopWorldTransform.ToSimulation(screenPoint),
+                Slugcat.Center, VisualSizeMultiplier, out worldPoint,
+                out simulationPoint);
+            if (Foods.TryBeginDrag(worldPoint)) return true;
             if (Slugcat.Grab(simulationPoint)) return true;
             if (Vec2.Distance(simulationPoint, Graphics.Head.Position) < 17.0)
             {
@@ -381,9 +430,58 @@ namespace RainWorldDesktopPet.Core
 
         public void EndGrab()
         {
-            if (Foods.EndDrag(Vec2.ClampMagnitude(mouse.Velocity /
-                SimulationConstants.LogicTicksPerSecond, 25.0))) return;
-            Slugcat.Release(mouse.Velocity);
+            // Food drag velocity is already in unscaled desktop-world simulation
+            // units. Character dragging alone needs the inverse visual-size scale.
+            if (Foods.IsDragging)
+            {
+                Foods.EndDrag(Vec2.ClampMagnitude(mouse.Velocity /
+                    SimulationConstants.LogicTicksPerSecond, 25.0));
+                return;
+            }
+            Slugcat.Release(mouse.Velocity / VisualSizeMultiplier);
+        }
+
+        public void SetSize(SlugcatSize value)
+        {
+            // Reject invalid values at the setting boundary so every renderer,
+            // hit-test, and pointer conversion keeps a finite positive scale.
+            SlugcatSizeSettings.Multiplier(value);
+            size = value;
+            Slugcat.SetSizeScale(VisualSizeMultiplier);
+        }
+
+        public Vec2 ToRenderedScreen(Vec2 simulationPoint)
+        {
+            return DesktopWorldTransform.ToDesktop(Slugcat.Center +
+                (simulationPoint - Slugcat.Center) * VisualSizeMultiplier);
+        }
+
+        public double ToRenderedScreenLength(double simulationLength)
+        {
+            return DesktopWorldTransform.ToDesktopLength(simulationLength *
+                VisualSizeMultiplier);
+        }
+
+        private Vec2 PointerToSimulation(Vec2 normalSimulationPoint)
+        {
+            Vec2 worldPointer;
+            Vec2 characterPointer;
+            ResolvePointerSpaces(normalSimulationPoint, Slugcat.Center,
+                VisualSizeMultiplier, out worldPointer, out characterPointer);
+            return characterPointer;
+        }
+
+        internal static void ResolvePointerSpaces(Vec2 normalSimulationPoint,
+            Vec2 characterCenter, double visualSizeMultiplier,
+            out Vec2 worldPointer, out Vec2 characterPointer)
+        {
+            if (visualSizeMultiplier <= 0.0 ||
+                double.IsNaN(visualSizeMultiplier) ||
+                double.IsInfinity(visualSizeMultiplier))
+                throw new ArgumentOutOfRangeException("visualSizeMultiplier");
+            worldPointer = normalSimulationPoint;
+            characterPointer = characterCenter +
+                (normalSimulationPoint - characterCenter) / visualSizeMultiplier;
         }
 
         private void RecoverFromDesktopEscape()

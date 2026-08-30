@@ -333,6 +333,16 @@ namespace RainWorldDesktopPet.Core
         }
         public DesktopFood Target { get { return target; } }
         public DesktopFood DraggedFood { get { return draggedFood; } }
+        internal DesktopFood HeldFoodForRender
+        {
+            get
+            {
+                return target != null && target.IsActive &&
+                    (target.State == DesktopFoodState.Held ||
+                        target.State == DesktopFoodState.Biting)
+                    ? target : null;
+            }
+        }
         public bool IsDragging { get { return draggedFood != null; } }
         public FoodInteractionState InteractionState { get; private set; }
         public int FoodPointsEaten { get; private set; }

@@ -10,6 +10,27 @@ namespace RainWorldDesktopPet.Graphics
 {
     public sealed class SlugcatPose
     {
+        public bool HasCustomDmsPartColor(string part)
+        {
+            if (string.IsNullOrWhiteSpace(part)) return false;
+            switch (part.ToUpperInvariant())
+            {
+                case "BODY": return HasCustomBodyColor;
+                case "FACE": return HasCustomFaceColor;
+                case "HEAD": return HasCustomHeadColor;
+                case "ARMS": return HasCustomArmsColor;
+                case "HIPS": return HasCustomHipsColor;
+                case "LEGS": return HasCustomLegsColor;
+                case "TAIL": return HasCustomTailColor;
+                case "FACESCAR": return HasCustomFaceScarColor;
+                case "GILLS": return HasCustomGillsColor;
+                case "TAILSPECKLES": return HasCustomTailSpecklesColor;
+                case "ASCENSION": return HasCustomAscensionColor;
+                case "PIXEL": return HasCustomPixelColor;
+                default: return false;
+            }
+        }
+
         public long SimulationTick;
         public double TimeStacker;
         public double LogicTicksPerSecond;
@@ -140,6 +161,18 @@ namespace RainWorldDesktopPet.Graphics
         public Color VisualHipsColor = Color.White;
         public Color VisualLegsColor = Color.White;
         public Color VisualTailColor = Color.White;
+        public bool HasCustomBodyColor;
+        public bool HasCustomFaceColor;
+        public bool HasCustomHeadColor;
+        public bool HasCustomArmsColor;
+        public bool HasCustomHipsColor;
+        public bool HasCustomLegsColor;
+        public bool HasCustomTailColor;
+        public bool HasCustomFaceScarColor;
+        public bool HasCustomGillsColor;
+        public bool HasCustomTailSpecklesColor;
+        public bool HasCustomAscensionColor;
+        public bool HasCustomPixelColor;
         public string BodyElement = "BodyA";
         public string HipsElement = "HipsA";
         public double VisualBodyScale = 1.0;
@@ -208,7 +241,41 @@ namespace RainWorldDesktopPet.Graphics
 
         public Vec2 ToRenderedWorld(Vec2 point)
         {
+            // Keep the interpolated physical hips chunk fixed while changing
+            // size. The origin deliberately excludes local animation offsets
+            // and makes the scaled hips collision bottom remain grounded.
+            return DesktopWorldTransform.ToDesktop(CharacterOrigin) +
+                (point - CharacterOrigin) * CharacterRenderScale;
+        }
+
+        // Character-local graphics are scaled around CharacterOrigin. World objects
+        // must keep their desktop position instead of inheriting later Slugcat motion.
+        public Vec2 ToRenderedStaticWorld(Vec2 point)
+        {
             return DesktopWorldTransform.ToDesktop(point);
+        }
+
+        // Convert a world-space point into the coordinate space consumed by the
+        // current character transform. After CharacterRenderScale is applied, the
+        // point lands at DesktopWorldTransform.ToDesktop(point) regardless of size.
+        public Vec2 ToCharacterRenderSpaceForWorld(Vec2 point)
+        {
+            if (CharacterRenderScale <= 0.0 ||
+                double.IsNaN(CharacterRenderScale) ||
+                double.IsInfinity(CharacterRenderScale))
+                throw new InvalidOperationException(
+                    "CharacterRenderScale must be finite and positive.");
+            return CharacterOrigin + (point - CharacterOrigin) *
+                (SimulationConstants.DesktopWorldScale / CharacterRenderScale);
+        }
+
+        public Vec2 CharacterRenderOffset
+        {
+            get
+            {
+                return DesktopWorldTransform.ToDesktop(CharacterOrigin) -
+                    CharacterOrigin * CharacterRenderScale;
+            }
         }
 
         private static void IncludeRendered(Vec2[] points, SlugcatPose pose,

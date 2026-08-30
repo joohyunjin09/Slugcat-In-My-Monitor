@@ -17,6 +17,7 @@ namespace RainWorldDesktopPet.Desktop
 
     public sealed class WindowEnumerator
     {
+        private const uint WindowTextTimeoutMilliseconds = 50;
         private readonly uint currentProcessId = (uint)Process.GetCurrentProcess().Id;
 
         public bool LastEnumerationSucceeded { get; private set; }
@@ -112,7 +113,11 @@ namespace RainWorldDesktopPet.Desktop
         private static string ReadWindowText(IntPtr handle)
         {
             StringBuilder builder = new StringBuilder(512);
-            NativeMethods.GetWindowText(handle, builder, builder.Capacity);
+            UIntPtr result;
+            NativeMethods.SendMessageTimeout(handle, NativeMethods.WM_GETTEXT,
+                new UIntPtr((uint)builder.Capacity), builder,
+                NativeMethods.SMTO_BLOCK | NativeMethods.SMTO_ABORTIFHUNG,
+                WindowTextTimeoutMilliseconds, out result);
             return builder.ToString();
         }
     }
