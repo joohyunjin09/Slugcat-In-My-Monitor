@@ -409,6 +409,7 @@ namespace RainWorldDesktopPet.Creature
                 chunk.ContactLeft = false;
                 chunk.ContactRight = false;
                 chunk.SupportingSurfaceId = 0;
+                chunk.SupportingSurfaceTop = 0.0;
                 chunk.WallSurfaceId = 0;
                 chunk.PreviousContactFloor = false;
                 chunk.PreviousContactLeft = false;

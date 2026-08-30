@@ -677,6 +677,20 @@ namespace RainWorldDesktopPet.Graphics
                 pose.DrawLast[i] = drawPositions[i, 1];
                 pose.DrawCurrent[i] = drawPositions[i, 0];
             }
+            // Terrain resolution occurs after the physics tick has recorded the
+            // previous position. Interpolating that pre-resolution Y would make
+            // the hips hover for part of each desktop frame, especially after a
+            // character-scale change. Player grounding belongs to either body
+            // chunk, so transfer the resolved supporting surface to the hips
+            // render anchor without changing the simulated chunks themselves.
+            BodyChunk supportingChunk = slugcat.BodyChunks[1].ContactFloor
+                ? slugcat.BodyChunks[1]
+                : (slugcat.BodyChunks[0].ContactFloor ? slugcat.BodyChunks[0] : null);
+            if (supportingChunk != null)
+            {
+                pose.ChunkRender[1].Y = supportingChunk.SupportingSurfaceTop -
+                    slugcat.BodyChunks[1].Radius;
+            }
             pose.Chest = Vec2.Lerp(drawPositions[0, 1], drawPositions[0, 0], timeStacker);
             pose.Hips = Vec2.Lerp(drawPositions[1, 1], drawPositions[1, 0], timeStacker);
             pose.BodyUp = (pose.Chest - pose.Hips).Normalized;
