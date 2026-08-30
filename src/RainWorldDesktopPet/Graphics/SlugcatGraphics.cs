@@ -220,6 +220,11 @@ namespace RainWorldDesktopPet.Graphics
                 slugcat.BodyChunks[1].Position.X -
                     slugcat.BodyChunks[1].LastPosition.X,
                 slugcat.BodyChunks[1].Velocity.Y);
+            if (slugcat.State.BodyMode == BodyModeIndex.WallClimb)
+            {
+                chestGraphicsVelocity = upper - drawPositions[0, 1];
+                hipsGraphicsVelocity = lower - drawPositions[1, 1];
+            }
             Vec2 bodyUp = (upper - lower).Normalized;
             if (bodyUp.LengthSquared < 0.1) bodyUp = Vec2.Up;
 
@@ -294,8 +299,11 @@ namespace RainWorldDesktopPet.Graphics
 
             for (int i = 0; i < 2; i++)
             {
-                arms[i].Step(slugcat, slugcat.BodyChunks[0].Position,
-                    slugcat.BodyChunks[1].Position, chestGraphicsVelocity,
+                Vec2 armConnection = slugcat.State.BodyMode == BodyModeIndex.WallClimb
+                    ? upper : slugcat.BodyChunks[0].Position;
+                Vec2 armRotationChunk = slugcat.State.BodyMode == BodyModeIndex.WallClimb
+                    ? lower : slugcat.BodyChunks[1].Position;
+                arms[i].Step(slugcat, armConnection, armRotationChunk, chestGraphicsVelocity,
                     world, i == 0 ? null : arms[0], airborneCounter);
             }
             SpearmasterAbilityController spearAbility = extraction;
@@ -535,6 +543,19 @@ namespace RainWorldDesktopPet.Graphics
                 // 0.35 + (0.25 - 0.5 * 0.25) = 0.475.  This is a graphics
                 // pose adjustment, not a whole-character scale change.
                 upper = Vec2.Lerp(upper, lower, 0.475);
+            }
+            if (slugcat.State.BodyMode == BodyModeIndex.WallClimb)
+            {
+                // Keep the wall pose upright around its current lower body
+                // chunk at the player's authored BodyChunkConnection distance.
+                // This is render-only: applying Player's preceding standing
+                // impulse after desktop collision causes floor-contact jitter.
+                upper = lower - new Vec2(0.0, slugcat.EffectiveBodyConnectionDistance);
+                // PlayerGraphics.RenderAsPup performs its compact 0.475
+                // upper-to-lower blend before body-mode offsets. Preserve it
+                // in the stabilized wall pose too; otherwise the pup's Body,
+                // Head and Face families are spaced like an adult.
+                if (renderAsPup) upper = Vec2.Lerp(upper, lower, 0.475);
             }
             if (slugcat.State.BodyMode == BodyModeIndex.Stand)
             {

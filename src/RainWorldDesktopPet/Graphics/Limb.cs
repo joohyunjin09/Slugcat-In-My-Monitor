@@ -216,7 +216,11 @@ namespace RainWorldDesktopPet.Graphics
             double airborneCounter)
         {
             SlugcatState state = player.State;
-            Vec2 connection = player.BodyChunks[0].Position;
+            // WallClimb receives the stabilized PlayerGraphics chest from
+            // SlugcatGraphics. Other body modes retain the physical upper
+            // chunk exactly as before.
+            Vec2 connection = state.BodyMode == BodyModeIndex.WallClimb
+                ? ConnectionPosition : player.BodyChunks[0].Position;
             Vec2 velocity = player.BodyChunks[0].Velocity;
             bool unused = true;
 
