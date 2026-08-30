@@ -9,6 +9,7 @@ namespace RainWorldDesktopPet.Graphics
     {
         private readonly TailSegment[] segments;
         private Vec2 lastHips;
+        private double geometryScale = 1.0;
 
         public ProceduralTail(Vec2 hips)
             : this(hips, SlugcatGraphicsProfiles.White.Tail)
@@ -32,6 +33,30 @@ namespace RainWorldDesktopPet.Graphics
         }
 
         public TailSegment[] Segments { get { return segments; } }
+        public double GeometryScale { get { return geometryScale; } }
+
+        public void SetGeometryScale(double value, Vec2 hips)
+        {
+            if (value <= 0.0 || double.IsNaN(value) || double.IsInfinity(value))
+                throw new ArgumentOutOfRangeException("value");
+            if (Math.Abs(value - geometryScale) < 0.000001)
+            {
+                lastHips = hips;
+                return;
+            }
+
+            double ratio = value / geometryScale;
+            for (int i = 0; i < segments.Length; i++)
+            {
+                TailSegment segment = segments[i];
+                segment.Position = hips + (segment.Position - hips) * ratio;
+                segment.LastPosition = hips + (segment.LastPosition - hips) * ratio;
+                segment.Velocity *= ratio;
+                segment.SetGeometryScale(value);
+            }
+            geometryScale = value;
+            lastHips = hips;
+        }
 
         public void Step(
             Vec2 chest,
@@ -84,13 +109,13 @@ namespace RainWorldDesktopPet.Graphics
             if (fastStanding)
             {
                 forceOrigin = hips + new Vec2(
-                    facing * 16.0 *
+                    facing * 16.0 * geometryScale *
                         MathUtil.Clamp(Math.Abs(hipsVelocity.X) - 0.2, 0.0, 1.0),
-                    4.0);
+                    4.0 * geometryScale);
             }
 
             Vec2 nextForceOrigin = hips;
-            double outwardForce = 28.0;
+            double outwardForce = 28.0 * geometryScale;
             for (int i = 0; i < segments.Length; i++)
             {
                 TailSegment segment = segments[i];
@@ -101,11 +126,11 @@ namespace RainWorldDesktopPet.Graphics
                 segment.ConstrainTo(connectedPoint, connectedSegment);
                 segment.ApplyEnvironment(
                     MathUtil.Lerp(0.75, 0.95, terrainFactor),
-                    MathUtil.Lerp(0.1, 0.5, terrainFactor));
+                    MathUtil.Lerp(0.1, 0.5, terrainFactor) * geometryScale);
                 terrainFactor = (terrainFactor * 10.0 + 1.0) / 11.0;
 
                 Vec2 fromHips = segment.Position - hips;
-                double maximumDistance = 9.0 * (i + 1);
+                double maximumDistance = 9.0 * (i + 1) * geometryScale;
                 if (fromHips.Length > maximumDistance)
                 {
                     segment.Position = hips + fromHips.Normalized * maximumDistance;
@@ -128,7 +153,7 @@ namespace RainWorldDesktopPet.Graphics
             for (int i = 0; i < segments.Length; i++)
             {
                 Vec2 fromHips = segments[i].Position - hips;
-                double maximumDistance = 9.0 * (i + 1);
+                double maximumDistance = 9.0 * (i + 1) * geometryScale;
                 if (fromHips.Length > maximumDistance)
                     segments[i].Position = hips + fromHips.Normalized * maximumDistance;
             }
@@ -155,8 +180,9 @@ namespace RainWorldDesktopPet.Graphics
             for (int i = 0; i < segments.Length; i++)
             {
                 double fraction = segments.Length == 1 ? 0.0 : (double)i / (segments.Length - 1);
-                double curveX = (Math.Sin(fraction * Math.PI) * 25.0 - fraction * 10.0) * -direction;
-                double curveY = MathUtil.Lerp(-5.0, 15.0, fraction);
+                double curveX = (Math.Sin(fraction * Math.PI) * 25.0 - fraction * 10.0) *
+                    -direction * geometryScale;
+                double curveY = MathUtil.Lerp(-5.0, 15.0, fraction) * geometryScale;
                 segments[i].Velocity *= 1.0 - 0.2 * amount;
                 segments[i].Position = Vec2.Lerp(
                     segments[i].Position,
