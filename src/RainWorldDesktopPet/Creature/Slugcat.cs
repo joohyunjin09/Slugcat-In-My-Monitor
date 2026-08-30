@@ -20,6 +20,7 @@ namespace RainWorldDesktopPet.Creature
         private readonly Random spearImpactRandom = new Random(0x5BEA7);
         private ISlugcatAbilityController abilityController;
         private double sizeMovementScale = 1.0;
+        private bool pupAppearance;
 
         public Slugcat(Vec2 spawnPosition)
             : this(spawnPosition, SlugcatId.White)
@@ -48,6 +49,7 @@ namespace RainWorldDesktopPet.Creature
             : this(spawnPosition, SlugcatId.White)
         {
             Appearance = SlugcatAppearance.For(variant);
+            Appearance.SetPupScale(BodyProportionScale);
             SetSelectedProfile(SlugcatProfiles.Get(variant));
         }
 
@@ -68,6 +70,20 @@ namespace RainWorldDesktopPet.Creature
         public long TerrainImpactSequence { get; private set; }
         public long ImpactStunDeadlineTick { get { return impactStunDeadlineTick; } }
         public double SizeMovementScale { get { return sizeMovementScale; } }
+        public bool PupAppearance { get { return pupAppearance; } }
+        public double BodyProportionScale
+        {
+            get { return pupAppearance ? SlugpupAppearanceSettings.BodyScale : 1.0; }
+        }
+        public double EffectiveBodyConnectionDistance
+        {
+            get
+            {
+                return pupAppearance
+                    ? SlugpupAppearanceSettings.BodyConnectionDistance
+                    : SimulationConstants.BodyConnectionDistance;
+            }
+        }
 
         public Vec2 Center { get { return (BodyChunks[0].Position + BodyChunks[1].Position) * 0.5; } }
 
@@ -381,7 +397,7 @@ namespace RainWorldDesktopPet.Creature
             grabbedChunk = -1;
             BodyChunks[1].Position = hipsPosition;
             BodyChunks[0].Position = hipsPosition -
-                new Vec2(0.0, SimulationConstants.BodyConnectionDistance);
+                new Vec2(0.0, EffectiveBodyConnectionDistance);
             for (int i = 0; i < BodyChunks.Length; i++)
             {
                 BodyChunk chunk = BodyChunks[i];
@@ -422,8 +438,65 @@ namespace RainWorldDesktopPet.Creature
                 throw new ArgumentOutOfRangeException("value");
 
             sizeMovementScale = value;
-            BodyChunks[0].SetRadius(SimulationConstants.MainChunkRadius * value);
-            BodyChunks[1].SetRadius(SimulationConstants.HipsChunkRadius * value);
+            ApplyCollisionRadii(true);
+        }
+
+        public void SetPupAppearance(bool enabled)
+        {
+            if (pupAppearance == enabled)
+            {
+                if (Appearance != null) Appearance.SetPupScale(BodyProportionScale);
+                ApplyCollisionRadii(true);
+                return;
+            }
+
+            pupAppearance = enabled;
+            if (Appearance != null) Appearance.SetPupScale(BodyProportionScale);
+            ApplyCollisionRadii(true);
+
+            double targetDistance = EffectiveBodyConnectionDistance;
+            if (enabled) BodyConnection.SetMaximumDistance(targetDistance);
+            else BodyConnection.ClearMaximumDistance();
+            BodyConnection.Distance = targetDistance;
+
+            BodyChunk chest = BodyChunks[0];
+            BodyChunk hips = BodyChunks[1];
+            Vec2 axis = chest.Position - hips.Position;
+            if (axis.LengthSquared < 0.000001) axis = Vec2.Up;
+            chest.Position = hips.Position + axis.Normalized * targetDistance;
+
+            // Geometry switches are settings changes, not animation frames. Keep
+            // both interpolation snapshots on the same new pose so changing to a
+            // pup cannot produce a one-frame adult->pup body lag or vertical bob.
+            for (int i = 0; i < BodyChunks.Length; i++)
+                BodyChunks[i].LastPosition = BodyChunks[i].Position;
+        }
+
+        private void ApplyCollisionRadii(bool preserveGroundContact)
+        {
+            double scale = sizeMovementScale * BodyProportionScale;
+            double mainRadius = SimulationConstants.MainChunkRadius * scale;
+            double hipsRadius = SimulationConstants.HipsChunkRadius * scale;
+            BodyChunk hips = BodyChunks[1];
+            double oldHipsRadius = hips.Radius;
+            bool grounded = preserveGroundContact &&
+                (State.Grounded || hips.ContactFloor || hips.PreviousContactFloor);
+
+            if (grounded && Math.Abs(oldHipsRadius - hipsRadius) > 0.000001)
+            {
+                // Windows simulation Y points down. Move the chunk centre by the
+                // lost/gained radius so its collision bottom stays on the exact
+                // same floor while size or pup mode changes.
+                Vec2 floorCompensation = new Vec2(0.0, oldHipsRadius - hipsRadius);
+                for (int i = 0; i < BodyChunks.Length; i++)
+                {
+                    BodyChunks[i].Position += floorCompensation;
+                    BodyChunks[i].LastPosition += floorCompensation;
+                }
+            }
+
+            BodyChunks[0].SetRadius(mainRadius);
+            BodyChunks[1].SetRadius(hipsRadius);
         }
 
         public void SetSelectedSlugcat(SlugcatId id)
@@ -444,12 +517,14 @@ namespace RainWorldDesktopPet.Creature
                     Appearance = SlugcatAppearance.For(SlugcatVariant.Survivor);
                     break;
             }
+            Appearance.SetPupScale(BodyProportionScale);
             SetSelectedProfile(profile);
         }
 
         public void SetVariant(SlugcatVariant variant)
         {
             Appearance = SlugcatAppearance.For(variant);
+            Appearance.SetPupScale(BodyProportionScale);
             SetSelectedProfile(SlugcatProfiles.Get(variant));
         }
 
