@@ -769,9 +769,8 @@ namespace RainWorldDesktopPet.Graphics
         private void DrawAtlasHips(ISpriteCanvas graphics, SlugcatPose pose)
         {
             double hipsWidth = pose.VisualHipsScale + 0.05 * pose.Breath;
-            Vec2 hipsPosition = (pose.Hips * 2.0 + pose.Chest) / 3.0;
-            Vec2 tailTarget = pose.Tail.Length > 0 ? pose.Tail[0] : pose.Hips + (pose.Hips - pose.Chest);
-            double hipsAngle = AimScreen(pose.Chest, tailTarget);
+            Vec2 hipsPosition = pose.Hips;
+            double hipsAngle = AimScreen(pose.Chest, pose.Hips);
             DrawElement(graphics, pose.HipsElement, hipsPosition, hipsAngle, hipsWidth, 1.0,
                 0.5, 0.5, pose.VisualHipsColor, SelectTorsoSide(pose));
         }
