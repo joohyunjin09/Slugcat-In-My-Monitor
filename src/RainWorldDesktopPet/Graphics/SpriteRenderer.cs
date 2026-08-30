@@ -498,9 +498,10 @@ namespace RainWorldDesktopPet.Graphics
             bool textured = dmsTailSkin != null && dmsTailSkin.TryGetSprite(
                 "TailTexture", pose.OriginalSlugcatId, DmsSpriteSide.None,
                 out dmsTail);
-            Color tailColor = dmsTailSkin != null &&
-                dmsTailSkin.DefaultTail.Color.A > 0
-                ? dmsTailSkin.DefaultTail.Color : bodyColor;
+            Color tailColor = dmsTailSkin == null
+                ? bodyColor
+                : dmsTailSkin.ResolveTailTint(dmsTail, bodyColor,
+                    pose.HasCustomDmsPartColor("TAIL"));
 
             // Rain World rasterizes PlayerGraphics' TriangleMesh at its 1:1
             // internal pixel resolution before point-filtering the result to
@@ -1085,17 +1086,20 @@ namespace RainWorldDesktopPet.Graphics
             if (Math.Abs(scaleX) < 0.000001 || Math.Abs(scaleY) < 0.000001) return;
             AtlasSprite sprite = null;
             DmsSkinDefinition selectedPartSkin = null;
+            string dmsPart = null;
             if (activePose != null)
             {
                 string generic = DmsSpriteGroups.ToGenericElement(name,
                     activePose.OriginalSlugcatId);
-                selectedPartSkin = GetDmsPart(DmsSpriteGroups.PartForElement(generic));
+                dmsPart = DmsSpriteGroups.PartForElement(generic);
+                selectedPartSkin = GetDmsPart(dmsPart);
             }
             bool dmsApplied = selectedPartSkin != null &&
                 selectedPartSkin.TryGetSprite(name, activePose.OriginalSlugcatId, side, out sprite);
             if (!dmsApplied && !atlas.TryGet(name, out sprite)) return;
-            if (dmsApplied) tint = selectedPartSkin.ResolveTint(name,
-                activePose.OriginalSlugcatId, tint);
+            if (dmsApplied) tint = selectedPartSkin.ResolveTint(sprite, name,
+                activePose.OriginalSlugcatId, tint,
+                activePose.HasCustomDmsPartColor(dmsPart));
             AtlasElement element = sprite.Element;
             graphics.Save();
             try

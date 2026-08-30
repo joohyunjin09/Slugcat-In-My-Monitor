@@ -90,6 +90,11 @@ namespace RainWorldDesktopPet.Graphics
                 ? graphicsProfile.EyeColor : body;
         }
 
+        public bool HasCustomPartColor(string part)
+        {
+            return !string.IsNullOrWhiteSpace(part) && partColors.ContainsKey(part);
+        }
+
         public void SetPartColor(string part, Color color)
         {
             if (string.IsNullOrWhiteSpace(part)) return;
@@ -564,6 +569,18 @@ namespace RainWorldDesktopPet.Graphics
             pose.VisualHipsColor = GetPartColor("Hips");
             pose.VisualLegsColor = GetPartColor("Legs");
             pose.VisualTailColor = GetPartColor("Tail");
+            pose.HasCustomBodyColor = HasCustomPartColor("Body");
+            pose.HasCustomFaceColor = HasCustomPartColor("Face");
+            pose.HasCustomHeadColor = HasCustomPartColor("Head");
+            pose.HasCustomArmsColor = HasCustomPartColor("Arms");
+            pose.HasCustomHipsColor = HasCustomPartColor("Hips");
+            pose.HasCustomLegsColor = HasCustomPartColor("Legs");
+            pose.HasCustomTailColor = HasCustomPartColor("Tail");
+            pose.HasCustomFaceScarColor = HasCustomPartColor("FaceScar");
+            pose.HasCustomGillsColor = HasCustomPartColor("Gills");
+            pose.HasCustomTailSpecklesColor = HasCustomPartColor("TailSpeckles");
+            pose.HasCustomAscensionColor = HasCustomPartColor("Ascension");
+            pose.HasCustomPixelColor = HasCustomPartColor("Pixel");
             pose.BodyElement = graphicsProfile.BodyElement;
             pose.HipsElement = graphicsProfile.HipsElement;
             pose.VisualBodyScale = compatibilityProfile.ResolveBodyScale(slugcat.Appearance);
