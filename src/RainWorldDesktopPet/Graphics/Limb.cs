@@ -26,6 +26,8 @@ namespace RainWorldDesktopPet.Graphics
         private readonly double defaultHuntSpeed;
         private readonly double defaultQuickness;
         private readonly int limbNumber;
+        private readonly double baseLength;
+        private double geometryScale = 1.0;
         private bool wasCrawling;
 
         public Limb(LimbKind kind, int side, Vec2 initialPosition, double length)
@@ -33,7 +35,7 @@ namespace RainWorldDesktopPet.Graphics
             Kind = kind;
             Side = side;
             limbNumber = side < 0 ? 0 : 1;
-            Length = length;
+            baseLength = length;
             End = new BodyPart(initialPosition, kind == LimbKind.Arm ? 3.0 : 2.5, 0.8, 1.0);
             defaultHuntSpeed = kind == LimbKind.Arm ? 7.0 : 5.0;
             defaultQuickness = 0.5;
@@ -48,7 +50,8 @@ namespace RainWorldDesktopPet.Graphics
 
         public readonly LimbKind Kind;
         public readonly int Side;
-        public readonly double Length;
+        public double Length { get { return baseLength * geometryScale; } }
+        public double GeometryScale { get { return geometryScale; } }
         public readonly BodyPart End;
         public LimbMode Mode;
         public Vec2 RelativeHuntPosition;
@@ -66,6 +69,27 @@ namespace RainWorldDesktopPet.Graphics
         public bool IsPlanted { get { return ReachedSnapPosition && Mode == LimbMode.HuntAbsolutePosition; } }
         public int LimbNumber { get { return limbNumber; } }
         public bool MovementEngagedThisTick { get; private set; }
+
+        public void SetGeometryScale(double value)
+        {
+            if (value <= 0.0 || double.IsNaN(value) || double.IsInfinity(value))
+                throw new ArgumentOutOfRangeException("value");
+            if (Math.Abs(value - geometryScale) < 0.000001) return;
+
+            double ratio = value / geometryScale;
+            End.Position = ConnectionPosition + (End.Position - ConnectionPosition) * ratio;
+            End.LastPosition = LastConnectionPosition +
+                (End.LastPosition - LastConnectionPosition) * ratio;
+            End.Velocity *= ratio;
+            if (Mode == LimbMode.HuntAbsolutePosition)
+            {
+                AbsoluteHuntPosition = ConnectionPosition +
+                    (AbsoluteHuntPosition - ConnectionPosition) * ratio;
+                TargetPosition = ConnectionPosition +
+                    (TargetPosition - ConnectionPosition) * ratio;
+            }
+            geometryScale = value;
+        }
 
         // SlugcatHand.Update ordering: update using the previous tick's target,
         // constrain to the upper BodyChunk, then select the target for next tick.
@@ -92,19 +116,19 @@ namespace RainWorldDesktopPet.Graphics
             {
                 // Do this before UpdateLimb consumes the previous frame's
                 // target. Otherwise a retracted or raised standing hand can be
-                // retained indefinitely by FindCrawlGrip's 29-unit keep zone.
+                // retained indefinitely by FindCrawlGrip's keep zone.
                 Vec2 normalizedVelocity = connectionVelocity.Normalized;
                 Mode = LimbMode.HuntAbsolutePosition;
                 AbsoluteHuntPosition = connection + new Vec2(
-                    -6.0 + 12.0 * limbNumber + normalizedVelocity.X * 20.0,
-                    Math.Abs(normalizedVelocity.Y) * 20.0);
+                    (-6.0 + 12.0 * limbNumber + normalizedVelocity.X * 20.0) * geometryScale,
+                    Math.Abs(normalizedVelocity.Y) * 20.0 * geometryScale);
                 TargetPosition = AbsoluteHuntPosition;
                 GripSurfaceId = 0;
                 RetractCounter = 0;
                 ReachedSnapPosition = false;
             }
             if (GripSurfaceId != 0 && !world.ContainsSurface(GripSurfaceId,
-                GripSurfaceKind, AbsoluteHuntPosition, 3.0))
+                GripSurfaceKind, AbsoluteHuntPosition, 3.0 * geometryScale))
             {
                 ReleaseSurfaceGrip();
             }
@@ -118,7 +142,9 @@ namespace RainWorldDesktopPet.Graphics
             {
                 Vec2 center = (player.BodyChunks[0].Position + player.BodyChunks[1].Position) * 0.5;
                 Mode = LimbMode.HuntAbsolutePosition;
-                AbsoluteHuntPosition = center + new Vec2(player.State.Facing * 10.0, 20.0);
+                AbsoluteHuntPosition = center + new Vec2(
+                    player.State.Facing * 10.0 * geometryScale,
+                    20.0 * geometryScale);
                 GripSurfaceId = 0;
                 retractWhenUnused = false;
             }
@@ -131,7 +157,7 @@ namespace RainWorldDesktopPet.Graphics
                     Mode = LimbMode.HuntAbsolutePosition;
                     End.Position = Vec2.Lerp(End.Position, connection,
                         MathUtil.Clamp((RetractCounter - 5.0) * 0.05, 0.0, 1.0));
-                    if (Vec2.Distance(End.Position, connection) < 2.0 && ReachedSnapPosition)
+                    if (Vec2.Distance(End.Position, connection) < 2.0 * geometryScale && ReachedSnapPosition)
                         Mode = LimbMode.Retracted;
                     AbsoluteHuntPosition = connection;
                     HuntSpeed = 1.0 + RetractCounter * 0.2;
@@ -144,7 +170,8 @@ namespace RainWorldDesktopPet.Graphics
             }
 
             TargetPosition = Mode == LimbMode.HuntRelativePosition
-                ? connection + RotateRelative(RelativeHuntPosition, rotationChunk, connection)
+                ? connection + RotateRelative(RelativeHuntPosition * geometryScale,
+                    rotationChunk, connection)
                 : AbsoluteHuntPosition;
             wasCrawling = crawling;
         }
@@ -161,18 +188,21 @@ namespace RainWorldDesktopPet.Graphics
             }
 
             if (Mode == LimbMode.HuntRelativePosition)
-                AbsoluteHuntPosition = connection + RotateRelative(RelativeHuntPosition, rotationChunk, connection);
+                AbsoluteHuntPosition = connection + RotateRelative(
+                    RelativeHuntPosition * geometryScale, rotationChunk, connection);
 
             if (Mode == LimbMode.HuntRelativePosition || Mode == LimbMode.HuntAbsolutePosition)
             {
-                if (Vec2.Distance(AbsoluteHuntPosition, End.Position) < HuntSpeed)
+                double effectiveHuntSpeed = HuntSpeed * geometryScale;
+                if (Vec2.Distance(AbsoluteHuntPosition, End.Position) < effectiveHuntSpeed)
                 {
                     End.Velocity = AbsoluteHuntPosition - End.Position;
                     ReachedSnapPosition = true;
                 }
                 else
                 {
-                    Vec2 desiredVelocity = (AbsoluteHuntPosition - End.Position).Normalized * HuntSpeed;
+                    Vec2 desiredVelocity = (AbsoluteHuntPosition - End.Position).Normalized *
+                        effectiveHuntSpeed;
                     End.Velocity = Vec2.Lerp(End.Velocity, desiredVelocity, Quickness);
                     ReachedSnapPosition = false;
                 }
@@ -220,9 +250,10 @@ namespace RainWorldDesktopPet.Graphics
                 Mode = LimbMode.HuntAbsolutePosition;
                 Vec2 bodyDirection = (player.BodyChunks[0].Position - player.BodyChunks[1].Position).Normalized;
                 Vec2 input = new Vec2(player.LastInput.X, player.LastInput.Y).Normalized;
-                Vec2 goal = connection + (bodyDirection + input * 1.5).Normalized * 20.0 +
-                    bodyDirection.Perpendicular * (6.0 - 12.0 * limbNumber);
-                if (!FindGrip(world, connection, goal, 20.0)) Mode = LimbMode.Dangle;
+                Vec2 goal = connection + (bodyDirection + input * 1.5).Normalized *
+                    (20.0 * geometryScale) +
+                    bodyDirection.Perpendicular * (6.0 - 12.0 * limbNumber) * geometryScale;
+                if (!FindGrip(world, connection, goal, 20.0 * geometryScale)) Mode = LimbMode.Dangle;
             }
             else if (state.BodyMode == BodyModeIndex.WallClimb)
             {
@@ -231,10 +262,10 @@ namespace RainWorldDesktopPet.Graphics
                 double wallX;
                 long wallId;
                 DesktopSurfaceKind wallKind;
-                if (!world.TryGetWall(connection.X, connection.Y, state.Facing, 30.0,
-                    out wallX, out wallId, out wallKind))
+                if (!world.TryGetWall(connection.X, connection.Y, state.Facing,
+                    30.0 * geometryScale, out wallX, out wallId, out wallKind))
                 {
-                    wallX = connection.X + state.Facing * 10.0;
+                    wallX = connection.X + state.Facing * 10.0 * geometryScale;
                     GripSurfaceId = 0;
                 }
                 else
@@ -244,7 +275,8 @@ namespace RainWorldDesktopPet.Graphics
                 }
                 AbsoluteHuntPosition.X = wallX;
                 bool lowHand = (limbNumber == 0) == (state.Facing == -1);
-                AbsoluteHuntPosition.Y = connection.Y + (lowHand ? 7.0 : -3.0);
+                AbsoluteHuntPosition.Y = connection.Y +
+                    (lowHand ? 7.0 : -3.0) * geometryScale;
             }
             else if (state.BodyMode == BodyModeIndex.Default &&
                      velocity.Length > 4.0 &&
@@ -255,7 +287,7 @@ namespace RainWorldDesktopPet.Graphics
                 Mode = LimbMode.HuntRelativePosition;
                 GripSurfaceId = 0;
                 bool chestPastHips = player.BodyChunks[0].Position.Y <
-                    player.BodyChunks[1].Position.Y - 5.0;
+                    player.BodyChunks[1].Position.Y - 5.0 * geometryScale;
                 double originalRelativeY = -velocity.Y *
                     (chestPastHips ? -3.0 : -0.9) +
                     Math.Abs(velocity.X * 0.6) + 1.0;
@@ -274,8 +306,8 @@ namespace RainWorldDesktopPet.Graphics
                 GripSurfaceId = 0;
                 Vec2 normalizedVelocity = velocity.Normalized;
                 AbsoluteHuntPosition = connection + new Vec2(
-                    -6.0 + 12.0 * limbNumber + normalizedVelocity.X * 20.0,
-                    Math.Abs(normalizedVelocity.Y) * 20.0);
+                    (-6.0 + 12.0 * limbNumber + normalizedVelocity.X * 20.0) * geometryScale,
+                    Math.Abs(normalizedVelocity.Y) * 20.0 * geometryScale);
             }
 
             return unused;
@@ -292,14 +324,17 @@ namespace RainWorldDesktopPet.Graphics
             }
             // SlugcatHand.EngageInMovement lets hand 0 establish the next
             // Crawl grip. Hand 1 may search only after hand 0 is planted near
-            // the upper chunk; both retain their previous target within 29u.
+            // the upper chunk; both retain their previous target within the
+            // proportionally scaled keep zone.
             if (limbNumber != 0 && (leadLimb == null ||
-                Math.Abs(leadLimb.End.Position.X - connection.X) >= 10.0 ||
+                Math.Abs(leadLimb.End.Position.X - connection.X) >= 10.0 * geometryScale ||
                 !leadLimb.ReachedSnapPosition)) return;
-            if (Vec2.Distance(connection, AbsoluteHuntPosition) < 29.0) return;
+            if (Vec2.Distance(connection, AbsoluteHuntPosition) < 29.0 * geometryScale) return;
 
-            Vec2 goal = new Vec2(connection.X + player.State.Facing * 28.0, connection.Y + 10.0);
-            FindGrip(world, connection, goal, 100.0);
+            Vec2 goal = connection + new Vec2(
+                player.State.Facing * 28.0 * geometryScale,
+                10.0 * geometryScale);
+            FindGrip(world, connection, goal, 100.0 * geometryScale);
         }
 
         // Desktop Room adapter for Limb.FindGrip: choose the nearest exposed
@@ -374,9 +409,10 @@ namespace RainWorldDesktopPet.Graphics
         public Vec2 ComputeJoint(Vec2 start, Vec2 end, double interpolation)
         {
             Vec2 delta = end - start;
-            double distance = Math.Max(0.001, Math.Min(delta.Length, Length * 0.995));
+            double length = Length;
+            double distance = Math.Max(0.001, Math.Min(delta.Length, length * 0.995));
             Vec2 direction = delta / distance;
-            double half = Length * 0.5;
+            double half = length * 0.5;
             double height = Math.Sqrt(Math.Max(0.0, half * half - distance * distance * 0.25));
             return start + direction * (distance * 0.5) + direction.Perpendicular * height * Side;
         }
