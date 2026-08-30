@@ -1,16 +1,21 @@
+using System;
 using RainWorldDesktopPet.Core;
 
 namespace RainWorldDesktopPet.Physics
 {
     public sealed class TailSegment
     {
+        private readonly double baseRadius;
+        private readonly double baseLength;
+        private double geometryScale = 1.0;
+
         public TailSegment(Vec2 position, double radius, double length, double affectPrevious)
         {
             Position = position;
             LastPosition = position;
             Velocity = Vec2.Zero;
-            Radius = radius;
-            Length = length;
+            baseRadius = radius;
+            baseLength = length;
             AffectPrevious = affectPrevious;
             Stretched = 1.0;
             LastStretched = 1.0;
@@ -19,11 +24,19 @@ namespace RainWorldDesktopPet.Physics
         public Vec2 Position;
         public Vec2 LastPosition;
         public Vec2 Velocity;
-        public readonly double Radius;
-        public readonly double Length;
+        public double Radius { get { return baseRadius * geometryScale; } }
+        public double Length { get { return baseLength * geometryScale; } }
+        public double GeometryScale { get { return geometryScale; } }
         public readonly double AffectPrevious;
         public double Stretched;
         public double LastStretched;
+
+        public void SetGeometryScale(double value)
+        {
+            if (value <= 0.0 || double.IsNaN(value) || double.IsInfinity(value))
+                throw new ArgumentOutOfRangeException("value");
+            geometryScale = value;
+        }
 
         public void BeginUpdate()
         {
@@ -37,10 +50,11 @@ namespace RainWorldDesktopPet.Physics
         {
             Vec2 delta = connectedPoint - Position;
             double distance = delta.Length;
-            if (distance <= Length || distance < 0.000001) return;
+            double length = Length;
+            if (distance <= length || distance < 0.000001) return;
 
             Vec2 direction = delta / distance;
-            double excess = distance - Length;
+            double excess = distance - length;
             if (connectedSegment == null)
             {
                 Vec2 correction = direction * excess;
@@ -58,7 +72,7 @@ namespace RainWorldDesktopPet.Physics
             }
 
             // TailSegment.StretchedRad uses this value while the mesh is drawn.
-            Stretched = MathUtil.Clamp((Length / (distance * 0.5) + 2.0) / 3.0, 0.2, 1.0);
+            Stretched = MathUtil.Clamp((length / (distance * 0.5) + 2.0) / 3.0, 0.2, 1.0);
         }
 
         public void ApplyEnvironment(double damping, double gravity)
