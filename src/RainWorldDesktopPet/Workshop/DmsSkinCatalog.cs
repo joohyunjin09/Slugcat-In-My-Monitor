@@ -205,6 +205,16 @@ namespace RainWorldDesktopPet.Workshop
                 : Color.White;
         }
 
+        // TailTexture is a deforming mesh rather than a normal FSprite. Its
+        // no-override state follows the selected Slugcat's tail colour, while
+        // DMS metadata and an explicit editor colour can still replace it.
+        public Color ResolveTailTint(Color fallback, bool hasCustomColor)
+        {
+            return hasCustomColor || DefaultTail.Color.A <= 0
+                ? fallback
+                : DefaultTail.Color;
+        }
+
         public Bitmap CreatePreview(int size)
         {
             AtlasSprite sprite;

@@ -2198,6 +2198,16 @@ namespace RainWorldDesktopPet.Tests
                 false).ToArgb(), "DMS metadata colour remains the default for greyscale sheets");
             Equal(profileColor.ToArgb(), skin.ResolveTint("BodyA", "White", profileColor,
                 true).ToArgb(), "an explicit colour overrides DMS metadata colour");
+
+            Color tailBaseColor = Color.FromArgb(255, 191, 68, 92);
+            Equal(tailBaseColor.ToArgb(), skin.ResolveTailTint(tailBaseColor, false).ToArgb(),
+                "a DMS tail follows the selected Slugcat colour by default");
+            Color tailMetadataColor = Color.FromArgb(255, 201, 171, 43);
+            skin.DefaultTail.Color = tailMetadataColor;
+            Equal(tailMetadataColor.ToArgb(), skin.ResolveTailTint(tailBaseColor, false).ToArgb(),
+                "DMS tail metadata remains the default when provided");
+            Equal(tailBaseColor.ToArgb(), skin.ResolveTailTint(tailBaseColor, true).ToArgb(),
+                "an explicitly customized DMS tail overrides metadata colour");
         }
 
         private static void DmsSpritesBesideExecutableAreDiscovered()

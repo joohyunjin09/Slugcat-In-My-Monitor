@@ -498,9 +498,10 @@ namespace RainWorldDesktopPet.Graphics
             bool textured = dmsTailSkin != null && dmsTailSkin.TryGetSprite(
                 "TailTexture", pose.OriginalSlugcatId, DmsSpriteSide.None,
                 out dmsTail);
-            Color tailColor = pose.HasCustomDmsPartColor("TAIL") ? bodyColor :
-                dmsTailSkin != null && dmsTailSkin.DefaultTail.Color.A > 0
-                    ? dmsTailSkin.DefaultTail.Color : Color.White;
+            Color tailColor = dmsTailSkin == null
+                ? bodyColor
+                : dmsTailSkin.ResolveTailTint(bodyColor,
+                    pose.HasCustomDmsPartColor("TAIL"));
 
             // Rain World rasterizes PlayerGraphics' TriangleMesh at its 1:1
             // internal pixel resolution before point-filtering the result to
