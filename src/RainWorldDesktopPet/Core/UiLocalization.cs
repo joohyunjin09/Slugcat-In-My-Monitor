@@ -32,7 +32,25 @@ namespace RainWorldDesktopPet.Core
 
         public static string Text(string korean, string english)
         {
-            return Current == UiLanguage.Korean ? korean : english;
+            return Current == UiLanguage.Korean ? NormalizeKoreanText(korean) : english;
+        }
+
+        private static string NormalizeKoreanText(string value)
+        {
+            if (string.IsNullOrEmpty(value)) return value;
+            switch (value)
+            {
+                case "Survivor — 생존자": return "생존자";
+                case "Monk — 수도승": return "수도승";
+                case "Hunter — 사냥꾼": return "사냥꾼";
+                case "Gourmand — 대식가": return "대식가";
+                case "Artificer — 기술병": return "기술병";
+                case "SpearMaster — 창술가": return "창술가";
+                case "Rivulet — 물살이": return "물살이";
+                case "Saint — 성자": return "성자";
+                case "캐릭터와 능력": return "슬러그캣";
+                default: return value;
+            }
         }
 
         public static void SetLanguage(UiLanguage language)
@@ -51,11 +69,6 @@ namespace RainWorldDesktopPet.Core
                 // A read-only settings directory must not prevent the app from running.
             }
 
-            // The tray ContextMenuStrip is created once when LayeredOverlayWindow starts.
-            // Dynamic entries such as "Slugcats (N)" and "Feed" refresh themselves, but
-            // static ToolStripMenuItems otherwise keep the language they were constructed
-            // with until the process restarts. Refresh any live NotifyIcon menu immediately
-            // so changing the language in Settings applies to the tray as well.
             RefreshOpenTrayMenus(language);
         }
 
@@ -82,8 +95,7 @@ namespace RainWorldDesktopPet.Core
             }
             catch (Exception)
             {
-                // Localization must remain non-fatal. The saved language will still be
-                // applied normally on the next launch even if a menu is being disposed.
+                // Localization must remain non-fatal. Saved language still applies next launch.
             }
         }
 
@@ -117,8 +129,8 @@ namespace RainWorldDesktopPet.Core
                     case "스킨 편집기 (실험적)": return "Skin Editor (Experimental)";
                     case "종료": return "Exit";
                     case "캐릭터와 능력": return "Character and Ability";
+                    case "슬러그캣": return "Character and Ability";
                     case "Workshop 모드 새로 고침": return "Refresh Workshop Mods";
-                    case "슬러그캣": return "Slugcats";
                     case "슬러그캣 추가": return "Add Slugcat";
                     case "다음 슬러그캣 선택": return "Select Next Slugcat";
                     case "선택한 슬러그캣 삭제": return "Remove Selected Slugcat";
@@ -127,6 +139,14 @@ namespace RainWorldDesktopPet.Core
                     case "알벌레 알 주기": return "Give Eggbug Egg";
                     case "슬러그캣 포만감": return "Slugcat Fullness";
                     case "먹이 치우기": return "Clear Food";
+                    case "생존자": return "Survivor";
+                    case "수도승": return "Monk";
+                    case "사냥꾼": return "Hunter";
+                    case "대식가": return "Gourmand";
+                    case "기술병": return "Artificer";
+                    case "창술가": return "SpearMaster";
+                    case "물살이": return "Rivulet";
+                    case "성자": return "Saint";
                 }
 
                 if (value.StartsWith("슬러그캣 (", StringComparison.Ordinal))
@@ -134,9 +154,11 @@ namespace RainWorldDesktopPet.Core
                 if (value.StartsWith("슬러그캣 ", StringComparison.Ordinal))
                 {
                     string translated = "Slugcat " + value.Substring("슬러그캣 ".Length);
-                    return translated.Replace(" · 포만감 ", " · Fullness ");
+                    translated = translated.Replace(" · 포만감 ", " · Fullness ");
+                    return TranslateSlugcatNames(translated, language);
                 }
-                return value.Replace(" · 포만감 ", " · Fullness ");
+                return TranslateSlugcatNames(
+                    value.Replace(" · 포만감 ", " · Fullness "), language);
             }
 
             switch (value)
@@ -147,7 +169,7 @@ namespace RainWorldDesktopPet.Core
                 case "Retry Rendering": return "렌더링 재시도";
                 case "Skin Editor (Experimental)": return "스킨 편집기 (실험적)";
                 case "Exit": return "종료";
-                case "Character and Ability": return "캐릭터와 능력";
+                case "Character and Ability": return "슬러그캣";
                 case "Refresh Workshop Mods": return "Workshop 모드 새로 고침";
                 case "Slugcats": return "슬러그캣";
                 case "Add Slugcat": return "슬러그캣 추가";
@@ -158,6 +180,14 @@ namespace RainWorldDesktopPet.Core
                 case "Give Eggbug Egg": return "알벌레 알 주기";
                 case "Slugcat Fullness": return "슬러그캣 포만감";
                 case "Clear Food": return "먹이 치우기";
+                case "Survivor": return "생존자";
+                case "Monk": return "수도승";
+                case "Hunter": return "사냥꾼";
+                case "Gourmand": return "대식가";
+                case "Artificer": return "기술병";
+                case "SpearMaster": return "창술가";
+                case "Rivulet": return "물살이";
+                case "Saint": return "성자";
             }
 
             if (value.StartsWith("Slugcats (", StringComparison.Ordinal))
@@ -165,9 +195,38 @@ namespace RainWorldDesktopPet.Core
             if (value.StartsWith("Slugcat ", StringComparison.Ordinal))
             {
                 string translated = "슬러그캣 " + value.Substring("Slugcat ".Length);
-                return translated.Replace(" · Fullness ", " · 포만감 ");
+                translated = translated.Replace(" · Fullness ", " · 포만감 ");
+                return TranslateSlugcatNames(translated, language);
             }
-            return value.Replace(" · Fullness ", " · 포만감 ");
+            return TranslateSlugcatNames(
+                value.Replace(" · Fullness ", " · 포만감 "), language);
+        }
+
+        private static string TranslateSlugcatNames(string value, UiLanguage language)
+        {
+            if (string.IsNullOrEmpty(value)) return value;
+            if (language == UiLanguage.English)
+            {
+                return value
+                    .Replace("생존자", "Survivor")
+                    .Replace("수도승", "Monk")
+                    .Replace("사냥꾼", "Hunter")
+                    .Replace("대식가", "Gourmand")
+                    .Replace("기술병", "Artificer")
+                    .Replace("창술가", "SpearMaster")
+                    .Replace("물살이", "Rivulet")
+                    .Replace("성자", "Saint");
+            }
+
+            return value
+                .Replace("SpearMaster", "창술가")
+                .Replace("Survivor", "생존자")
+                .Replace("Monk", "수도승")
+                .Replace("Hunter", "사냥꾼")
+                .Replace("Gourmand", "대식가")
+                .Replace("Artificer", "기술병")
+                .Replace("Rivulet", "물살이")
+                .Replace("Saint", "성자");
         }
 
         private static void EnsureLoaded()
