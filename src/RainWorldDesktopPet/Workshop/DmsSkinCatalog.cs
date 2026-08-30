@@ -191,9 +191,10 @@ namespace RainWorldDesktopPet.Workshop
             return elements.TryGetValue(generic, out sprite);
         }
 
-        // DMS owns the visible source palette. Metadata and authored PNG
-        // colours must therefore win over the editor colour and the selected
-        // Slugcat's default; only neutral/greyscale sheets inherit fallback.
+        // DMS owns the visible source palette. Authored PNG colours and
+        // non-white metadata colours therefore win over the editor colour and
+        // the selected Slugcat's default. Pure white is a neutral DMS mask,
+        // so it inherits fallback like a greyscale sheet.
         public Color ResolveTint(string originalElement, string slugcatId, Color fallback,
             bool hasCustomColor)
         {
@@ -206,7 +207,8 @@ namespace RainWorldDesktopPet.Workshop
             string part = DmsSpriteGroups.PartForElement(
                 DmsSpriteGroups.ToGenericElement(originalElement, slugcatId));
             Color color;
-            if (part != null && DefaultColors.TryGetValue(part, out color) && color.A > 0)
+            if (part != null && DefaultColors.TryGetValue(part, out color) &&
+                color.A > 0 && !IsNeutralWhite(color))
                 return color;
             // A colour-authored DMS PNG keeps its own palette. The fallback
             // already contains an explicit user colour when one exists, then
@@ -249,11 +251,16 @@ namespace RainWorldDesktopPet.Workshop
             return false;
         }
 
+        internal static bool IsNeutralWhite(Color color)
+        {
+            return color.R == 255 && color.G == 255 && color.B == 255;
+        }
+
         // TailTexture is a deforming mesh rather than a normal FSprite, but
         // follows the same priority as normal DMS elements.
         public Color ResolveTailTint(AtlasSprite sprite, Color fallback, bool hasCustomColor)
         {
-            if (DefaultTail.Color.A > 0) return DefaultTail.Color;
+            if (DefaultTail.Color.A > 0 && !IsNeutralWhite(DefaultTail.Color)) return DefaultTail.Color;
             return sprite == null || !HasAuthoredColor(sprite) ? fallback : Color.White;
         }
 

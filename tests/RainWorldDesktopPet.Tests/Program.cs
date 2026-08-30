@@ -2222,6 +2222,13 @@ namespace RainWorldDesktopPet.Tests
             Equal(metadataColor.ToArgb(), skin.ResolveTint("BodyA", "White", profileColor,
                 true).ToArgb(), "DMS metadata colour wins over an explicit colour");
 
+            Color customColor = Color.FromArgb(255, 224, 95, 75);
+            skin.DefaultColors["BODY"] = Color.White;
+            Equal(customColor.ToArgb(), skin.ResolveTint("BodyA", "White", customColor,
+                true).ToArgb(), "a white DMS metadata mask inherits an explicit colour");
+            Equal(profileColor.ToArgb(), skin.ResolveTint("BodyA", "White", profileColor,
+                false).ToArgb(), "a white DMS metadata mask inherits the Slugcat colour");
+
             using (Bitmap monochrome = new Bitmap(2, 1))
             using (Bitmap authored = new Bitmap(2, 1))
             {
@@ -2246,6 +2253,9 @@ namespace RainWorldDesktopPet.Tests
                 "DMS tail metadata remains the default when provided");
             Equal(tailMetadataColor.ToArgb(), skin.ResolveTailTint(null, tailBaseColor, true).ToArgb(),
                 "DMS tail metadata wins over an explicit colour");
+            skin.DefaultTail.Color = Color.White;
+            Equal(tailBaseColor.ToArgb(), skin.ResolveTailTint(null, tailBaseColor, false).ToArgb(),
+                "a white DMS tail metadata mask inherits the Slugcat colour");
         }
 
         private static void V5PresetSkinIdParses()
