@@ -474,7 +474,11 @@ namespace RainWorldDesktopPet.Creature
 
         private void ApplyCollisionRadii(bool preserveGroundContact)
         {
-            double scale = sizeMovementScale * BodyProportionScale;
+            // Player.setPupStatus changes the juvenile body connection and mass,
+            // but keeps the original BodyChunk radii.  The desktop size option is
+            // therefore the only scale that belongs on collision radii; applying
+            // the 17 -> 12 connection ratio here makes pups artificially tiny.
+            double scale = sizeMovementScale;
             double mainRadius = SimulationConstants.MainChunkRadius * scale;
             double hipsRadius = SimulationConstants.HipsChunkRadius * scale;
             BodyChunk hips = BodyChunks[1];
@@ -486,7 +490,7 @@ namespace RainWorldDesktopPet.Creature
             {
                 // Windows simulation Y points down. Move the chunk centre by the
                 // lost/gained radius so its collision bottom stays on the exact
-                // same floor while size or pup mode changes.
+                // same floor while the explicit desktop size changes.
                 Vec2 floorCompensation = new Vec2(0.0, oldHipsRadius - hipsRadius);
                 for (int i = 0; i < BodyChunks.Length; i++)
                 {
