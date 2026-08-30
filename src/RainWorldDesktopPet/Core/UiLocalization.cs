@@ -32,7 +32,9 @@ namespace RainWorldDesktopPet.Core
 
         public static string Text(string korean, string english)
         {
-            return Current == UiLanguage.Korean ? NormalizeKoreanText(korean) : english;
+            return Current == UiLanguage.Korean
+                ? NormalizeKoreanText(korean)
+                : NormalizeEnglishText(english);
         }
 
         private static string NormalizeKoreanText(string value)
@@ -48,7 +50,17 @@ namespace RainWorldDesktopPet.Core
                 case "SpearMaster — 창술가": return "창술가";
                 case "Rivulet — 물살이": return "물살이";
                 case "Saint — 성자": return "성자";
-                case "캐릭터와 능력": return "슬러그캣";
+                case "캐릭터와 능력": return "캐릭터";
+                default: return value;
+            }
+        }
+
+        private static string NormalizeEnglishText(string value)
+        {
+            if (string.IsNullOrEmpty(value)) return value;
+            switch (value)
+            {
+                case "Character and Ability": return "Character";
                 default: return value;
             }
         }
@@ -128,8 +140,9 @@ namespace RainWorldDesktopPet.Core
                     case "렌더링 재시도": return "Retry Rendering";
                     case "스킨 편집기 (실험적)": return "Skin Editor (Experimental)";
                     case "종료": return "Exit";
-                    case "캐릭터와 능력": return "Character and Ability";
-                    case "슬러그캣": return "Character and Ability";
+                    case "캐릭터와 능력": return "Character";
+                    case "캐릭터": return "Character";
+                    case "슬러그캣": return "Slugcats";
                     case "Workshop 모드 새로 고침": return "Refresh Workshop Mods";
                     case "슬러그캣 추가": return "Add Slugcat";
                     case "다음 슬러그캣 선택": return "Select Next Slugcat";
@@ -169,7 +182,8 @@ namespace RainWorldDesktopPet.Core
                 case "Retry Rendering": return "렌더링 재시도";
                 case "Skin Editor (Experimental)": return "스킨 편집기 (실험적)";
                 case "Exit": return "종료";
-                case "Character and Ability": return "슬러그캣";
+                case "Character and Ability": return "캐릭터";
+                case "Character": return "캐릭터";
                 case "Refresh Workshop Mods": return "Workshop 모드 새로 고침";
                 case "Slugcats": return "슬러그캣";
                 case "Add Slugcat": return "슬러그캣 추가";
