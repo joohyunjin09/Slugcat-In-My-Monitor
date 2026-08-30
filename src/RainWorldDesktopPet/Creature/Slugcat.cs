@@ -438,7 +438,7 @@ namespace RainWorldDesktopPet.Creature
                 throw new ArgumentOutOfRangeException("value");
 
             sizeMovementScale = value;
-            ApplyCollisionRadii(true);
+            ApplyCollisionRadii(false);
         }
 
         public void SetPupAppearance(bool enabled)
