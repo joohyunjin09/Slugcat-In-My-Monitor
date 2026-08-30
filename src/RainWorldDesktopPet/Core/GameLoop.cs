@@ -177,6 +177,7 @@ namespace RainWorldDesktopPet.Core
         }
 
         public Color GetPartColor(string part) { return Graphics.GetPartColor(part); }
+        public bool HasCustomPartColor(string part) { return Graphics.HasCustomPartColor(part); }
         public void SetPartColor(string part, Color color) { Graphics.SetPartColor(part, color); }
         public void ClearPartColors() { Graphics.ClearPartColors(); }
         public WorkshopCatalog WorkshopCatalog { get { return workshopCatalog; } }
@@ -194,6 +195,17 @@ namespace RainWorldDesktopPet.Core
             if (skin != null && skin.TryGetSprite(element, CurrentSlugcatId(),
                 DmsSpriteSide.None, out sprite)) return true;
             return atlas != null && atlas.TryGet(element, out sprite);
+        }
+
+        public Color GetDmsPartPreviewTint(string part)
+        {
+            Color fallback = GetPartColor(part);
+            DmsSkinDefinition skin = Renderer.GetDmsPart(part);
+            string element = DmsSpriteGroups.PreviewElement(part);
+            return skin == null || string.IsNullOrEmpty(element)
+                ? fallback
+                : skin.ResolveTint(element, CurrentSlugcatId(), fallback,
+                    Graphics.HasCustomPartColor(part));
         }
         public DmsSkinDefinition ActiveDmsSkin { get { return Renderer.ActiveDmsSkin; } }
 

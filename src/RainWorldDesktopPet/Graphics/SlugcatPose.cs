@@ -10,6 +10,27 @@ namespace RainWorldDesktopPet.Graphics
 {
     public sealed class SlugcatPose
     {
+        public bool HasCustomDmsPartColor(string part)
+        {
+            if (string.IsNullOrWhiteSpace(part)) return false;
+            switch (part.ToUpperInvariant())
+            {
+                case "BODY": return HasCustomBodyColor;
+                case "FACE": return HasCustomFaceColor;
+                case "HEAD": return HasCustomHeadColor;
+                case "ARMS": return HasCustomArmsColor;
+                case "HIPS": return HasCustomHipsColor;
+                case "LEGS": return HasCustomLegsColor;
+                case "TAIL": return HasCustomTailColor;
+                case "FACESCAR": return HasCustomFaceScarColor;
+                case "GILLS": return HasCustomGillsColor;
+                case "TAILSPECKLES": return HasCustomTailSpecklesColor;
+                case "ASCENSION": return HasCustomAscensionColor;
+                case "PIXEL": return HasCustomPixelColor;
+                default: return false;
+            }
+        }
+
         public long SimulationTick;
         public double TimeStacker;
         public double LogicTicksPerSecond;
@@ -140,6 +161,18 @@ namespace RainWorldDesktopPet.Graphics
         public Color VisualHipsColor = Color.White;
         public Color VisualLegsColor = Color.White;
         public Color VisualTailColor = Color.White;
+        public bool HasCustomBodyColor;
+        public bool HasCustomFaceColor;
+        public bool HasCustomHeadColor;
+        public bool HasCustomArmsColor;
+        public bool HasCustomHipsColor;
+        public bool HasCustomLegsColor;
+        public bool HasCustomTailColor;
+        public bool HasCustomFaceScarColor;
+        public bool HasCustomGillsColor;
+        public bool HasCustomTailSpecklesColor;
+        public bool HasCustomAscensionColor;
+        public bool HasCustomPixelColor;
         public string BodyElement = "BodyA";
         public string HipsElement = "HipsA";
         public double VisualBodyScale = 1.0;

@@ -141,6 +141,7 @@ namespace RainWorldDesktopPet.Tests
             Run("AI produces VirtualInput without moving physics directly", AiDoesNotMoveCreature);
             Run("Futile atlas metadata parses frame geometry", AtlasMetadataParses);
             Run("DMS part atlas overrides and restores original sprites", DmsPartAtlasOverrideRestoresBase);
+            Run("DMS preserves authored PNG colour until a part is customized", DmsAuthoredColorIsPreservedUntilCustomized);
             Run("DMS sprites beside the executable are discovered", DmsSpritesBesideExecutableAreDiscovered);
             Run("Customize colors reach each rendered sprite part", PartColorsReachRenderedPose);
             Run("Rain World locator validates an explicit installation", LocatorValidatesExplicitPath);
@@ -2180,6 +2181,23 @@ namespace RainWorldDesktopPet.Tests
             {
                 if (Directory.Exists(root)) Directory.Delete(root, true);
             }
+        }
+
+        private static void DmsAuthoredColorIsPreservedUntilCustomized()
+        {
+            DmsSkinDefinition skin = new DmsSkinDefinition();
+            Color profileColor = Color.FromArgb(255, 74, 132, 201);
+            Equal(Color.White.ToArgb(), skin.ResolveTint("BodyA", "White", profileColor,
+                false).ToArgb(), "an authored DMS PNG is not multiplied by the Slugcat colour");
+            Equal(profileColor.ToArgb(), skin.ResolveTint("BodyA", "White", profileColor,
+                true).ToArgb(), "an explicitly customized DMS part remains tintable");
+
+            Color metadataColor = Color.FromArgb(255, 42, 205, 110);
+            skin.DefaultColors["BODY"] = metadataColor;
+            Equal(metadataColor.ToArgb(), skin.ResolveTint("BodyA", "White", profileColor,
+                false).ToArgb(), "DMS metadata colour remains the default for greyscale sheets");
+            Equal(profileColor.ToArgb(), skin.ResolveTint("BodyA", "White", profileColor,
+                true).ToArgb(), "an explicit colour overrides DMS metadata colour");
         }
 
         private static void DmsSpritesBesideExecutableAreDiscovered()

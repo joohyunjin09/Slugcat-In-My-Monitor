@@ -189,14 +189,20 @@ namespace RainWorldDesktopPet.Workshop
             return elements.TryGetValue(generic, out sprite);
         }
 
-        public Color ResolveTint(string originalElement, string slugcatId, Color fallback)
+        // DMS sheets may either contain their authored colour directly or use a
+        // metadata default for a greyscale sheet. A Slugcat/profile colour is
+        // only a tint when the user explicitly picked a colour for this part;
+        // otherwise multiplying it into a coloured DMS PNG destroys its detail.
+        public Color ResolveTint(string originalElement, string slugcatId, Color fallback,
+            bool hasCustomColor)
         {
             string part = DmsSpriteGroups.PartForElement(
                 DmsSpriteGroups.ToGenericElement(originalElement, slugcatId));
             Color color;
+            if (hasCustomColor) return fallback;
             return part != null && DefaultColors.TryGetValue(part, out color) && color.A > 0
                 ? color
-                : fallback;
+                : Color.White;
         }
 
         public Bitmap CreatePreview(int size)
