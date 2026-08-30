@@ -154,6 +154,7 @@ namespace RainWorldDesktopPet.Tests
             Run("Obstacle contact makes an original jump attempt reachable", ObstacleJumpIsReachable);
             Run("Mouse locomotion requires explicit click attention", MouseLocomotionRequiresAttention);
             Run("Wall contact reaches gravity-driven WallClimb through VirtualInput", WallContactReachesClimbMovement);
+            Run("Original blocked-wall pose applies to Slugcat and Slugpup", OriginalBlockedWallPoseAppliesToSlugcatAndSlugpup);
             Run("WallClimb hands use alternating wall targets", WallClimbHandsTargetTheWall);
             Run("Sleep curl pulls both hands to the original target", SleepCurlHandsShareOriginalTarget);
             Run("Moving window walls carry a climbing Slugcat", MovingWindowWallCarriesClimber);
@@ -2517,8 +2518,86 @@ namespace RainWorldDesktopPet.Tests
             slugcat.Movement.ApplyInput(input, world);
             True(slugcat.State.BodyMode == BodyModeIndex.WallClimb,
                 "movement must interpret climb VirtualInput without direct AI movement");
-            True(slugcat.BodyChunks[0].Velocity.Y >= 0.0 && slugcat.BodyChunks[1].Velocity.Y >= 0.0,
-                "wall slide must not inject upward screen-space velocity");
+            True(slugcat.BodyChunks[0].Velocity.Y + slugcat.BodyChunks[1].Velocity.Y >= 0.0,
+                "wall slide's standing support must not create net upward screen-space travel");
+        }
+
+        private static void OriginalBlockedWallPoseAppliesToSlugcatAndSlugpup()
+        {
+            MonitorInfo monitor = new MonitorInfo("WALL-POSE-MONITOR",
+                new Rectangle(0, 0, 1200, 900), new Rectangle(0, 0, 1200, 850), true);
+            DesktopCollisionWorld world = CreateSyntheticWorld(
+                new[] { monitor }, new DesktopWindowSnapshot[0]);
+            double wall = DesktopWorldTransform.ToSimulationLength(monitor.Bounds.Right);
+            double floor = DesktopWorldTransform.ToSimulationLength(monitor.FloorY);
+
+            foreach (bool renderAsPup in new[] { false, true })
+            {
+                Slugcat slugcat = new Slugcat(new Vec2(400.0, 400.0));
+                slugcat.SetPupAppearance(renderAsPup);
+                slugcat.Reposition(new Vec2(wall - SimulationConstants.HipsChunkRadius,
+                    floor - SimulationConstants.HipsChunkRadius));
+                slugcat.State.BodyMode = BodyModeIndex.Stand;
+                // Reproduce the ordinary standing-to-crawl transition that can
+                // already be active when the pet reaches the monitor edge.
+                // WallClimb must replace it rather than letting the pet fold
+                // down while it keeps pressing into the wall.
+                slugcat.State.Animation = AnimationIndex.DownOnFours;
+
+                // This runs the real desktop order: body chunks resolve against
+                // both the ground and the right monitor wall before the source
+                // Player.MovementUpdate-equivalent receives horizontal input.
+                // The wall contact must remain continuous; losing it for even one
+                // tick would alternate the rendered Stand and WallClimb poses.
+                for (int tick = 0; tick < 24; tick++)
+                {
+                    slugcat.Step(new VirtualInput(1, 0, false, false), world,
+                        Vec2.Zero, Vec2.Zero);
+                    True(slugcat.State.BodyMode == BodyModeIndex.WallClimb,
+                        "blocked-wall body mode must not flicker at tick " + tick +
+                        " chest=" + slugcat.BodyChunks[0].Position +
+                        " hips=" + slugcat.BodyChunks[1].Position +
+                        " chestRight=" + slugcat.BodyChunks[0].ContactRight +
+                        " hipsRight=" + slugcat.BodyChunks[1].ContactRight);
+                    True(slugcat.State.Animation == AnimationIndex.None,
+                        "blocked-wall pose must cancel DownOnFours at tick " + tick);
+                }
+                Vec2 originalChest = slugcat.BodyChunks[0].Position;
+                Vec2 originalHips = slugcat.BodyChunks[1].Position;
+
+                SlugcatGraphics graphics = new SlugcatGraphics(slugcat);
+                AttentionSystem attention = new AttentionSystem();
+                graphics.Step(attention, world);
+                SlugcatPose pose = graphics.BuildPose(1.0, attention);
+                True(pose.BodyMode == BodyModeIndex.WallClimb,
+                    "render pose should retain the wall-climb body mode");
+                True(pose.RenderAsPup == renderAsPup,
+                    "wall pose must preserve the selected adult or pup render state");
+
+                Vec2 expectedChest = originalHips - new Vec2(0.0,
+                    slugcat.EffectiveBodyConnectionDistance);
+                if (renderAsPup)
+                    expectedChest = Vec2.Lerp(expectedChest, originalHips, 0.475);
+                double wallOffset = slugcat.BodyChunks[1].ContactFloor ? 3.0 : 5.0;
+                expectedChest += new Vec2(-wallOffset, -2.0);
+                Near(expectedChest.X, pose.Chest.X, 0.000001,
+                    "wall pose chest x follows PlayerGraphics for the selected render state");
+                Near(expectedChest.Y, pose.Chest.Y, 0.000001,
+                    "wall pose chest y follows PlayerGraphics for the selected render state");
+                True(pose.Chest.Y < pose.Hips.Y,
+                    "blocked-wall render pose must keep the chest above the hips");
+                True(graphics.Arms[0].TargetPosition.X > slugcat.BodyChunks[0].Position.X &&
+                    graphics.Arms[1].TargetPosition.X > slugcat.BodyChunks[0].Position.X,
+                    "both original wall-pose hands should stay on the contacted wall");
+            }
+
+            Slugcat oppositeInput = new Slugcat(new Vec2(400.0, 400.0));
+            oppositeInput.Reposition(new Vec2(wall - SimulationConstants.HipsChunkRadius,
+                floor - SimulationConstants.HipsChunkRadius));
+            oppositeInput.Step(new VirtualInput(-1, 0, false, false), world,
+                Vec2.Zero, Vec2.Zero);
+            True(oppositeInput.State.BodyMode != BodyModeIndex.WallClimb,
+                "opposite horizontal input must not select the contacted-wall pose");
         }
 
         private static void OriginalFaceFrameSelection()
@@ -2631,9 +2710,11 @@ namespace RainWorldDesktopPet.Tests
                 "both wall-climb hands should target the contacted wall side");
             True(graphics.Arms[1].TargetPosition.X > slugcat.BodyChunks[0].Position.X,
                 "both wall-climb hands should target the contacted wall side");
-            Near(slugcat.BodyChunks[0].Position.Y - 3.0, graphics.Arms[0].TargetPosition.Y, 0.000001,
+            double wallChestY = slugcat.BodyChunks[1].Position.Y -
+                slugcat.EffectiveBodyConnectionDistance - 2.0;
+            Near(wallChestY - 3.0, graphics.Arms[0].TargetPosition.Y, 0.000001,
                 "upper wall hand offset");
-            Near(slugcat.BodyChunks[0].Position.Y + 7.0, graphics.Arms[1].TargetPosition.Y, 0.000001,
+            Near(wallChestY + 7.0, graphics.Arms[1].TargetPosition.Y, 0.000001,
                 "lower wall hand offset");
         }
 

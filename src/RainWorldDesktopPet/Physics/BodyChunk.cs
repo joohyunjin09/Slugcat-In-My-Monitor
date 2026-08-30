@@ -30,6 +30,7 @@ namespace RainWorldDesktopPet.Physics
         public bool ContactRight;
         public long SupportingSurfaceId;
         public DesktopSurfaceKind SupportingSurfaceKind;
+        public double SupportingSurfaceTop;
         public long WallSurfaceId;
         public DesktopSurfaceKind WallSurfaceKind;
         public double FloorImpactSpeed;
@@ -71,6 +72,7 @@ namespace RainWorldDesktopPet.Physics
             ContactRight = false;
             SupportingSurfaceId = 0;
             SupportingSurfaceKind = DesktopSurfaceKind.ScreenEdge;
+            SupportingSurfaceTop = 0.0;
             WallSurfaceId = 0;
             WallSurfaceKind = DesktopSurfaceKind.ScreenEdge;
             FloorImpactSpeed = 0.0;

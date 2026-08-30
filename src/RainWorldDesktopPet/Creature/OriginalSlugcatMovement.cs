@@ -200,13 +200,38 @@ namespace RainWorldDesktopPet.Creature
             SlugcatState state = owner.State;
             BodyChunk chest = owner.BodyChunks[0];
             BodyChunk hips = owner.BodyChunks[1];
-            if (wallContact && input.Y < 0 && !grounded)
+            // Player.MovementUpdate enters WallClimb when the front body chunk's
+            // horizontal ContactPoint is the same direction as the held input.
+            // It does not require an upward input or an airborne state.
+            int chestContactX = chest.ContactRight ? 1 : (chest.ContactLeft ? -1 : 0);
+            // The desktop BodyChunkConnection runs after terrain collision and
+            // can pull only the upper chunk a fraction off the same vertical
+            // surface. In that frame preserve the Player contact direction from
+            // the lower chunk; otherwise Stand and WallClimb would alternate.
+            int bodyContactX = chestContactX != 0
+                ? chestContactX
+                : (hips.ContactRight ? 1 : (hips.ContactLeft ? -1 : 0));
+            if (bodyContactX != 0 && bodyContactX == input.X)
             {
                 if (state.BodyMode != BodyModeIndex.WallClimb)
                     owner.EmitSound("Slugcat_Enter_Wall_Slide", owner.Center, 1.0, 1.0, 4);
                 state.BodyMode = BodyModeIndex.WallClimb;
+                // WallClimb is a body pose, not the completion of the ordinary
+                // Stand -> DownOnFours transition. Clear a transition that was
+                // started before the contact was resolved so the graphics stay
+                // in Player's wall pose while input remains into the wall.
                 state.Animation = AnimationIndex.None;
-                state.CanWallJump = ((chest.ContactRight || hips.ContactRight) ? -1 : 1) * 15;
+                state.CanWallJump = -bodyContactX * 15;
+                return;
+            }
+            // Player.UpdateBodyMode keeps an already-selected WallClimb body mode
+            // while the player continues pressing into that wall. Do not require
+            // a fresh desktop collision flag every tick: the connection pass can
+            // briefly separate both circular chunks from a one-pixel wall.
+            if (state.BodyMode == BodyModeIndex.WallClimb && input.X != 0 &&
+                input.X == state.Facing)
+            {
+                state.Animation = AnimationIndex.None;
                 return;
             }
             if (state.CanWallJump > 0) state.CanWallJump--;
@@ -619,6 +644,17 @@ namespace RainWorldDesktopPet.Creature
             SlugcatState state = owner.State;
             BodyChunk chest = owner.BodyChunks[0];
             BodyChunk hips = owner.BodyChunks[1];
+            if (state.BodyMode == BodyModeIndex.WallClimb)
+            {
+                // Retail Player applies its standing-body force before this
+                // branch. The desktop collision/connection solver does not
+                // share that order, so applying it after contact makes both
+                // chunks fight the monitor floor every tick. Keep the wall
+                // slide physics unchanged; SlugcatGraphics reconstructs the
+                // upright wall pose from the BodyChunkConnection distance.
+                state.Animation = AnimationIndex.None;
+                return;
+            }
             if (state.BodyMode == BodyModeIndex.Stand && grounded)
             {
                 chest.Velocity.Y -= 1.5;

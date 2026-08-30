@@ -522,6 +522,7 @@ namespace RainWorldDesktopPet.Physics
             chunk.ContactFloor = true;
             chunk.SupportingSurfaceId = bestFloor.Id;
             chunk.SupportingSurfaceKind = bestFloor.Kind;
+            chunk.SupportingSurfaceTop = bestFloor.Top;
         }
 
         private static void ResolveHorizontal(BodyChunk chunk,
@@ -605,6 +606,7 @@ namespace RainWorldDesktopPet.Physics
             chunk.ContactFloor = true;
             chunk.SupportingSurfaceId = best.Id;
             chunk.SupportingSurfaceKind = best.Kind;
+            chunk.SupportingSurfaceTop = best.Top;
             impact.PostImpactVelocity = chunk.Velocity;
         }
 
