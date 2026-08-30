@@ -123,6 +123,8 @@ namespace RainWorldDesktopPet.Workshop
             new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private readonly HashSet<string> asymmetricParts =
             new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, bool> authoredColorCache =
+            new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
 
         public string ModId;
         public string ModName;
@@ -189,30 +191,70 @@ namespace RainWorldDesktopPet.Workshop
             return elements.TryGetValue(generic, out sprite);
         }
 
-        // DMS sheets may either contain their authored colour directly or use a
-        // metadata default for a greyscale sheet. A Slugcat/profile colour is
-        // only a tint when the user explicitly picked a colour for this part;
-        // otherwise multiplying it into a coloured DMS PNG destroys its detail.
+        // DMS owns the visible source palette. Metadata and authored PNG
+        // colours must therefore win over the editor colour and the selected
+        // Slugcat's default; only neutral/greyscale sheets inherit fallback.
         public Color ResolveTint(string originalElement, string slugcatId, Color fallback,
             bool hasCustomColor)
+        {
+            return ResolveTint(null, originalElement, slugcatId, fallback, hasCustomColor);
+        }
+
+        public Color ResolveTint(AtlasSprite sprite, string originalElement, string slugcatId,
+            Color fallback, bool hasCustomColor)
         {
             string part = DmsSpriteGroups.PartForElement(
                 DmsSpriteGroups.ToGenericElement(originalElement, slugcatId));
             Color color;
-            if (hasCustomColor) return fallback;
-            return part != null && DefaultColors.TryGetValue(part, out color) && color.A > 0
-                ? color
-                : Color.White;
+            if (part != null && DefaultColors.TryGetValue(part, out color) && color.A > 0)
+                return color;
+            // A colour-authored DMS PNG keeps its own palette. The fallback
+            // already contains an explicit user colour when one exists, then
+            // the selected Slugcat's normal colour for monochrome art.
+            return sprite == null || !HasAuthoredColor(sprite) ? fallback : Color.White;
         }
 
-        // TailTexture is a deforming mesh rather than a normal FSprite. Its
-        // no-override state follows the selected Slugcat's tail colour, while
-        // DMS metadata and an explicit editor colour can still replace it.
-        public Color ResolveTailTint(Color fallback, bool hasCustomColor)
+        internal bool HasAuthoredColor(AtlasSprite sprite)
         {
-            return hasCustomColor || DefaultTail.Color.A <= 0
-                ? fallback
-                : DefaultTail.Color;
+            if (sprite == null || sprite.Atlas == null || sprite.Atlas.Image == null ||
+                sprite.Element == null) return false;
+            string key = sprite.Atlas.ImagePath + "|" + sprite.Element.Frame.X + "," +
+                sprite.Element.Frame.Y + "," + sprite.Element.Frame.Width + "," +
+                sprite.Element.Frame.Height;
+            bool result;
+            if (authoredColorCache.TryGetValue(key, out result)) return result;
+            result = HasAuthoredColor(sprite.Atlas.Image, sprite.Element.Frame);
+            authoredColorCache[key] = result;
+            return result;
+        }
+
+        internal static bool HasAuthoredColor(Bitmap bitmap, Rectangle frame)
+        {
+            if (bitmap == null || frame.Width < 1 || frame.Height < 1) return false;
+            Rectangle bounds = new Rectangle(0, 0, bitmap.Width, bitmap.Height);
+            frame.Intersect(bounds);
+            for (int y = frame.Top; y < frame.Bottom; y++)
+            {
+                for (int x = frame.Left; x < frame.Right; x++)
+                {
+                    Color pixel = bitmap.GetPixel(x, y);
+                    if (pixel.A < 16) continue;
+                    int minimum = Math.Min(pixel.R, Math.Min(pixel.G, pixel.B));
+                    int maximum = Math.Max(pixel.R, Math.Max(pixel.G, pixel.B));
+                    // Keep near-neutral antialiasing pixels from falsely
+                    // turning a monochrome DMS sheet into an authored palette.
+                    if (maximum - minimum > 12) return true;
+                }
+            }
+            return false;
+        }
+
+        // TailTexture is a deforming mesh rather than a normal FSprite, but
+        // follows the same priority as normal DMS elements.
+        public Color ResolveTailTint(AtlasSprite sprite, Color fallback, bool hasCustomColor)
+        {
+            if (DefaultTail.Color.A > 0) return DefaultTail.Color;
+            return sprite == null || !HasAuthoredColor(sprite) ? fallback : Color.White;
         }
 
         public Bitmap CreatePreview(int size)
@@ -253,6 +295,7 @@ namespace RainWorldDesktopPet.Workshop
             rightElements.Clear();
             availableParts.Clear();
             asymmetricParts.Clear();
+            authoredColorCache.Clear();
         }
     }
 

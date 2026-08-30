@@ -500,7 +500,7 @@ namespace RainWorldDesktopPet.Graphics
                 out dmsTail);
             Color tailColor = dmsTailSkin == null
                 ? bodyColor
-                : dmsTailSkin.ResolveTailTint(bodyColor,
+                : dmsTailSkin.ResolveTailTint(dmsTail, bodyColor,
                     pose.HasCustomDmsPartColor("TAIL"));
 
             // Rain World rasterizes PlayerGraphics' TriangleMesh at its 1:1
@@ -1097,7 +1097,7 @@ namespace RainWorldDesktopPet.Graphics
             bool dmsApplied = selectedPartSkin != null &&
                 selectedPartSkin.TryGetSprite(name, activePose.OriginalSlugcatId, side, out sprite);
             if (!dmsApplied && !atlas.TryGet(name, out sprite)) return;
-            if (dmsApplied) tint = selectedPartSkin.ResolveTint(name,
+            if (dmsApplied) tint = selectedPartSkin.ResolveTint(sprite, name,
                 activePose.OriginalSlugcatId, tint,
                 activePose.HasCustomDmsPartColor(dmsPart));
             AtlasElement element = sprite.Element;

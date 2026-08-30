@@ -392,12 +392,12 @@ namespace RainWorldDesktopPet.UI
             HashSet<string> customizedColors = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             for (int i = firstPart; i < fields.Length; i++)
             {
-                int equals = fields[i].IndexOf('=');
-                int comma = fields[i].LastIndexOf(',');
-                if (equals <= 0 || comma <= equals) continue;
-                string part = NormalizePresetPart(fields[i].Substring(0, equals));
+                string serializedPart;
+                string id;
+                int colorStart;
+                if (!TrySplitPresetPart(fields[i], out serializedPart, out id, out colorStart)) continue;
+                string part = NormalizePresetPart(serializedPart);
                 if (!partSelectors.ContainsKey(part)) continue;
-                string id = fields[i].Substring(equals + 1, comma - equals - 1);
                 DmsSkinDefinition set = FindSet(id);
                 if (!string.Equals(id, "default", StringComparison.OrdinalIgnoreCase))
                 {
@@ -410,10 +410,10 @@ namespace RainWorldDesktopPet.UI
                 }
                 sets[part] = set;
                 uint argb;
-                int colorEnd = fields[i].IndexOf(',', comma + 1);
+                int colorEnd = fields[i].IndexOf(',', colorStart + 1);
                 string colorText = colorEnd < 0
-                    ? fields[i].Substring(comma + 1)
-                    : fields[i].Substring(comma + 1, colorEnd - comma - 1);
+                    ? fields[i].Substring(colorStart + 1)
+                    : fields[i].Substring(colorStart + 1, colorEnd - colorStart - 1);
                 if (!uint.TryParse(colorText,
                     System.Globalization.NumberStyles.HexNumber, null, out argb))
                     throw new InvalidOperationException(T(PartDisplayName(part) + " 색상 정보가 올바르지 않습니다.",
@@ -446,6 +446,24 @@ namespace RainWorldDesktopPet.UI
             PopulateSpriteSelectors();
             RefreshFromGame();
             Changed(successMessage);
+        }
+
+        // V5 adds a second comma after the ARGB value. The skin ID always
+        // ends at the first comma following '='; using the last comma turns
+        // e.g. "homeobox.raincoatriv,FF91CCF0,0" into a nonexistent ID.
+        internal static bool TrySplitPresetPart(string field, out string part, out string id,
+            out int colorStart)
+        {
+            part = null;
+            id = null;
+            colorStart = -1;
+            if (string.IsNullOrEmpty(field)) return false;
+            int equals = field.IndexOf('=');
+            colorStart = field.IndexOf(',', equals + 1);
+            if (equals <= 0 || colorStart <= equals) return false;
+            part = field.Substring(0, equals);
+            id = field.Substring(equals + 1, colorStart - equals - 1);
+            return true;
         }
 
         private static string PresetDirectory

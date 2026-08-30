@@ -141,7 +141,8 @@ namespace RainWorldDesktopPet.Tests
             Run("AI produces VirtualInput without moving physics directly", AiDoesNotMoveCreature);
             Run("Futile atlas metadata parses frame geometry", AtlasMetadataParses);
             Run("DMS part atlas overrides and restores original sprites", DmsPartAtlasOverrideRestoresBase);
-            Run("DMS preserves authored PNG colour until a part is customized", DmsAuthoredColorIsPreservedUntilCustomized);
+            Run("DMS preserves authored source palettes over user colours", DmsAuthoredColorIsPreservedUntilCustomized);
+            Run("V5 presets preserve the exact DMS skin ID", V5PresetSkinIdParses);
             Run("DMS sprites beside the executable are discovered", DmsSpritesBesideExecutableAreDiscovered);
             Run("Customize colors reach each rendered sprite part", PartColorsReachRenderedPose);
             Run("Rain World locator validates an explicit installation", LocatorValidatesExplicitPath);
@@ -2187,27 +2188,80 @@ namespace RainWorldDesktopPet.Tests
         {
             DmsSkinDefinition skin = new DmsSkinDefinition();
             Color profileColor = Color.FromArgb(255, 74, 132, 201);
-            Equal(Color.White.ToArgb(), skin.ResolveTint("BodyA", "White", profileColor,
-                false).ToArgb(), "an authored DMS PNG is not multiplied by the Slugcat colour");
             Equal(profileColor.ToArgb(), skin.ResolveTint("BodyA", "White", profileColor,
-                true).ToArgb(), "an explicitly customized DMS part remains tintable");
+                false).ToArgb(), "a monochrome DMS sheet inherits the Slugcat colour");
+            Equal(profileColor.ToArgb(), skin.ResolveTint("BodyA", "White", profileColor,
+                true).ToArgb(), "a monochrome DMS part remains tintable");
+
+            using (RainWorldAtlas authoredAtlas = new RainWorldAtlas("authored.png",
+                new Bitmap(2, 1), new Dictionary<string, AtlasElement>
+                {
+                    { "BodyA", new AtlasElement { Name = "BodyA", Frame = new Rectangle(0, 0, 2, 1) } }
+                }))
+            {
+                authoredAtlas.Image.SetPixel(0, 0, Color.White);
+                authoredAtlas.Image.SetPixel(1, 0, Color.FromArgb(255, 220, 45, 60));
+                AtlasSprite authoredSprite = new AtlasSprite
+                {
+                    Atlas = authoredAtlas,
+                    Element = authoredAtlas.Elements["BodyA"]
+                };
+                Equal(Color.White.ToArgb(), skin.ResolveTint(authoredSprite, "BodyA", "White",
+                    profileColor, true).ToArgb(),
+                    "an authored DMS palette wins over an explicit colour");
+
+                Color authoredTailBaseColor = Color.FromArgb(255, 191, 68, 92);
+                Equal(Color.White.ToArgb(), skin.ResolveTailTint(authoredSprite, authoredTailBaseColor, true).ToArgb(),
+                    "an authored DMS tail palette wins over an explicit colour");
+            }
 
             Color metadataColor = Color.FromArgb(255, 42, 205, 110);
             skin.DefaultColors["BODY"] = metadataColor;
             Equal(metadataColor.ToArgb(), skin.ResolveTint("BodyA", "White", profileColor,
                 false).ToArgb(), "DMS metadata colour remains the default for greyscale sheets");
-            Equal(profileColor.ToArgb(), skin.ResolveTint("BodyA", "White", profileColor,
-                true).ToArgb(), "an explicit colour overrides DMS metadata colour");
+            Equal(metadataColor.ToArgb(), skin.ResolveTint("BodyA", "White", profileColor,
+                true).ToArgb(), "DMS metadata colour wins over an explicit colour");
+
+            using (Bitmap monochrome = new Bitmap(2, 1))
+            using (Bitmap authored = new Bitmap(2, 1))
+            {
+                monochrome.SetPixel(0, 0, Color.White);
+                monochrome.SetPixel(1, 0, Color.FromArgb(255, 80, 80, 80));
+                authored.SetPixel(0, 0, Color.White);
+                authored.SetPixel(1, 0, Color.FromArgb(255, 220, 45, 60));
+                True(!DmsSkinDefinition.HasAuthoredColor(monochrome,
+                    new Rectangle(0, 0, 2, 1)),
+                    "neutral DMS art inherits the Slugcat colour");
+                True(DmsSkinDefinition.HasAuthoredColor(authored,
+                    new Rectangle(0, 0, 2, 1)),
+                    "coloured DMS art keeps its authored palette");
+            }
 
             Color tailBaseColor = Color.FromArgb(255, 191, 68, 92);
-            Equal(tailBaseColor.ToArgb(), skin.ResolveTailTint(tailBaseColor, false).ToArgb(),
+            Equal(tailBaseColor.ToArgb(), skin.ResolveTailTint(null, tailBaseColor, false).ToArgb(),
                 "a DMS tail follows the selected Slugcat colour by default");
             Color tailMetadataColor = Color.FromArgb(255, 201, 171, 43);
             skin.DefaultTail.Color = tailMetadataColor;
-            Equal(tailMetadataColor.ToArgb(), skin.ResolveTailTint(tailBaseColor, false).ToArgb(),
+            Equal(tailMetadataColor.ToArgb(), skin.ResolveTailTint(null, tailBaseColor, false).ToArgb(),
                 "DMS tail metadata remains the default when provided");
-            Equal(tailBaseColor.ToArgb(), skin.ResolveTailTint(tailBaseColor, true).ToArgb(),
-                "an explicitly customized DMS tail overrides metadata colour");
+            Equal(tailMetadataColor.ToArgb(), skin.ResolveTailTint(null, tailBaseColor, true).ToArgb(),
+                "DMS tail metadata wins over an explicit colour");
+        }
+
+        private static void V5PresetSkinIdParses()
+        {
+            string part;
+            string id;
+            int colorStart;
+            True(SkinEditorWindow.TrySplitPresetPart(
+                "HEAD=homeobox.raincoatriv,FF91CCF0,0", out part, out id, out colorStart),
+                "V5 part field must parse");
+            True(string.Equals("HEAD", part, StringComparison.Ordinal), "V5 part name");
+            True(string.Equals("homeobox.raincoatriv", id, StringComparison.Ordinal),
+                "V5 DMS skin ID must exclude its ARGB and flag");
+            True(string.Equals("FF91CCF0,0",
+                "HEAD=homeobox.raincoatriv,FF91CCF0,0".Substring(colorStart + 1), StringComparison.Ordinal),
+                "V5 colour data begins after the DMS skin ID");
         }
 
         private static void DmsSpritesBesideExecutableAreDiscovered()

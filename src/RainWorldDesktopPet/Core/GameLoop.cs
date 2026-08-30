@@ -202,9 +202,11 @@ namespace RainWorldDesktopPet.Core
             Color fallback = GetPartColor(part);
             DmsSkinDefinition skin = Renderer.GetDmsPart(part);
             string element = DmsSpriteGroups.PreviewElement(part);
-            return skin == null || string.IsNullOrEmpty(element)
+            AtlasSprite sprite;
+            return skin == null || string.IsNullOrEmpty(element) ||
+                !skin.TryGetSprite(element, CurrentSlugcatId(), DmsSpriteSide.None, out sprite)
                 ? fallback
-                : skin.ResolveTint(element, CurrentSlugcatId(), fallback,
+                : skin.ResolveTint(sprite, element, CurrentSlugcatId(), fallback,
                     Graphics.HasCustomPartColor(part));
         }
         public DmsSkinDefinition ActiveDmsSkin { get { return Renderer.ActiveDmsSkin; } }
