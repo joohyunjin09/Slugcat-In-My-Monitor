@@ -145,6 +145,10 @@ namespace RainWorldDesktopPet.Graphics
         public double CharacterRenderScale = SimulationConstants.CharacterRenderScale;
         public SlugcatId SelectedSlugcat;
         public SlugcatSkin CurrentSkin;
+        // Mirrors PlayerGraphics.RenderAsPup for the sprite-selection branch.
+        // The desktop app has no PlayerState.forceFullGrown equivalent, so its
+        // graphics-only Slugpup setting maps directly to this state.
+        public bool RenderAsPup;
         public string OriginalSlugcatId = "White";
         public string VisualProfileName = "Default";
         public string MovementProfileDebug = string.Empty;

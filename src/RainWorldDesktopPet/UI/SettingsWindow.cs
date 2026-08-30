@@ -234,7 +234,13 @@ namespace RainWorldDesktopPet.UI
                 retryButton.Enabled = app.SettingsCanRetryRendering;
                 debugCheck.Checked = app.SettingsDebugEnabled;
                 pauseCheck.Checked = app.SettingsPaused;
-                pupAppearanceCheck.Checked = app.SettingsIsSlugpupAppearance();
+                bool canUseSlugpup = app.SettingsCanUseSlugpupAppearance();
+                pupAppearanceCheck.Enabled = canUseSlugpup;
+                pupAppearanceCheck.Text = canUseSlugpup
+                    ? T("슬러그펍", "Slugpup")
+                    : T("슬러그펍 (More Slugcats 확장팩 필요)",
+                        "Slugpup (More Slugcats Expansion required)");
+                pupAppearanceCheck.Checked = canUseSlugpup && app.SettingsIsSlugpupAppearance();
                 for (int i = 0; i < languageSelector.Items.Count; i++)
                 {
                     LanguageChoice language = languageSelector.Items[i] as LanguageChoice;
@@ -409,7 +415,16 @@ namespace RainWorldDesktopPet.UI
             GameLoop loop = SelectedLoop(app);
             if (loop == null) return false;
             Track(loop);
-            return loop.Slugcat.PupAppearance;
+            return EnsureSlugpupAvailability(loop) && loop.Slugcat.PupAppearance;
+        }
+
+        internal static bool SettingsCanUseSlugpupAppearance(
+            this LayeredOverlayWindow app)
+        {
+            GameLoop loop = SelectedLoop(app);
+            if (loop == null) return false;
+            Track(loop);
+            return EnsureSlugpupAvailability(loop);
         }
 
         internal static void SettingsSetSlugpupAppearance(
@@ -418,7 +433,7 @@ namespace RainWorldDesktopPet.UI
             GameLoop loop = SelectedLoop(app);
             if (loop == null) return;
             Track(loop);
-            loop.Slugcat.SetPupAppearance(enabled);
+            loop.Slugcat.SetPupAppearance(EnsureSlugpupAvailability(loop) && enabled);
             SynchronizeGraphics(loop);
 
             // Re-enter the existing size boundary once so hit testing and the
@@ -433,6 +448,7 @@ namespace RainWorldDesktopPet.UI
             GameLoop loop = SelectedLoop(app);
             if (loop == null) return;
             Track(loop);
+            EnsureSlugpupAvailability(loop);
             SynchronizeGraphics(loop);
         }
 
@@ -473,23 +489,37 @@ namespace RainWorldDesktopPet.UI
                     trackedLoops.RemoveAt(i);
                     continue;
                 }
+                EnsureSlugpupAvailability(loop);
                 if (!loop.Slugcat.PupAppearance) continue;
                 try { SynchronizeGraphics(loop); }
                 catch (ObjectDisposedException) { trackedLoops.RemoveAt(i); }
             }
         }
 
+        private static bool EnsureSlugpupAvailability(GameLoop loop)
+        {
+            bool available = loop != null && loop.Installation != null &&
+                loop.Installation.HasMoreSlugcatsExpansion;
+            if (!available && loop != null && loop.Slugcat.PupAppearance)
+            {
+                // A configuration may survive after the installed game changes.
+                // Restore the adult geometry before exposing the disabled control.
+                loop.Slugcat.SetPupAppearance(false);
+                SynchronizeGraphics(loop);
+            }
+            return available;
+        }
+
         private static void SynchronizeGraphics(GameLoop loop)
         {
             if (loop == null) return;
-            double scale = loop.Slugcat.BodyProportionScale;
+            const double scale = 1.0;
             if (loop.Slugcat.Appearance != null &&
                 Math.Abs(loop.Slugcat.Appearance.PupScale - scale) > 0.000001)
                 loop.Slugcat.Appearance.SetPupScale(scale);
 
-            if (loop.Graphics.Tail != null &&
-                Math.Abs(loop.Graphics.Tail.GeometryScale - scale) > 0.000001)
-                loop.Graphics.Tail.SetGeometryScale(scale,
+            if (loop.Graphics.Tail != null)
+                loop.Graphics.Tail.SetPupGeometry(loop.Slugcat.PupAppearance,
                     loop.Slugcat.BodyChunks[1].Position);
 
             for (int i = 0; i < loop.Graphics.Arms.Length; i++)

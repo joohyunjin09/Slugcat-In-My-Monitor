@@ -264,7 +264,9 @@ namespace RainWorldDesktopPet.Graphics
             head.Update();
             world.PushOutOfTerrain(head, slugcat.BodyChunks[0].Position);
             Vec2 neckDirection = bodyUp * 3.0;
-            if (slugcat.State.BodyMode == BodyModeIndex.Crawl) neckDirection.X *= 2.5;
+            // PlayerGraphics skips the adult crawl neck widening for RenderAsPup.
+            if (slugcat.State.BodyMode == BodyModeIndex.Crawl && !slugcat.PupAppearance)
+                neckDirection.X *= 2.5;
             Vec2 headTarget = Vec2.Lerp(upper, lower, 0.2) + neckDirection;
             headTargetPosition = headTarget;
             head.ConnectToPoint(headTarget, 3.0, false, 0.2,
@@ -494,13 +496,27 @@ namespace RainWorldDesktopPet.Graphics
             int facing = slugcat.State.Facing;
             Vec2 upper = drawPositions[0, 0];
             Vec2 lower = drawPositions[1, 0];
+            bool renderAsPup = slugcat.PupAppearance;
+
+            if (renderAsPup)
+            {
+                // PlayerGraphics.Update moves drawPositions[0, 0] toward the
+                // hips before any body-mode offsets.  A normal Player has no
+                // NPCStats here, so the DLL evaluates the source expression
+                // 0.35 + (0.25 - 0.5 * 0.25) = 0.475.  This is a graphics
+                // pose adjustment, not a whole-character scale change.
+                upper = Vec2.Lerp(upper, lower, 0.475);
+            }
             if (slugcat.State.BodyMode == BodyModeIndex.Stand)
             {
                 double cycle = frame / 6.0 * Math.PI * 2.0;
-                upper.X += facing * 6.0 * MathUtil.Clamp(Math.Abs(slugcat.BodyChunks[1].Velocity.X) - 0.2, 0.0, 1.0);
-                upper.Y -= Math.Cos(cycle) * 2.0;
-                lower.X -= facing * (1.5 - frame / 6.0);
-                lower.Y -= 2.0 + Math.Sin(cycle) * 4.0;
+                upper.X += facing * (renderAsPup ? 2.0 : 6.0) *
+                    MathUtil.Clamp(Math.Abs(slugcat.BodyChunks[1].Velocity.X) - 0.2,
+                        0.0, 1.0);
+                upper.Y -= Math.Cos(cycle) * (renderAsPup ? 1.5 : 2.0);
+                lower.X -= facing * (1.5 - frame / 6.0) *
+                    (renderAsPup ? 0.25 : 1.0);
+                lower.Y -= 2.0 + Math.Sin(cycle) * (renderAsPup ? 2.0 : 4.0);
             }
             else if (slugcat.State.BodyMode == BodyModeIndex.Crawl)
             {
@@ -548,6 +564,7 @@ namespace RainWorldDesktopPet.Graphics
             pose.SimulationTick = simulationTick;
             pose.TimeStacker = timeStacker;
             pose.SelectedSlugcat = slugcat.SelectedSlugcat.Id;
+            pose.RenderAsPup = slugcat.PupAppearance;
             SlugcatVisualProfile compatibilityProfile =
                 SlugcatVisualProfiles.FromGraphics(graphicsProfile);
             pose.CurrentSkin = compatibilityProfile.Skin;

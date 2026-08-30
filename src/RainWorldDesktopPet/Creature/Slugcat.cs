@@ -73,7 +73,9 @@ namespace RainWorldDesktopPet.Creature
         public bool PupAppearance { get { return pupAppearance; } }
         public double BodyProportionScale
         {
-            get { return pupAppearance ? SlugpupAppearanceSettings.BodyScale : 1.0; }
+            // Player.setPupStatus keeps the original 9/8 BodyChunk radii.
+            // The pup-specific connection and tail rules are applied separately.
+            get { return 1.0; }
         }
         public double EffectiveBodyConnectionDistance
         {
@@ -474,7 +476,7 @@ namespace RainWorldDesktopPet.Creature
 
         private void ApplyCollisionRadii(bool preserveGroundContact)
         {
-            double scale = sizeMovementScale * BodyProportionScale;
+            double scale = sizeMovementScale;
             double mainRadius = SimulationConstants.MainChunkRadius * scale;
             double hipsRadius = SimulationConstants.HipsChunkRadius * scale;
             BodyChunk hips = BodyChunks[1];

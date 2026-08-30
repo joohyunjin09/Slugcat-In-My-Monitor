@@ -19,14 +19,10 @@ namespace RainWorldDesktopPet.Creature
 
     public static class SlugpupAppearanceSettings
     {
-        // Player.setPupStatus / RenderAsPup keeps the original player atlas and
-        // switches to the shorter juvenile body geometry. Rain World's adult
-        // Player connection is 17 units; the slugpup connection is 12 units.
-        // Use that canonical ratio for local body, limb, collision and tail
-        // geometry instead of adding a second whole-character render scale.
+        // Player.setPupStatus changes the BodyChunkConnection from 17 to 12.
+        // It does not rescale either BodyChunk radius; PlayerGraphics applies
+        // the separate half-length rule only when constructing the tail.
         public const double BodyConnectionDistance = 12.0;
-        public const double BodyScale =
-            BodyConnectionDistance / SimulationConstants.BodyConnectionDistance;
     }
 
     public sealed class SlugcatAppearance

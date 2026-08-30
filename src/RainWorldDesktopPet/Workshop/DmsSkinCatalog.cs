@@ -346,6 +346,19 @@ namespace RainWorldDesktopPet.Workshop
         public static string ToGenericElement(string element, string slugcatId)
         {
             if (string.IsNullOrEmpty(element)) return element;
+            // Dress My Slugcat supplies the normal HeadA/FaceA/FaceB sheets,
+            // then SpriteDefinitions.Init aliases those sheets to the concrete
+            // PlayerGraphics Slugpup names. A skin must therefore never need
+            // duplicate HeadC or PFace sprite files.
+            if (string.Equals(slugcatId, "Slugpup", StringComparison.OrdinalIgnoreCase))
+            {
+                if (element.StartsWith("HeadC", StringComparison.OrdinalIgnoreCase))
+                    return "HeadA" + element.Substring(5);
+                if (element.StartsWith("PFaceA", StringComparison.OrdinalIgnoreCase))
+                    return "FaceA" + element.Substring(6);
+                if (element.StartsWith("PFaceB", StringComparison.OrdinalIgnoreCase))
+                    return "FaceB" + element.Substring(6);
+            }
             if (string.Equals(slugcatId, "Saint", StringComparison.OrdinalIgnoreCase) &&
                 element.StartsWith("HeadB", StringComparison.OrdinalIgnoreCase))
                 return "HeadA" + element.Substring(5);

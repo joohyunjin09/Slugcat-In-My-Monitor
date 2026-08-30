@@ -106,6 +106,15 @@ namespace RainWorldDesktopPet.Graphics
         }
 
         public bool UsesLocalAtlas { get { return atlas != null; } }
+
+        // DMS uses Slugpup as the replacement-map identity, irrespective of
+        // the campaign whose PlayerGraphics is currently rendered as a pup.
+        // This mirrors DressMySlugcat's cached playerState.isPup branch.
+        internal static string ResolveDmsSlugcatId(SlugcatPose pose)
+        {
+            return pose != null && pose.RenderAsPup ? "Slugpup" : pose.OriginalSlugcatId;
+        }
+
         public DmsSkinDefinition ActiveDmsSkin
         {
             get
@@ -998,7 +1007,9 @@ namespace RainWorldDesktopPet.Graphics
 
             if (pose.MouseAttentionActive) reason += "+MouseAttention";
             SlugcatGraphicsProfile profile = ResolvePoseProfile(pose);
-            result.HeadElement = profile.HeadFamily + headFrame;
+            // PlayerGraphics.DrawSprites routes RenderAsPup through cachedHeads[2]
+            // (HeadC0..17), instead of scaling an adult HeadA/B atlas element.
+            result.HeadElement = (pose.RenderAsPup ? "HeadC" : profile.HeadFamily) + headFrame;
             result.HeadPosition = headPosition;
             result.HeadRotation = rawHeadAngle;
             result.HeadScaleX = headScaleX * pose.VisualHeadScale;
@@ -1019,6 +1030,13 @@ namespace RainWorldDesktopPet.Graphics
 
         private static string FaceFamily(SlugcatPose pose)
         {
+            // PlayerGraphics.DefaultFaceSprite selects cachedFaceSpriteNames[1]
+            // for RenderAsPup: PFaceA while awake and PFaceB while blinking.
+            // SaintFaceCondition shares that second (closed-eye) family, so it
+            // must take precedence even when the character is rendered as a pup.
+            if (pose.RenderAsPup)
+                return pose.Blink || ResolvePoseProfile(pose).Id == SlugcatId.Saint
+                    ? "PFaceB" : "PFaceA";
             return ResolvePoseProfile(pose).ResolveFaceFamily(
                 pose.Blink, SelectFaceScaleX(pose));
         }
@@ -1087,18 +1105,20 @@ namespace RainWorldDesktopPet.Graphics
             AtlasSprite sprite = null;
             DmsSkinDefinition selectedPartSkin = null;
             string dmsPart = null;
+            string dmsSlugcatId = null;
             if (activePose != null)
             {
+                dmsSlugcatId = ResolveDmsSlugcatId(activePose);
                 string generic = DmsSpriteGroups.ToGenericElement(name,
-                    activePose.OriginalSlugcatId);
+                    dmsSlugcatId);
                 dmsPart = DmsSpriteGroups.PartForElement(generic);
                 selectedPartSkin = GetDmsPart(dmsPart);
             }
             bool dmsApplied = selectedPartSkin != null &&
-                selectedPartSkin.TryGetSprite(name, activePose.OriginalSlugcatId, side, out sprite);
+                selectedPartSkin.TryGetSprite(name, dmsSlugcatId, side, out sprite);
             if (!dmsApplied && !atlas.TryGet(name, out sprite)) return;
             if (dmsApplied) tint = selectedPartSkin.ResolveTint(sprite, name,
-                activePose.OriginalSlugcatId, tint,
+                dmsSlugcatId, tint,
                 activePose.HasCustomDmsPartColor(dmsPart));
             AtlasElement element = sprite.Element;
             graphics.Save();
