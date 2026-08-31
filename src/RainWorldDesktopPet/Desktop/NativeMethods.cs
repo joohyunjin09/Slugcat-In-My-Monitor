@@ -68,6 +68,7 @@ namespace RainWorldDesktopPet.Desktop
         internal const int WHDR_BEGINLOOP = 0x00000004;
         internal const int WHDR_ENDLOOP = 0x00000008;
         internal const int WAVE_FORMAT_PCM = 1;
+        internal const int CALLBACK_EVENT = 0x00050000;
 
         [StructLayout(LayoutKind.Sequential)]
         internal struct WAVEFORMATEX
@@ -306,6 +307,9 @@ namespace RainWorldDesktopPet.Desktop
             IntPtr hWaveOut,
             IntPtr lpWaveHdr,
             int uSize);
+
+        [DllImport("winmm.dll")]
+        internal static extern int waveOutSetVolume(IntPtr hWaveOut, uint dwVolume);
 
         [DllImport("winmm.dll")]
         internal static extern int waveOutUnprepareHeader(

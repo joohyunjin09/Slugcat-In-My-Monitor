@@ -1,4 +1,5 @@
 using System;
+using RainWorldDesktopPet.Audio;
 using RainWorldDesktopPet.Core;
 using RainWorldDesktopPet.Desktop;
 using RainWorldDesktopPet.Physics;
@@ -15,12 +16,16 @@ namespace RainWorldDesktopPet.Creature
         private long impactStunDeadlineTick = -1;
         private readonly List<AbilityEffect> effects = new List<AbilityEffect>();
         private readonly List<DesktopSpear> spears = new List<DesktopSpear>();
+        private readonly Dictionary<string, string> spearAirLoops =
+            new Dictionary<string, string>(StringComparer.Ordinal);
         private readonly IList<AbilityEffect> effectView;
         private readonly IList<DesktopSpear> spearView;
         private readonly Random spearImpactRandom = new Random(0x5BEA7);
         private ISlugcatAbilityController abilityController;
         private double sizeMovementScale = 1.0;
         private bool pupAppearance;
+        private ISoundEventSink audioSink;
+        private string audioSourceId = string.Empty;
 
         public Slugcat(Vec2 spawnPosition)
             : this(spawnPosition, SlugcatId.White)
@@ -427,6 +432,7 @@ namespace RainWorldDesktopPet.Creature
             if (abilityController != null) abilityController.Reset();
             Movement.Reset();
             effects.Clear();
+            StopAllSpearAirLoops();
             spears.Clear();
         }
 
@@ -545,15 +551,39 @@ namespace RainWorldDesktopPet.Creature
         public void EmitSound(string id, Vec2 position, double volume, double pitch,
             int cooldownTicks)
         {
+            EmitSound(id, position, BodyChunks[0].Velocity, volume, pitch,
+                cooldownTicks);
+        }
+
+        public void EmitSound(string id, Vec2 position, Vec2 velocity,
+            double volume, double pitch, int cooldownTicks)
+        {
+            if (audioSink == null || string.IsNullOrEmpty(id)) return;
+            audioSink.Play(new SoundEvent(audioSourceId, id, position, velocity,
+                volume, pitch, Math.Max(0, cooldownTicks), physicsTick));
         }
 
         public void StartSoundLoop(string id, string loopKey, Vec2 position,
             double volume, double pitch)
         {
+            if (audioSink == null || string.IsNullOrEmpty(id) ||
+                string.IsNullOrEmpty(loopKey)) return;
+            audioSink.StartLoop(new SoundEvent(audioSourceId, id, position,
+                BodyChunks[0].Velocity, volume, pitch, 0, physicsTick), loopKey);
         }
 
         public void StopSoundLoop(string id, string loopKey, Vec2 position)
         {
+            if (audioSink == null || string.IsNullOrEmpty(loopKey)) return;
+            audioSink.StopLoop(audioSourceId, loopKey);
+        }
+
+        public void SetAudioSink(ISoundEventSink sink, string sourceId)
+        {
+            if (audioSink != null && !ReferenceEquals(audioSink, sink))
+                audioSink.StopSource(audioSourceId);
+            audioSink = sink;
+            audioSourceId = sourceId ?? string.Empty;
         }
 
         public void AddEffect(AbilityEffect effect)
@@ -575,21 +605,63 @@ namespace RainWorldDesktopPet.Creature
             }
             for (int i = spears.Count - 1; i >= 0; i--)
             {
-                if (spears[i].Step(world))
+                DesktopSpear spear = spears[i];
+                if (spear.Step(world))
                 {
-                    for (int spark = 0; spark < spears[i].ImpactSparkCount; spark++)
+                    if (!string.IsNullOrEmpty(spear.LastImpactSound))
+                        EmitSound(spear.LastImpactSound, spear.Chunk.Position,
+                            spear.Chunk.Velocity, 1.0, 1.0, 1);
+                    for (int spark = 0; spark < spear.ImpactSparkCount; spark++)
                     {
                         Vec2 angle = RandomUnit(spearImpactRandom);
-                        Vec2 at = spears[i].Chunk.Position +
-                            spears[i].ThrowDirection * (spears[i].Chunk.Radius - 1.0);
+                        Vec2 at = spear.Chunk.Position +
+                            spear.ThrowDirection * (spear.Chunk.Radius - 1.0);
                         Vec2 velocity = angle * (spearImpactRandom.NextDouble() * 10.0) -
-                            spears[i].ThrowDirection * 10.0;
+                            spear.ThrowDirection * 10.0;
                         AddEffect(AbilityEffect.CreateSpark(at, velocity, 2, 4,
                             spearImpactRandom));
                     }
                 }
-                if (spears[i].IsExpired) spears.RemoveAt(i);
+                UpdateSpearAirLoop(spear);
+                if (spear.IsExpired)
+                {
+                    StopSpearAirLoop(spear);
+                    spears.RemoveAt(i);
+                }
             }
+        }
+
+        private void UpdateSpearAirLoop(DesktopSpear spear)
+        {
+            string previous;
+            spearAirLoops.TryGetValue(spear.AudioLoopKey, out previous);
+            string current = spear.AirLoopSound;
+            if (string.Equals(previous, current, StringComparison.Ordinal)) return;
+            if (!string.IsNullOrEmpty(previous))
+                StopSoundLoop(previous, spear.AudioLoopKey, spear.Chunk.Position);
+            if (string.IsNullOrEmpty(current))
+                spearAirLoops.Remove(spear.AudioLoopKey);
+            else
+            {
+                spearAirLoops[spear.AudioLoopKey] = current;
+                StartSoundLoop(current, spear.AudioLoopKey, spear.Chunk.Position,
+                    0.7, 1.0);
+            }
+        }
+
+        private void StopSpearAirLoop(DesktopSpear spear)
+        {
+            string previous;
+            if (!spearAirLoops.TryGetValue(spear.AudioLoopKey, out previous)) return;
+            spearAirLoops.Remove(spear.AudioLoopKey);
+            StopSoundLoop(previous, spear.AudioLoopKey, spear.Chunk.Position);
+        }
+
+        private void StopAllSpearAirLoops()
+        {
+            foreach (KeyValuePair<string, string> pair in spearAirLoops)
+                StopSoundLoop(pair.Value, pair.Key, Center);
+            spearAirLoops.Clear();
         }
 
         private static Vec2 RandomUnit(Random random)

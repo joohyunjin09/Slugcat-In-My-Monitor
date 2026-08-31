@@ -13,6 +13,7 @@
     <ApplicationIcon>..\..\docs\media\icon.ico</ApplicationIcon>
     <StartupObject>RainWorldDesktopPet.Program</StartupObject>
     <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
+    <IgnoreDefaultInstalledAssemblyTables>true</IgnoreDefaultInstalledAssemblyTables>
     <NoStdLib>true</NoStdLib>
     <TargetFrameworkRootPath>$(MSBuildProjectDirectory)\..\..\.tools\net48-reference\build\</TargetFrameworkRootPath>
   </PropertyGroup>
@@ -48,12 +49,47 @@
     <Reference Include="System.Windows.Forms" />
     <Reference Include="System.Web.Extensions" />
     <Reference Include="System.Xml" />
+    <Reference Include="netstandard">
+      <HintPath>..\..\.tools\net48-reference\build\.NETFramework\v4.8\Facades\netstandard.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Fmod5Sharp">
+      <HintPath>..\..\.tools\audio-codecs\Fmod5Sharp\lib\netstandard2.0\Fmod5Sharp.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="NVorbis">
+      <HintPath>..\..\.tools\audio-codecs\legacy\NVorbis\lib\netstandard2.0\NVorbis.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="NAudio.Core">
+      <HintPath>..\..\.tools\audio-codecs\NAudio.Core\lib\netstandard2.0\NAudio.Core.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="OggVorbisEncoder">
+      <HintPath>..\..\.tools\audio-codecs\OggVorbisEncoder\lib\net461\OggVorbisEncoder.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="System.ValueTuple, Version=4.0.3.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51">
+      <HintPath>..\..\.tools\audio-codecs\System.ValueTuple\lib\net47\System.ValueTuple.dll</HintPath>
+      <SpecificVersion>true</SpecificVersion>
+      <Private>true</Private>
+    </Reference>
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="Audio\RainWorldAudioEngine.cs" />
+    <Compile Include="Audio\PushToMeowController.cs" />
+    <Compile Include="Audio\PushToMeowLibrary.cs" />
+    <Compile Include="Audio\RainWorldSoundBank.cs" />
+    <Compile Include="Audio\RainWorldSoundCatalog.cs" />
+    <Compile Include="Audio\SoundEvent.cs" />
+    <Compile Include="Audio\WaveOutVoice.cs" />
+    <Compile Include="Audio\WavPcmReader.cs" />
     <Compile Include="AI\AttentionSystem.cs" />
     <Compile Include="AI\DesktopPetAI.cs" />
     <Compile Include="AI\UtilityEvaluator.cs" />
     <Compile Include="Core\FixedTimeStep.cs" />
+    <Compile Include="Core\AudioMuteSettings.cs" />
+    <Compile Include="Core\AudioVolumeSettings.cs" />
     <Compile Include="Core\DesktopFoodManager.cs" />
     <Compile Include="Core\GameLoop.cs" />
     <Compile Include="Core\DesktopWorldTransform.cs" />
@@ -122,6 +158,46 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="App.config" />
+    <None Include="..\..\THIRD-PARTY-NOTICES.md">
+      <Link>THIRD-PARTY-NOTICES.md</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <Content Include="..\..\.tools\audio-codecs\Microsoft.Bcl.AsyncInterfaces\lib\net461\Microsoft.Bcl.AsyncInterfaces.dll">
+      <Link>Microsoft.Bcl.AsyncInterfaces.dll</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="..\..\.tools\audio-codecs\System.Buffers\lib\net461\System.Buffers.dll">
+      <Link>System.Buffers.dll</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="..\..\.tools\audio-codecs\System.Memory\lib\net461\System.Memory.dll">
+      <Link>System.Memory.dll</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="..\..\.tools\audio-codecs\System.Numerics.Vectors\lib\net46\System.Numerics.Vectors.dll">
+      <Link>System.Numerics.Vectors.dll</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="..\..\.tools\audio-codecs\System.Runtime.CompilerServices.Unsafe\lib\net461\System.Runtime.CompilerServices.Unsafe.dll">
+      <Link>System.Runtime.CompilerServices.Unsafe.dll</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="..\..\.tools\audio-codecs\System.Text.Encodings.Web\lib\net461\System.Text.Encodings.Web.dll">
+      <Link>System.Text.Encodings.Web.dll</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="..\..\.tools\audio-codecs\System.Text.Json\lib\net461\System.Text.Json.dll">
+      <Link>System.Text.Json.dll</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="..\..\.tools\audio-codecs\System.Threading.Tasks.Extensions\lib\net461\System.Threading.Tasks.Extensions.dll">
+      <Link>System.Threading.Tasks.Extensions.dll</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="..\..\.tools\audio-codecs\System.ValueTuple\lib\net47\System.ValueTuple.dll">
+      <Link>System.ValueTuple.dll</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
 </Project>
