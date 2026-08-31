@@ -4,6 +4,7 @@ using System.Drawing;
 using System.IO;
 using System.Diagnostics;
 using System.Threading;
+using RainWorldDesktopPet.Audio;
 using RainWorldDesktopPet.AI;
 using RainWorldDesktopPet.Core;
 using RainWorldDesktopPet.Creature;
@@ -587,6 +588,8 @@ namespace RainWorldDesktopPet.Tests
         {
             DesktopCollisionWorld world = CreateAirWorld();
             Slugcat slugcat = CreateAirSlugcat(SlugcatId.SpearMaster);
+            AbilitySoundSink sounds = new AbilitySoundSink();
+            slugcat.SetAudioSink(sounds, "spearmaster-extraction");
             List<VirtualInput> inputs = new List<VirtualInput>();
             for (int i = 0; i < 80; i++)
                 inputs.Add(new VirtualInput(0, 0, false, true));
@@ -605,6 +608,12 @@ namespace RainWorldDesktopPet.Tests
             Near(1.25, ability.HeldSpear.DamageBonus, 0.000001,
                 "SpearMaster throwing skill damage bonus");
             Equal(9, replay[79].EffectCount, "four drips plus five sparks");
+            Equal(2, sounds.Events.Count,
+                "extraction emits exactly one pull and one completion sound");
+            Equal("SM_Spear_Pull", sounds.Events[0].Id,
+                "pull sound starts after spear progress crosses .1");
+            Equal("SM_Spear_Grab", sounds.Events[1].Id,
+                "grab sound plays when the needle is fully extracted");
         }
 
         private static void SpearmasterThrowReplay()
@@ -1266,6 +1275,16 @@ namespace RainWorldDesktopPet.Tests
             for (int i = 0; i < slugcat.AbilityEffects.Count; i++)
                 if (slugcat.AbilityEffects[i].Kind == kind) return true;
             return false;
+        }
+
+        private sealed class AbilitySoundSink : ISoundEventSink
+        {
+            internal readonly List<SoundEvent> Events = new List<SoundEvent>();
+            public string Status { get { return "test"; } }
+            public void Play(SoundEvent sound) { Events.Add(sound); }
+            public void StartLoop(SoundEvent sound, string loopKey) { }
+            public void StopLoop(string sourceId, string loopKey) { }
+            public void StopSource(string sourceId) { }
         }
 
         private static void True(bool condition, string message)

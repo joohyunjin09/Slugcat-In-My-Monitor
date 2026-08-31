@@ -89,6 +89,9 @@ namespace RainWorldDesktopPet.Graphics
         public int Facing;
         public AnimationIndex Animation;
         public BodyModeIndex BodyMode;
+        // Rendering-only release weight for the stabilized desktop WallClimb
+        // pose. The logical body mode still changes immediately with input.
+        public double WallClimbBlend;
         public int AnimationFrame;
         public int InputX;
         public int PreviousInputX;

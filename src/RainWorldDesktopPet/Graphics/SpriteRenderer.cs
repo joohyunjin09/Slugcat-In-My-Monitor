@@ -779,12 +779,12 @@ namespace RainWorldDesktopPet.Graphics
         private void DrawAtlasLegs(ISpriteCanvas graphics, SlugcatPose pose)
         {
             string legsName;
-            if (pose.BodyMode == BodyModeIndex.Stand)
+            if (IsVisualWallClimb(pose))
+                legsName = "LegsAWall";
+            else if (pose.BodyMode == BodyModeIndex.Stand)
                 legsName = "LegsA" + PositiveModulo(pose.AnimationFrame, 7);
             else if (pose.BodyMode == BodyModeIndex.Crawl)
                 legsName = "LegsACrawling" + PositiveModulo(pose.AnimationFrame / 2, 6);
-            else if (pose.BodyMode == BodyModeIndex.WallClimb)
-                legsName = "LegsAWall";
             else
                 legsName = "LegsAAir0";
             double legsAngle = AimScreen(pose.LegsDirection, Vec2.Zero);
@@ -977,9 +977,14 @@ namespace RainWorldDesktopPet.Graphics
                 faceRotation = rawHeadAngle;
                 reason = "ZeroG";
             }
-            else if (pose.BodyMode == BodyModeIndex.Crawl ||
+            else if (!IsVisualWallClimb(pose) &&
+                    (pose.BodyMode == BodyModeIndex.Crawl ||
                      (pose.BodyMode == BodyModeIndex.Stand && pose.InputX != 0))
+                    )
             {
+                // PlayerGraphics.DrawSprites keeps moving faces on image 4;
+                // DefaultFaceSprite still applies Blink, so a meow resolves to
+                // FaceB4/PFaceB4 without losing the upward face offset.
                 bool crawl = pose.BodyMode == BodyModeIndex.Crawl;
                 headFrame = crawl ? 7 : 6;
                 faceFrame = 4;
@@ -995,7 +1000,7 @@ namespace RainWorldDesktopPet.Graphics
                 faceScaleX = SelectDefaultFaceScaleX(pose, rawHeadAngle);
                 if (pose.IsAirborne)
                     reason = pose.IsRising ? "AirborneRising" : "AirborneFalling";
-                else if (pose.BodyMode == BodyModeIndex.WallClimb)
+                else if (IsVisualWallClimb(pose))
                     reason = "WallClimb";
                 else if (pose.BodyMode == BodyModeIndex.ClimbingOnBeam)
                     reason = "Beam";
@@ -1076,10 +1081,10 @@ namespace RainWorldDesktopPet.Graphics
 
         public static double ComputeArmScaleY(SlugcatPose pose, int index)
         {
+            if (IsVisualWallClimb(pose))
+                return pose.Facing == -1 ? -1.0 : 1.0;
             if (pose.BodyMode == BodyModeIndex.Crawl)
                 return pose.Chest.X < pose.Hips.X ? -1.0 : 1.0;
-            if (pose.BodyMode == BodyModeIndex.WallClimb)
-                return pose.Facing == -1 ? -1.0 : 1.0;
             // Custom.DistanceToLine is evaluated in Futile's y-up space.
             // Reflecting it into this renderer's y-down space reverses the
             // signed distance. The arm, hand target and spear keep one shared
@@ -1087,6 +1092,12 @@ namespace RainWorldDesktopPet.Graphics
             return SignedDistanceToLine(pose.Hands[index], pose.Chest, pose.Hips) < 0.0
                 ? 1.0
                 : -1.0;
+        }
+
+        internal static bool IsVisualWallClimb(SlugcatPose pose)
+        {
+            return pose.BodyMode == BodyModeIndex.WallClimb ||
+                pose.WallClimbBlend > 0.000001;
         }
 
         private void DrawElement(ISpriteCanvas graphics, string name, Vec2 position, double angle, double scaleX, double scaleY, double anchorX, double anchorY, Color tint)

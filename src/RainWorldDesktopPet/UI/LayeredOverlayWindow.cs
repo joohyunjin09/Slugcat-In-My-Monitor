@@ -7,6 +7,7 @@ using System.Drawing;
 using System.Runtime.InteropServices;
 using System.Threading;
 using System.Windows.Forms;
+using RainWorldDesktopPet.Audio;
 using RainWorldDesktopPet.Core;
 using RainWorldDesktopPet.Desktop;
 using RainWorldDesktopPet.Graphics;
@@ -51,6 +52,7 @@ namespace RainWorldDesktopPet.UI
         private readonly ToolStripMenuItem debugItem;
         private readonly ToolStripMenuItem retryRenderItem;
         private readonly ToolStripMenuItem pauseItem;
+        private readonly ToolStripMenuItem muteItem;
         private readonly ToolStripMenuItem activeSlugcatsMenu;
         private readonly ToolStripMenuItem spawnItem;
         private readonly ToolStripMenuItem removeItem;
@@ -73,6 +75,7 @@ namespace RainWorldDesktopPet.UI
             new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
         private readonly DesktopCollisionWorld collisionWorld =
             new DesktopCollisionWorld(new WindowEnumerator());
+        private readonly RainWorldAudioEngine audioEngine;
         private readonly Stopwatch surfaceRefreshClock = Stopwatch.StartNew();
         private readonly Stopwatch refreshRateCacheClock = Stopwatch.StartNew();
         private readonly ConcurrentQueue<HookMouseInput> hookMouseInputs =
@@ -134,6 +137,9 @@ namespace RainWorldDesktopPet.UI
             TopMost = true;
             StartPosition = FormStartPosition.Manual;
             virtualDesktopBounds = MonitorManager.GetVirtualBounds();
+            audioEngine = new RainWorldAudioEngine(installation, virtualDesktopBounds);
+            audioEngine.SetMasterVolume(AudioVolumeSettings.Current);
+            audioEngine.SetMuted(AudioMuteSettings.Current);
             Bounds = virtualDesktopBounds;
             Text = "SlugcatInMyMonitor";
             applicationIcon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
@@ -164,6 +170,15 @@ namespace RainWorldDesktopPet.UI
             {
                 for (int i = 0; i < gameLoops.Count; i++)
                     gameLoops[i].Paused = pauseItem.Checked;
+                RefreshSettingsWindow();
+            };
+            muteItem = new ToolStripMenuItem(T("사운드 음소거", "Mute Audio"));
+            muteItem.CheckOnClick = true;
+            muteItem.Checked = audioEngine.Muted;
+            muteItem.CheckedChanged += delegate
+            {
+                audioEngine.SetMuted(muteItem.Checked);
+                AudioMuteSettings.Set(muteItem.Checked);
                 RefreshSettingsWindow();
             };
             retryRenderItem = new ToolStripMenuItem(T("렌더링 재시도", "Retry Rendering"));
@@ -217,6 +232,7 @@ namespace RainWorldDesktopPet.UI
             menu.Items.Add(foodMenu);
             menu.Items.Add(slugcatMenu);
             menu.Items.Add(skinEditorItem);
+            menu.Items.Add(muteItem);
             menu.Items.Add(debugItem);
             menu.Items.Add(pauseItem);
             menu.Items.Add(refreshWorkshopItem);
@@ -304,6 +320,8 @@ namespace RainWorldDesktopPet.UI
             for (int i = 0; i < gameLoops.Count; i++) gameLoops[i].Dispose();
             gameLoops.Clear();
             gameLoop = null;
+            AudioMuteSettings.Set(audioEngine.Muted);
+            audioEngine.Dispose();
             if (compositionHost != null) compositionHost.Dispose();
             trayIcon.Visible = false;
             trayIcon.Dispose();
@@ -397,7 +415,8 @@ namespace RainWorldDesktopPet.UI
                                 loop.Renderer.Render(surface.Graphics,
                                     poseBuffer[loopIndex], renderSpace, debug,
                                     loop.World, loop.Slugcat, loop.AI,
-                                    loop.AssetStatus, loop.SelectedSlugcat);
+                                    debug ? loop.AssetStatus + "\n" + loop.AudioStatus :
+                                        loop.AssetStatus, loop.SelectedSlugcat);
                             else
                                 loop.Renderer.RenderGpu(gpuCanvas,
                                     poseBuffer[loopIndex], renderSpace,
@@ -1121,7 +1140,7 @@ namespace RainWorldDesktopPet.UI
         {
             if (gameLoops.Count >= MaximumSlugcats) return;
             GameLoop added = new GameLoop(Handle, installation, id,
-                gameLoops.Count, collisionWorld);
+                gameLoops.Count, collisionWorld, audioEngine);
             added.DebugEnabled = debugItem.Checked;
             added.Paused = pauseItem.Checked;
             gameLoops.Add(added);
@@ -1412,6 +1431,23 @@ namespace RainWorldDesktopPet.UI
             get { return pauseItem.Checked; }
             set { pauseItem.Checked = value; }
         }
+        internal bool SettingsAudioMuted
+        {
+            get { return muteItem.Checked; }
+            set { muteItem.Checked = value; }
+        }
+        internal int SettingsAudioVolumePercent
+        {
+            get { return (int)Math.Round(audioEngine.MasterVolume * 100.0); }
+            set
+            {
+                double volume = AudioVolumeSettings.Clamp(value / 100.0);
+                audioEngine.SetMasterVolume(volume);
+            }
+        }
+        internal void SettingsPersistAudioVolume()
+        { AudioVolumeSettings.Set(audioEngine.MasterVolume); }
+        internal string SettingsAudioStatus { get { return audioEngine.Status; } }
         internal SlugcatId SettingsSlugcatId
         { get { return gameLoop == null ? startSlugcat : gameLoop.SelectedSlugcat.Id; } }
         internal SlugcatSize SettingsSlugcatSize

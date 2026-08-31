@@ -38,8 +38,20 @@ repository or its releases.
 - **DMS skins:** per-part skin selection and color editing (experimental)
 - **GPU rendering:** DirectComposition multi-surface composition with smoke and explosion effects
 - **Smooth motion:** refresh-rate-aware rendering interpolation over a fixed 40 Hz simulation
+- **Original character audio:** footsteps, jumps, down-on-fours transitions, rolls, body impacts, and the implemented Downpour special abilities loaded from the installed Rain World sound bank. Ground-skid, wall-slide, and belly-slide sounds are intentionally silent.
+- **Stable overlapping playback:** one fixed 48 kHz WinMM device software-mixes up to 128 lightweight playback cursors, with thirty-two reserved for impacts, abilities, and meows. A reusable 40 ms output ring and peak limiter prevent device churn, underruns, and overlap clipping. Layered `PLAYALL` events start only when every layer is available. One-shots finish naturally, while action loops stop in command order after a short anti-click release.
+- **Push To Meow integration:** installed adult/pup voice mappings, closed-eye face families, upward face motion, and Spearmaster's two-phase tail flick at natural randomized intervals
+- **Volume control:** a saved 0–200% master-volume slider in Settings plus instant mute in Settings and the tray menu. Audio starts muted on first launch, then restores the last mute choice.
 
-Runtime audio is currently disabled for performance and stability.
+Audio indexing, FSB5 PCM/Vorbis reads and decoding, and voice cleanup run on a dedicated worker. The
+simulation only enqueues bounded commands; decoded clips use a 24 MiB LRU cache
+shared by every active Slugcat.
+
+When Push To Meow is installed, its `sounds.txt` and `custom_meows.json` are read
+without copying mod assets into this repository. Only WAV families used by the
+currently supported Slugcats and Slugpups are prepared in the background. Pets
+start after a 12–30 second delay, then meow about every 24–85 seconds depending
+on fullness; sleeping, stunned, and dragged pets stay quiet.
 
 ## Supported Slugcats
 

@@ -10,9 +10,8 @@ namespace RainWorldDesktopPet.Creature
     public sealed partial class SlugcatMovement
     {
         private readonly string rollLoopKey = "movement:roll:" + Guid.NewGuid().ToString("N");
-        private readonly string bellySlideLoopKey = "movement:belly:" + Guid.NewGuid().ToString("N");
         private bool rollLoopPlaying;
-        private bool bellySlideLoopPlaying;
+        private bool suppressStepSoundThisTick;
 
         public bool LaunchedThisTick { get; private set; }
         public bool Rolling { get { return owner.State.Animation == AnimationIndex.Roll && owner.State.RollDirection != 0; } }
@@ -29,6 +28,8 @@ namespace RainWorldDesktopPet.Creature
             BodyChunk chest = owner.BodyChunks[0];
             BodyChunk hips = owner.BodyChunks[1];
             SlugcatState state = owner.State;
+            suppressStepSoundThisTick =
+                state.Animation == AnimationIndex.CrawlTurn;
             bool grounded = chest.ContactFloor || hips.ContactFloor;
             bool wallContact = chest.ContactLeft || chest.ContactRight ||
                 hips.ContactLeft || hips.ContactRight;
@@ -72,7 +73,7 @@ namespace RainWorldDesktopPet.Creature
                 return;
             }
 
-            SelectOriginalBodyMode(input, grounded, wallContact);
+            SelectOriginalBodyMode(input, grounded, world);
             UpdateOriginalSkid(input, grounded, previousBodyMode);
             if (TryOriginalBufferedJump(input, grounded, wallContact))
             {
@@ -82,6 +83,8 @@ namespace RainWorldDesktopPet.Creature
 
             ApplyOriginalHorizontalInput(input, grounded);
             UpdateOriginalPosture(input, grounded, previousAnimation);
+            suppressStepSoundThisTick |=
+                state.Animation == AnimationIndex.CrawlTurn;
             if (state.Animation == AnimationIndex.Flip) ApplyOriginalFlipRotation();
 
             if (!grounded && input.Jump && jumpBoost > 0.0)
@@ -101,23 +104,75 @@ namespace RainWorldDesktopPet.Creature
         {
             SlugcatState state = owner.State;
             int downDiagonal = OriginalDownDiagonal(owner.LastInput);
-            if (downDiagonal == 0 || state.Animation == AnimationIndex.Roll ||
-                impact.ImpactDirection.Y >= 0.0 || state.AllowRoll <= 0 ||
-                state.ConsistentDownDiagonal <= (impact.ImpactSpeed > 24.0 ? 1 : 6) ||
-                (impact.ImpactSpeed <= 12.0 && state.Animation != AnimationIndex.Flip))
+            bool enterRoll = downDiagonal != 0 &&
+                state.Animation != AnimationIndex.Roll &&
+                impact.ImpactDirection.Y < 0.0 && state.AllowRoll > 0 &&
+                state.ConsistentDownDiagonal > (impact.ImpactSpeed > 24.0 ? 1 : 6) &&
+                (impact.ImpactSpeed > 12.0 || state.Animation == AnimationIndex.Flip);
+            if (enterRoll)
+            {
+                state.Animation = AnimationIndex.Roll;
+                state.RollDirection = downDiagonal;
+                state.RollCounter = 0;
+                state.StopRollingCounter = 0;
+                state.Standing = false;
+                double target = 9.0 * owner.LastInput.X;
+                for (int i = 0; i < owner.BodyChunks.Length; i++)
+                    owner.BodyChunks[i].Velocity.X = MathUtil.Lerp(
+                        owner.BodyChunks[i].Velocity.X, target, 0.7);
+                owner.EmitSound("Slugcat_Roll_Init", owner.Center, 1.0, 1.0, 1);
+                StartOriginalRollLoop();
                 return;
+            }
 
-            state.Animation = AnimationIndex.Roll;
-            state.RollDirection = downDiagonal;
-            state.RollCounter = 0;
-            state.StopRollingCounter = 0;
-            state.Standing = false;
-            double target = 9.0 * owner.LastInput.X;
-            for (int i = 0; i < owner.BodyChunks.Length; i++)
-                owner.BodyChunks[i].Velocity.X = MathUtil.Lerp(
-                    owner.BodyChunks[i].Velocity.X, target, 0.7);
-            owner.EmitSound("Slugcat_Roll_Init", owner.Center, 1.0, 1.0, 1);
-            StartOriginalRollLoop();
+            // A desktop constraint can retain a directional contact flag even
+            // when a new high-speed component collision occurs. Preserve the
+            // DLL's first-contact gate for ordinary bumps, but do not lose the
+            // >12 speed impact feedback because of that desktop-only artifact.
+            if (!impact.FirstContact && impact.ImpactSpeed <= 12.0) return;
+            EmitOriginalTerrainImpactSound(impact);
+        }
+
+        private void EmitOriginalTerrainImpactSound(TerrainImpactData impact)
+        {
+            bool gourmand = owner.SelectedSlugcat.Id == SlugcatId.Gourmand;
+            double stunSpeed = gourmand ? 40.0 : 35.0;
+            double lightCeiling = gourmand ? 1.0 : 3.0;
+            double mediumCeiling = gourmand ? 8.0 : 16.0;
+
+            // Desktop pets suppress Rain World's lethal fall result. The original
+            // non-lethal high-impact branch still owns the matching hard sound.
+            if (impact.ImpactSpeed > stunSpeed)
+            {
+                owner.EmitSound(owner.SelectedSlugcat.Audio.ImpactHard, owner.Center,
+                    1.0, 1.0, 4);
+            }
+            else if (impact.ImpactDirection.Y < 0.0 && owner.State.Conscious)
+            {
+                string id = owner.State.Standing && impact.BodyChunkIndex == 1
+                    ? "Slugcat_Floor_Impact_Standard"
+                    : "Slugcat_Floor_Impact_Stealthy";
+                double volume = MathUtil.InverseLerp(8.0, 11.0, impact.ImpactSpeed);
+                if (volume > 0.0)
+                    owner.EmitSound(id, owner.Center, volume, 1.0, 4);
+            }
+            else if (impact.ImpactSpeed < lightCeiling)
+            {
+                double volume = MathUtil.InverseLerp(0.0, 2.0, impact.ImpactSpeed);
+                if (volume > 0.0)
+                    owner.EmitSound(owner.SelectedSlugcat.Audio.ImpactLight,
+                        owner.Center, volume, 3.0, 4);
+            }
+            else if (impact.ImpactSpeed < mediumCeiling)
+            {
+                owner.EmitSound(owner.SelectedSlugcat.Audio.ImpactMedium, owner.Center,
+                    1.0, 1.0, 4);
+            }
+            else
+            {
+                owner.EmitSound(owner.SelectedSlugcat.Audio.ImpactHard, owner.Center,
+                    1.0, 1.0, 4);
+            }
         }
 
         public void Reset()
@@ -185,17 +240,20 @@ namespace RainWorldDesktopPet.Creature
             bool waking = previous.Posture != VirtualPosture.None &&
                 input.Posture == VirtualPosture.None;
             if (waking || (input.Y < 0 && previous.Y >= 0)) state.Standing = true;
-            if (input.Y > 0 && previous.Y <= 0)
+            bool downEdge = input.Y > 0 && previous.Y <= 0;
+            bool postureEdge = input.Posture != VirtualPosture.None &&
+                previous.Posture == VirtualPosture.None;
+            if (downEdge || postureEdge)
             {
                 if (state.Standing && previousBodyMode == BodyModeIndex.Stand)
                     owner.EmitSound("Slugcat_Down_On_Fours", owner.Center, 1.0, 1.0, 2);
-                state.Standing = false;
             }
+            if (downEdge) state.Standing = false;
             if (input.Posture != VirtualPosture.None) state.Standing = false;
         }
 
         private void SelectOriginalBodyMode(VirtualInput input, bool grounded,
-            bool wallContact)
+            DesktopCollisionWorld world)
         {
             SlugcatState state = owner.State;
             BodyChunk chest = owner.BodyChunks[0];
@@ -213,8 +271,6 @@ namespace RainWorldDesktopPet.Creature
                 : (hips.ContactRight ? 1 : (hips.ContactLeft ? -1 : 0));
             if (bodyContactX != 0 && bodyContactX == input.X)
             {
-                if (state.BodyMode != BodyModeIndex.WallClimb)
-                    owner.EmitSound("Slugcat_Enter_Wall_Slide", owner.Center, 1.0, 1.0, 4);
                 state.BodyMode = BodyModeIndex.WallClimb;
                 // WallClimb is a body pose, not the completion of the ordinary
                 // Stand -> DownOnFours transition. Clear a transition that was
@@ -224,12 +280,21 @@ namespace RainWorldDesktopPet.Creature
                 state.CanWallJump = -bodyContactX * 15;
                 return;
             }
-            // Player.UpdateBodyMode keeps an already-selected WallClimb body mode
-            // while the player continues pressing into that wall. Do not require
-            // a fresh desktop collision flag every tick: the connection pass can
-            // briefly separate both circular chunks from a one-pixel wall.
-            if (state.BodyMode == BodyModeIndex.WallClimb && input.X != 0 &&
-                input.X == state.Facing)
+            // Retail MovementUpdate resets bodyMode to Default before selecting
+            // WallClimb again from current contact + horizontal input. Preserve
+            // a missing desktop-contact tick only while a body chunk is still
+            // geometrically adjacent to that wall. A stationary circle does not
+            // receive a fresh swept-contact flag, while a tongue-pulled Saint can
+            // retain stale directional intent after physically leaving the wall.
+            int previousBodyContactX = chest.PreviousContactRight ? 1 :
+                (chest.PreviousContactLeft ? -1 :
+                    (hips.PreviousContactRight ? 1 :
+                        (hips.PreviousContactLeft ? -1 : 0)));
+            if (state.BodyMode == BodyModeIndex.WallClimb &&
+                bodyContactX == 0 && input.X != 0 &&
+                (previousBodyContactX == input.X ||
+                 IsAdjacentToWall(world, chest, input.X) ||
+                 IsAdjacentToWall(world, hips, input.X)))
             {
                 state.Animation = AnimationIndex.None;
                 return;
@@ -244,6 +309,19 @@ namespace RainWorldDesktopPet.Creature
             bool upright = chest.Position.Y < hips.Position.Y - 3.0;
             state.BodyMode = upright && state.Animation != AnimationIndex.CrawlTurn
                 ? BodyModeIndex.Stand : BodyModeIndex.Crawl;
+        }
+
+        private static bool IsAdjacentToWall(DesktopCollisionWorld world,
+            BodyChunk chunk, int direction)
+        {
+            if (world == null || direction == 0) return false;
+            double wallX;
+            long wallId;
+            if (!world.TryGetWall(chunk.Position.X, chunk.Position.Y, direction,
+                    chunk.Radius + 1.5, out wallX, out wallId))
+                return false;
+            double separation = (wallX - chunk.Position.X) * direction;
+            return separation >= -0.5 && separation <= chunk.Radius + 1.5;
         }
 
         private void UpdateOriginalSkid(VirtualInput input, bool grounded,
@@ -282,7 +360,6 @@ namespace RainWorldDesktopPet.Creature
                 Math.Sign(velocity) == state.SlideDirection)
             {
                 state.SlideCounter = 1;
-                owner.EmitSound("Slugcat_Skid_On_Ground_Init", owner.Center, 1.0, 1.0, 2);
             }
             else
             {
@@ -414,8 +491,6 @@ namespace RainWorldDesktopPet.Creature
             state.RollDirection = direction;
             state.RollCounter = state.ExitBellySlideCounter = 0;
             state.Standing = false;
-            owner.EmitSound("Slugcat_Belly_Slide_Init", owner.Center, 1.0, 1.0, 1);
-            StartOriginalBellyLoop();
         }
 
         private void UpdateOriginalBellySlide(VirtualInput input)
@@ -427,7 +502,6 @@ namespace RainWorldDesktopPet.Creature
             state.BodyMode = BodyModeIndex.Default;
             state.RollCounter++;
             state.Standing = false;
-            if (!bellySlideLoopPlaying) StartOriginalBellyLoop();
             bool rivulet = owner.SelectedSlugcat.Id == SlugcatId.Rivulet;
             GourmandAbilityController gourmand = owner.AbilityController as GourmandAbilityController;
             if (state.RollCounter < 6 && !rivulet)
@@ -446,7 +520,6 @@ namespace RainWorldDesktopPet.Creature
             if (input.JumpPressed && state.RollCounter > 0 &&
                 state.RollCounter < (rivulet ? 6 : 12))
             {
-                StopOriginalBellyLoop();
                 double jumpFactor = OriginalJumpFactor();
                 if (input.X == -direction)
                 {
@@ -497,11 +570,8 @@ namespace RainWorldDesktopPet.Creature
 
         private void FinishOriginalBellySlide(bool success)
         {
-            StopOriginalBellyLoop();
             SlugcatState state = owner.State;
             state.SlowMovementStun = success ? 20 : 40;
-            owner.EmitSound(success ? "Slugcat_Belly_Slide_Finish_Success" :
-                "Slugcat_Belly_Slide_Finish_Fail", owner.Center, 1.0, 1.0, 1);
             state.RollDirection = state.RollCounter = state.ExitBellySlideCounter = 0;
             state.Animation = AnimationIndex.None;
             state.Standing = success;
@@ -710,7 +780,7 @@ namespace RainWorldDesktopPet.Creature
                     {
                         state.BodyMode = BodyModeIndex.Stand;
                         state.Animation = AnimationIndex.None;
-                        owner.EmitSound("Slugcat_Regain_Footing", owner.Center, 1.0, 1.0, 2);
+                        owner.EmitSound("Slugcat_Stand_Up", owner.Center, 1.0, 1.0, 2);
                     }
                 }
             }
@@ -808,7 +878,8 @@ namespace RainWorldDesktopPet.Creature
                     state.AnimationFrame++;
                     int lastFrame = crawl ? 10 : 6;
                     if (state.AnimationFrame > lastFrame) state.AnimationFrame = 0;
-                    if (state.AnimationFrame == 0)
+                    if (state.AnimationFrame == 0 &&
+                        !suppressStepSoundThisTick)
                     {
                         string sound = crawl ? "Slugcat_Crawling_Step" :
                             ((((int)Math.Floor(state.RunCycle)) & 1) == 0
@@ -896,25 +967,9 @@ namespace RainWorldDesktopPet.Creature
             owner.StopSoundLoop("Slugcat_Roll_LOOP", rollLoopKey, owner.Center);
         }
 
-        private void StartOriginalBellyLoop()
-        {
-            if (bellySlideLoopPlaying) return;
-            bellySlideLoopPlaying = true;
-            owner.StartSoundLoop("Slugcat_Belly_Slide_LOOP", bellySlideLoopKey,
-                owner.Center, 0.8, 1.0);
-        }
-
-        private void StopOriginalBellyLoop()
-        {
-            if (!bellySlideLoopPlaying) return;
-            bellySlideLoopPlaying = false;
-            owner.StopSoundLoop("Slugcat_Belly_Slide_LOOP", bellySlideLoopKey, owner.Center);
-        }
-
         private void StopOriginalMovementLoops()
         {
             StopOriginalRollLoop();
-            StopOriginalBellyLoop();
         }
     }
 }

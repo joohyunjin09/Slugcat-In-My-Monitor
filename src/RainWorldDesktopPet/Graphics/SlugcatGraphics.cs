@@ -11,6 +11,8 @@ namespace RainWorldDesktopPet.Graphics
 {
     public sealed class SlugcatGraphics
     {
+        internal const double WallClimbReleasePerTick = 0.2;
+
         private readonly Slugcat slugcat;
         private readonly Limb[] arms;
         private readonly BodyPart head;
@@ -36,8 +38,18 @@ namespace RainWorldDesktopPet.Graphics
         private double breath;
         private double lastBreath;
         private int blink;
+        private int pendingMeowAnimationTicks;
+        private int pendingMeowBlinkTicks;
+        private int pendingMeowLookTicks;
+        private int meowBlinkTicks;
+        private int meowLookTicks;
+        private bool pendingSpearmasterMeowWiggle;
+        private int spearmasterMeowSecondPhaseTicks;
+        private double spearmasterMeowHorizontal;
         private double airborneCounter;
         private double spearDirection;
+        private double wallClimbBlend;
+        private double lastWallClimbBlend;
         private bool leftFoot;
         private int previousAnimationFrame;
         private readonly Dictionary<string, Color> partColors =
@@ -77,6 +89,26 @@ namespace RainWorldDesktopPet.Graphics
         }
         public ISlugcatGraphicsExtension[] Extensions { get { return extensions; } }
 
+        public void TriggerMeowAnimation(bool shortMeow)
+        {
+            bool spearmaster = slugcat.SelectedSlugcat.Id == SlugcatId.SpearMaster;
+            // Push To Meow schedules DoMeowAnim 33 ms after the sound starts.
+            // Trigger runs immediately before this tick's Graphics.Step, so two
+            // step visits produce the nearest 40 Hz activation point: 25 ms.
+            pendingMeowAnimationTicks = 2;
+            pendingMeowBlinkTicks = Math.Max(
+                pendingMeowBlinkTicks, shortMeow ? 9 : 11);
+            if (!spearmaster)
+                pendingMeowLookTicks = Math.Max(
+                    pendingMeowLookTicks, shortMeow ? 7 : 11);
+            else
+            {
+                // The DLL starts Spearmaster's two-phase tail impulse before
+                // the delayed blink and deliberately skips LookAtPoint.
+                pendingSpearmasterMeowWiggle = true;
+            }
+        }
+
         public Color GetPartColor(string part)
         {
             Color color;
@@ -112,6 +144,13 @@ namespace RainWorldDesktopPet.Graphics
             ProceduralTail previous = tail;
             graphicsProfile = profile;
             atlas = sourceAtlas;
+            pendingMeowAnimationTicks = 0;
+            pendingMeowBlinkTicks = 0;
+            pendingMeowLookTicks = 0;
+            meowBlinkTicks = 0;
+            meowLookTicks = 0;
+            pendingSpearmasterMeowWiggle = false;
+            spearmasterMeowSecondPhaseTicks = 0;
             tail = new ProceduralTail(slugcat.BodyChunks[1].Position, profile.Tail);
             if (previous != null && previous.Segments.Length == tail.Segments.Length)
             {
@@ -140,6 +179,54 @@ namespace RainWorldDesktopPet.Graphics
             SetGraphicsProfile(profile, sourceAtlas);
         }
 
+        private void UpdateSpearmasterMeowWiggle()
+        {
+            if (pendingSpearmasterMeowWiggle)
+            {
+                pendingSpearmasterMeowWiggle = false;
+                spearmasterMeowHorizontal = -slugcat.State.Facing * 2.0;
+                for (int i = 0; i < tail.Segments.Length; i++)
+                {
+                    // DLL: Random.Range(3, 6) / 2f * (i - 1) * 1.5f.
+                    // Negate Y because desktop simulation points downward.
+                    double originalY = graphicsRandom.Next(3, 6) / 2.0 *
+                        (i - 1) * 1.5;
+                    tail.Segments[i].Velocity = new Vec2(
+                        spearmasterMeowHorizontal, -originalY);
+                }
+                // DLL delay is Random.Range(80, 140) milliseconds. The pet
+                // simulation advances at 25 ms per fixed tick.
+                spearmasterMeowSecondPhaseTicks = Math.Max(1,
+                    (int)Math.Round(graphicsRandom.Next(80, 141) /
+                        (SimulationConstants.LogicStepSeconds * 1000.0)));
+                return;
+            }
+
+            if (spearmasterMeowSecondPhaseTicks <= 0) return;
+            spearmasterMeowSecondPhaseTicks--;
+            if (spearmasterMeowSecondPhaseTicks > 0) return;
+            for (int i = 0; i < tail.Segments.Length; i++)
+            {
+                // DLL second phase: -Random.Range(4, 8) / 3f *
+                // (i - 1) * 1.5f; negate for desktop Y.
+                double originalY = -graphicsRandom.Next(4, 8) / 3.0 *
+                    (i - 1) * 1.5;
+                tail.Segments[i].Velocity = new Vec2(
+                    spearmasterMeowHorizontal, -originalY);
+            }
+        }
+
+        private void UpdateMeowFaceAnimation()
+        {
+            if (pendingMeowAnimationTicks <= 0) return;
+            pendingMeowAnimationTicks--;
+            if (pendingMeowAnimationTicks > 0) return;
+            meowBlinkTicks = Math.Max(meowBlinkTicks, pendingMeowBlinkTicks);
+            meowLookTicks = Math.Max(meowLookTicks, pendingMeowLookTicks);
+            pendingMeowBlinkTicks = 0;
+            pendingMeowLookTicks = 0;
+        }
+
         // Called after Player/PhysicalObject update, matching GraphicsModule.Update.
         public void Step(AttentionSystem attention, DesktopCollisionWorld world)
         {
@@ -157,6 +244,15 @@ namespace RainWorldDesktopPet.Graphics
             lastOriginalLookDirection = originalLookDirection;
             originalLookDirection = (originalAttentionTarget - head.Position).Normalized;
             lookDirection = (attention.Smoothed - head.Position).Normalized;
+            UpdateMeowFaceAnimation();
+            if (meowLookTicks > 0)
+            {
+                // Unity/Rain World uses positive Y for up; desktop simulation
+                // uses negative Y, represented by Vec2.Up.
+                originalLookDirection = Vec2.Up;
+                lookDirection = Vec2.Up;
+                meowLookTicks--;
+            }
             mouseAttentionActive = isMouseAttentionActive && slugcat.State.Conscious &&
                 !slugcat.State.Dead && slugcat.State.StunCounter < 1;
             if (!slugcat.State.Conscious)
@@ -175,7 +271,9 @@ namespace RainWorldDesktopPet.Graphics
             }
             if (slugcat.State.Animation == AnimationIndex.Sleep)
                 blink = Math.Max(2, blink);
+            blink = Math.Max(blink, meowBlinkTicks);
             blink = Math.Max(blink, slugcat.State.ImpactBlinkTicks);
+            if (meowBlinkTicks > 0) meowBlinkTicks--;
             lastLegsDirection = legsDirection;
 
             if (slugcat.State.BodyMode == BodyModeIndex.Stand && slugcat.LastInput.X != 0)
@@ -194,6 +292,9 @@ namespace RainWorldDesktopPet.Graphics
                 drawPositions[i, 1] = drawPositions[i, 0];
                 drawPositions[i, 0] = slugcat.BodyChunks[i].Position;
             }
+            lastWallClimbBlend = wallClimbBlend;
+            wallClimbBlend = AdvanceWallClimbBlend(wallClimbBlend,
+                slugcat.State.BodyMode == BodyModeIndex.WallClimb);
             ApplyOriginalBodyModeOffsets();
 
             bool noChunkContact = !slugcat.BodyChunks[0].ContactFloor &&
@@ -220,7 +321,7 @@ namespace RainWorldDesktopPet.Graphics
                 slugcat.BodyChunks[1].Position.X -
                     slugcat.BodyChunks[1].LastPosition.X,
                 slugcat.BodyChunks[1].Velocity.Y);
-            if (slugcat.State.BodyMode == BodyModeIndex.WallClimb)
+            if (wallClimbBlend > 0.0)
             {
                 chestGraphicsVelocity = upper - drawPositions[0, 1];
                 hipsGraphicsVelocity = lower - drawPositions[1, 1];
@@ -244,6 +345,7 @@ namespace RainWorldDesktopPet.Graphics
                 slugcat.BodyChunks[1].Velocity,
                 slugcat.State.Facing, slugcat.State.BodyMode, world,
                 slugcat.SizeMovementScale);
+            UpdateSpearmasterMeowWiggle();
 
             SpearmasterAbilityController extraction =
                 slugcat.AbilityController as SpearmasterAbilityController;
@@ -299,9 +401,9 @@ namespace RainWorldDesktopPet.Graphics
 
             for (int i = 0; i < 2; i++)
             {
-                Vec2 armConnection = slugcat.State.BodyMode == BodyModeIndex.WallClimb
+                Vec2 armConnection = wallClimbBlend > 0.0
                     ? upper : slugcat.BodyChunks[0].Position;
-                Vec2 armRotationChunk = slugcat.State.BodyMode == BodyModeIndex.WallClimb
+                Vec2 armRotationChunk = wallClimbBlend > 0.0
                     ? lower : slugcat.BodyChunks[1].Position;
                 arms[i].Step(slugcat, armConnection, armRotationChunk, chestGraphicsVelocity,
                     world, i == 0 ? null : arms[0], airborneCounter);
@@ -527,6 +629,16 @@ namespace RainWorldDesktopPet.Graphics
             return new Vec2(Math.Sin(radians), -Math.Cos(radians));
         }
 
+        internal static double AdvanceWallClimbBlend(double current, bool wallClimb)
+        {
+            // Entry remains responsive. On release, retain only the authored
+            // graphics pose for five 40 Hz ticks while movement/input state is
+            // already free to select its next mode.
+            return wallClimb
+                ? 1.0
+                : MathUtil.MoveTowards(current, 0.0, WallClimbReleasePerTick);
+        }
+
         private void ApplyOriginalBodyModeOffsets()
         {
             int frame = slugcat.State.AnimationFrame;
@@ -543,19 +655,6 @@ namespace RainWorldDesktopPet.Graphics
                 // 0.35 + (0.25 - 0.5 * 0.25) = 0.475.  This is a graphics
                 // pose adjustment, not a whole-character scale change.
                 upper = Vec2.Lerp(upper, lower, 0.475);
-            }
-            if (slugcat.State.BodyMode == BodyModeIndex.WallClimb)
-            {
-                // Keep the wall pose upright around its current lower body
-                // chunk at the player's authored BodyChunkConnection distance.
-                // This is render-only: applying Player's preceding standing
-                // impulse after desktop collision causes floor-contact jitter.
-                upper = lower - new Vec2(0.0, slugcat.EffectiveBodyConnectionDistance);
-                // PlayerGraphics.RenderAsPup performs its compact 0.475
-                // upper-to-lower blend before body-mode offsets. Preserve it
-                // in the stabilized wall pose too; otherwise the pup's Body,
-                // Head and Face families are spaced like an adult.
-                if (renderAsPup) upper = Vec2.Lerp(upper, lower, 0.475);
             }
             if (slugcat.State.BodyMode == BodyModeIndex.Stand)
             {
@@ -574,17 +673,30 @@ namespace RainWorldDesktopPet.Graphics
                 double cos = Math.Cos(frame / 14.0 * Math.PI * 2.0);
                 upper.X += cos * facing * 2.0;
                 upper.Y += -sin * 1.5 - 3.0;
-                head.Velocity.Y -= sin * 0.5 + 0.5;
-                head.Velocity.X += upper.X < lower.X ? -1.0 : 1.0;
+                double crawlWeight = 1.0 - wallClimbBlend;
+                head.Velocity.Y -= (sin * 0.5 + 0.5) * crawlWeight;
+                head.Velocity.X += (upper.X < lower.X ? -1.0 : 1.0) * crawlWeight;
                 lower.X += -3.0 * sin * facing;
                 lower.Y += cos * 1.5 - 7.0;
             }
-            else if (slugcat.State.BodyMode == BodyModeIndex.WallClimb)
+
+            if (wallClimbBlend > 0.0)
             {
-                legsDirection.Y += 1.0;
-                upper.Y -= 2.0;
-                upper.X -= facing * (slugcat.BodyChunks[1].ContactFloor ? 3.0 : 5.0);
-                head.Velocity.Y += facing * 5.0;
+                // The desktop wall pose stabilizes PlayerGraphics' upright
+                // reconstruction. Blend it back to the next authored pose so
+                // leaving the wall cannot teleport the rendered torso.
+                Vec2 wallLower = drawPositions[1, 0];
+                Vec2 wallUpper = wallLower - new Vec2(0.0,
+                    slugcat.EffectiveBodyConnectionDistance);
+                if (renderAsPup)
+                    wallUpper = Vec2.Lerp(wallUpper, wallLower, 0.475);
+                wallUpper.Y -= 2.0;
+                wallUpper.X -= facing *
+                    (slugcat.BodyChunks[1].ContactFloor ? 3.0 : 5.0);
+                upper = Vec2.Lerp(upper, wallUpper, wallClimbBlend);
+                lower = Vec2.Lerp(lower, wallLower, wallClimbBlend);
+                legsDirection.Y += wallClimbBlend;
+                head.Velocity.Y += facing * 5.0 * wallClimbBlend;
             }
             if (slugcat.State.Animation == AnimationIndex.Sleep)
             {
@@ -713,6 +825,8 @@ namespace RainWorldDesktopPet.Graphics
             pose.Facing = slugcat.State.Facing;
             pose.Animation = slugcat.State.Animation;
             pose.BodyMode = slugcat.State.BodyMode;
+            pose.WallClimbBlend = MathUtil.Lerp(lastWallClimbBlend,
+                wallClimbBlend, timeStacker);
             pose.AnimationFrame = slugcat.State.AnimationFrame;
             pose.InputX = slugcat.LastInput.X;
             VirtualInput[] inputHistory = slugcat.Movement.InputHistoryForRead;

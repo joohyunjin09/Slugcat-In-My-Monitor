@@ -24,6 +24,8 @@ namespace RainWorldDesktopPet.RainWorld
     // is never copied wholesale or retained in memory.
     public sealed class UnityFsBundleReader : IDisposable
     {
+        private const long MaximumBlockCacheBytes = 8L * 1024L * 1024L;
+
         private sealed class BlockInfo
         {
             public uint UncompressedSize;
@@ -39,6 +41,7 @@ namespace RainWorldDesktopPet.RainWorld
         private readonly Dictionary<int, byte[]> blockCache = new Dictionary<int, byte[]>();
         private readonly Queue<int> cacheOrder = new Queue<int>();
         private readonly object sync = new object();
+        private long blockCacheBytes;
 
         public UnityFsBundleReader(string path)
         {
@@ -207,10 +210,18 @@ namespace RainWorldDesktopPet.RainWorld
                 block.Flags & 0x3f);
             blockCache[index] = data;
             cacheOrder.Enqueue(index);
-            while (cacheOrder.Count > 8)
+            blockCacheBytes += data.Length;
+            // Keep at most one oversized archive block. Rain World's one-gigabyte
+            // sound bundle must never turn into a proportional managed cache.
+            while (blockCacheBytes > MaximumBlockCacheBytes && cacheOrder.Count > 1)
             {
                 int expired = cacheOrder.Dequeue();
-                blockCache.Remove(expired);
+                byte[] removed;
+                if (blockCache.TryGetValue(expired, out removed))
+                {
+                    blockCache.Remove(expired);
+                    blockCacheBytes -= removed.Length;
+                }
             }
             return data;
         }
@@ -325,9 +336,19 @@ namespace RainWorldDesktopPet.RainWorld
             source.Position = AlignValue(source.Position, alignment);
         }
 
+        public void TrimBlockCache()
+        {
+            lock (sync)
+            {
+                blockCache.Clear();
+                cacheOrder.Clear();
+                blockCacheBytes = 0;
+            }
+        }
+
         public void Dispose()
         {
-            blockCache.Clear();
+            TrimBlockCache();
             stream.Dispose();
         }
     }

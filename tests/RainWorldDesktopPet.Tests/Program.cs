@@ -2,12 +2,14 @@ using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Imaging;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Diagnostics;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Threading;
+using RainWorldDesktopPet.Audio;
 using RainWorldDesktopPet.AI;
 using RainWorldDesktopPet.Core;
 using RainWorldDesktopPet.Creature;
@@ -146,6 +148,26 @@ namespace RainWorldDesktopPet.Tests
             Run("DMS sprites beside the executable are discovered", DmsSpritesBesideExecutableAreDiscovered);
             Run("Customize colors reach each rendered sprite part", PartColorsReachRenderedPose);
             Run("Rain World locator validates an explicit installation", LocatorValidatesExplicitPath);
+            Run("Rain World sounds.txt preserves trigger and clip transforms",
+                RainWorldSoundCatalogParsesGameDirectives);
+            Run("Movement PCM loudness normalization uses a bounded RMS average",
+                MovementPcmLoudnessNormalizationUsesBoundedRms);
+            Run("Audio master volume supports a persisted zero-to-two range",
+                AudioMasterVolumeSupportsZeroToTwoRange);
+            Run("Audio mute defaults on and restores a saved choice",
+                AudioMuteDefaultsOnAndRestoresSavedChoice);
+            Run("Push To Meow profiles and random cadence match the inspected DLL",
+                PushToMeowProfilesAndCadenceMatchDll);
+            Run("Audio admission keeps movement, Downpour abilities, and Push To Meow",
+                AudioAdmissionKeepsCharacterMovementDownpourAbilitiesAndMeows);
+            Run("Push To Meow animations blink, look up, and wiggle Spearmaster's tail",
+                PushToMeowAnimationsMatchDll);
+            Run("Slugcat sound calls stay behind the audio sink boundary",
+                SlugcatSoundCallsUseAudioSink);
+            Run("Sliding stays silent and high-speed impacts remain audible",
+                ExpandedMovementSoundsFollowOriginalStates);
+            Run("CrawlTurn direction changes do not emit a footstep",
+                CrawlTurnDoesNotEmitFootstep);
             Run("Slugpup availability follows the More Slugcats install marker",
                 SlugpupAvailabilityFollowsMoreSlugcatsInstallMarker);
             Run("Required autonomous behavior states are present", RequiredBehaviorsExist);
@@ -154,6 +176,8 @@ namespace RainWorldDesktopPet.Tests
             Run("Obstacle contact makes an original jump attempt reachable", ObstacleJumpIsReachable);
             Run("Mouse locomotion requires explicit click attention", MouseLocomotionRequiresAttention);
             Run("Wall contact reaches gravity-driven WallClimb through VirtualInput", WallContactReachesClimbMovement);
+            Run("WallClimb releases after movement intent ends", WallClimbReleasesAfterIntentEnds);
+            Run("WallClimb render pose releases without snapping", WallClimbRenderPoseReleasesSmoothly);
             Run("Original blocked-wall pose applies to Slugcat and Slugpup", OriginalBlockedWallPoseAppliesToSlugcatAndSlugpup);
             Run("WallClimb hands use alternating wall targets", WallClimbHandsTargetTheWall);
             Run("Sleep curl pulls both hands to the original target", SleepCurlHandsShareOriginalTarget);
@@ -268,6 +292,8 @@ namespace RainWorldDesktopPet.Tests
                 Run("Local embedded original atlas loads without DMS", delegate { EmbeddedOriginalAtlasLoads(localInstallation); });
                 Run("Local food atlas renders deep blue, cyan, and warm egg layers",
                     delegate { FoodAtlasRendersOriginalPalette(localInstallation); });
+                Run("Installed Spearmaster pull and grab clips decode as PCM",
+                    delegate { InstalledSpearmasterExtractionClipsDecode(localInstallation); });
                 Run("Installed Workshop mods parse without loading their DLLs",
                     delegate { LocalWorkshopIntegrationsParse(localInstallation); });
             }
@@ -459,7 +485,208 @@ namespace RainWorldDesktopPet.Tests
                         "missing Dress My Slugcat must leave the base appearance available");
                 }
                 foreach (RainWorldMod mod in removedDms) workshop.Mods.Add(mod);
+
+                RainWorldMod pushToMeow = workshop.FindById("pushtomeow");
+                if (pushToMeow != null)
+                {
+                    using (RainWorldAudioEngine audio = new RainWorldAudioEngine(
+                        installation, new Rectangle(0, 0, 1920, 1080)))
+                    {
+                        Stopwatch timeout = Stopwatch.StartNew();
+                        while (timeout.Elapsed.TotalSeconds < 20.0 &&
+                            audio.Status.IndexOf("indexing", StringComparison.OrdinalIgnoreCase) >= 0)
+                            Thread.Sleep(25);
+                        True(audio.PushToMeowAvailable,
+                            "installed Push To Meow must be available: " + audio.Status);
+                        True(audio.Status.IndexOf(
+                            "31 permitted SoundIDs, 77 matching Rain World clips indexed",
+                            StringComparison.OrdinalIgnoreCase) >= 0,
+                            "only permitted base audio metadata is retained: " +
+                            audio.Status);
+                        True(audio.Status.IndexOf("movement loudness normalized across",
+                            StringComparison.OrdinalIgnoreCase) >= 0,
+                            "movement clip loudness profile is prepared: " +
+                            audio.Status);
+                        True(audio.Status.IndexOf("104/104 permitted meow clips prepared",
+                            StringComparison.OrdinalIgnoreCase) >= 0,
+                            "only supported Slugcat/Slugpup meow WAVs are indexed: " +
+                            audio.Status);
+                        True(audio.CachedBytes <= 24L * 1024L * 1024L,
+                            "audio cache must remain within 24 MiB");
+                        AssertInstalledMeowVoiceMatrix(audio);
+                        AssertInstalledConcurrentAudioBurst(audio);
+                        Console.WriteLine("      " + audio.Status + "; retained " +
+                            (audio.CachedBytes / (1024.0 * 1024.0)).ToString("0.0") +
+                            " MiB");
+                        audio.SetMuted(true);
+                        True(audio.Muted, "mute state is applied immediately");
+                    }
+                }
             }
+        }
+
+        private static void InstalledSpearmasterExtractionClipsDecode(
+            RainWorldInstallation installation)
+        {
+            string[] names = { "smSpearPull", "smSpearPull2", "smSpearGrab" };
+            using (RainWorldSoundBank bank = new RainWorldSoundBank(
+                installation, names))
+            {
+                for (int i = 0; i < names.Length; i++)
+                {
+                    IList<string> resolved = bank.ResolveClipNames(names[i]);
+                    Equal(1, resolved.Count,
+                        "installed extraction clip metadata " + names[i]);
+                    RainWorldPcmClip clip;
+                    string reason;
+                    True(bank.TryLoadPcm(resolved[0], out clip, out reason),
+                        "installed extraction clip PCM " + names[i] + ": " + reason);
+                    True(clip != null && clip.DataLength > 0,
+                        "installed extraction clip has samples " + names[i]);
+                }
+            }
+        }
+
+        private static void AssertInstalledMeowVoiceMatrix(
+            RainWorldAudioEngine audio)
+        {
+            SlugcatId[] ids =
+            {
+                SlugcatId.White, SlugcatId.Yellow, SlugcatId.Red,
+                SlugcatId.Gourmand, SlugcatId.Artificer,
+                SlugcatId.SpearMaster, SlugcatId.Rivulet, SlugcatId.Saint
+            };
+            string[] shortIds =
+            {
+                "SlugcatMeowNormalShort", "SlugcatMeowNormalShort",
+                "SlugcatMeowNormalShort", "SlugcatMeowFatShort",
+                "SlugcatMeowCoarseShort", "SlugcatMeowSpearShort",
+                "SlugcatMeowRivuletAShort", "SlugcatMeowSaintShort"
+            };
+            string[] longIds =
+            {
+                "SlugcatMeowNormal", "SlugcatMeowNormal",
+                "SlugcatMeowNormal", "SlugcatMeowFat",
+                "SlugcatMeowCoarse", "SlugcatMeowSpear",
+                "SlugcatMeowRivuletA", "SlugcatMeowSaint"
+            };
+            for (int i = 0; i < ids.Length; i++)
+            {
+                for (int shortMeow = 0; shortMeow < 2; shortMeow++)
+                {
+                    string adultId = shortMeow != 0 ? shortIds[i] : longIds[i];
+                    PushToMeowSound sound;
+                    True(audio.TryResolveMeow(ids[i], false, shortMeow != 0,
+                        out sound) && sound.SoundId == adultId,
+                        ids[i] + " installed adult meow mapping");
+                    string pupId = i < 3
+                        ? (shortMeow != 0 ? "SlugcatMeowPupShort" : "SlugcatMeowPup")
+                        : adultId;
+                    True(audio.TryResolveMeow(ids[i], true, shortMeow != 0,
+                        out sound) && sound.SoundId == pupId,
+                        ids[i] + " installed pup meow mapping");
+                    Near(i < 3 ? 1.0 : 1.3, sound.Pitch, 0.000001,
+                        ids[i] + " installed pup pitch");
+                }
+            }
+        }
+
+        private static void AssertInstalledConcurrentAudioBurst(
+            RainWorldAudioEngine audio)
+        {
+            audio.SetMasterVolume(0.0);
+            Vec2 listener = DesktopWorldTransform.ToSimulation(
+                new Vec2(960.0, 540.0));
+            int droppedBefore = audio.DroppedRequestCount;
+            long renderedBefore = audio.RenderedAudioBufferCount;
+            const long tick = 1000;
+            for (int i = 0; i < 46; i++)
+                audio.Play(new SoundEvent("stress-step-" + i,
+                    "Slugcat_Step_A", listener, 1.0, 1.0, 0, tick));
+            for (int i = 0; i < 16; i++)
+                audio.Play(new SoundEvent("stress-meow-" + i,
+                    "SlugcatMeowNormal", listener, 1.0, 1.0, 0, tick));
+            audio.Play(new SoundEvent("stress-explosion", "Bomb_Explode",
+                listener, 1.0, 1.0, 0, tick));
+
+            Stopwatch timeout = Stopwatch.StartNew();
+            while (timeout.Elapsed.TotalSeconds < 5.0 &&
+                (audio.LastEvent.IndexOf("Bomb_Explode",
+                    StringComparison.OrdinalIgnoreCase) < 0 ||
+                 audio.RenderedAudioBufferCount < renderedBefore + 4) &&
+                audio.Status.IndexOf("playback error",
+                    StringComparison.OrdinalIgnoreCase) < 0)
+                Thread.Sleep(10);
+
+            True(audio.LastEvent.IndexOf("Bomb_Explode",
+                StringComparison.OrdinalIgnoreCase) >= 0,
+                "46 footsteps, 16 meows, and both explosion layers reach the mixer: " +
+                audio.Status + "; last=" + audio.LastEvent);
+            Equal(droppedBefore, audio.DroppedRequestCount,
+                "64-voice installed-audio burst must not drop a request");
+            Equal(1, audio.OutputDeviceCount,
+                "64 mixed voices must share exactly one WinMM device");
+            True(audio.RenderedAudioBufferCount >= renderedBefore + 4,
+                "64 mixed voices render through the complete output ring");
+            True(audio.Status.IndexOf("playback error",
+                StringComparison.OrdinalIgnoreCase) < 0,
+                "64-voice software mix runs without a device error");
+
+            audio.SetMuted(true);
+            Thread.Sleep(100);
+            audio.SetMuted(false);
+            droppedBefore = audio.DroppedRequestCount;
+            renderedBefore = audio.RenderedAudioBufferCount;
+            for (int cycle = 0; cycle < 30; cycle++)
+            {
+                long simulationTick = 2000 + cycle * 4;
+                for (int slugcat = 0; slugcat < 8; slugcat++)
+                {
+                    Vec2 position = listener +
+                        new Vec2((slugcat - 3.5) * 50.0, 0.0);
+                    audio.Play(new SoundEvent("soak-cat-" + slugcat,
+                        (cycle & 1) == 0 ? "Slugcat_Step_A" : "Slugcat_Step_B",
+                        position, 1.0, 1.0, 0, simulationTick));
+                    if (cycle % 10 == 0)
+                    {
+                        audio.Play(new SoundEvent("soak-meow-" + slugcat,
+                            "SlugcatMeowNormalShort", position,
+                            1.0, 1.0, 0, simulationTick));
+                        audio.Play(new SoundEvent("soak-blast-" + slugcat,
+                            slugcat < 4 ? "Bomb_Explode" : "Fire_Spear_Explode",
+                            position, 1.0, 1.0, 0, simulationTick));
+                    }
+                }
+                Thread.Sleep(100);
+            }
+            Thread.Sleep(200);
+            Equal(droppedBefore, audio.DroppedRequestCount,
+                "eight-pet walking, meow, and explosion soak drops no sound; " +
+                "peak voices=" + audio.PeakActiveVoiceCount +
+                "; max render ms=" +
+                audio.MaximumMixerRenderMilliseconds.ToString("0.000",
+                    CultureInfo.InvariantCulture));
+            Equal(1, audio.OutputDeviceCount,
+                "eight-pet soak keeps one WinMM output device");
+            True(audio.RenderedAudioBufferCount >= renderedBefore + 200,
+                "eight-pet soak continuously feeds the reusable output ring");
+            True(audio.Status.IndexOf("playback error",
+                StringComparison.OrdinalIgnoreCase) < 0,
+                "eight-pet soak finishes without a mixer or device error");
+            True(audio.PeakActiveVoiceCount <=
+                RainWorldAudioEngine.MaximumVoices,
+                "eight-pet soak remains inside the bounded cursor capacity");
+            True(audio.MaximumMixerRenderMilliseconds > 0.0 &&
+                audio.MaximumMixerRenderMilliseconds <
+                    WaveOutMixer.BufferMilliseconds,
+                "worst software-mix pass completes inside one output buffer: " +
+                audio.MaximumMixerRenderMilliseconds.ToString("0.000",
+                    CultureInfo.InvariantCulture) + " ms");
+            Console.WriteLine("      eight-pet audio: peak voices=" +
+                audio.PeakActiveVoiceCount + "; max 10 ms-buffer render=" +
+                audio.MaximumMixerRenderMilliseconds.ToString("0.000",
+                    CultureInfo.InvariantCulture) + " ms; devices=" +
+                audio.OutputDeviceCount + "; dropped=0");
         }
 
         private static void Run(string name, Action test)
@@ -1639,6 +1866,8 @@ namespace RainWorldDesktopPet.Tests
             DesktopCollisionWorld world = new DesktopCollisionWorld(new WindowEnumerator());
             world.Refresh(IntPtr.Zero);
             Slugcat slugcat = new Slugcat(new Vec2(300.0, 300.0));
+            RecordingSoundSink sounds = new RecordingSoundSink();
+            slugcat.SetAudioSink(sounds, "posture-test");
             slugcat.State.BodyMode = BodyModeIndex.Stand;
             for (int tick = 0; tick < 5; tick++)
             {
@@ -1652,6 +1881,9 @@ namespace RainWorldDesktopPet.Tests
                         "first down frame keeps the physical Stand mode");
                     True(slugcat.State.Animation != AnimationIndex.DownOnFours,
                         "first down frame is not the final crawl transition");
+                    True(sounds.PlayCount == 1 && sounds.LastSound != null &&
+                        sounds.LastSound.Id == "Slugcat_Down_On_Fours",
+                        "down edge emits Player's one-shot crouch sound");
                 }
             }
             Equal((int)AnimationIndex.DownOnFours, (int)slugcat.State.Animation,
@@ -1670,6 +1902,20 @@ namespace RainWorldDesktopPet.Tests
                 "StandUp begins while the body is still physically low");
             Equal((int)AnimationIndex.StandUp, (int)slugcat.State.Animation,
                 "low body enters StandUp instead of swapping to standing sprite");
+            True(sounds.LastSound != null &&
+                sounds.LastSound.Id == "Slugcat_Stand_Up",
+                "standing transition emits Player's one-shot stand sound");
+
+            Slugcat resting = new Slugcat(new Vec2(500.0, 300.0));
+            RecordingSoundSink restingSounds = new RecordingSoundSink();
+            resting.SetAudioSink(restingSounds, "posture-rest-test");
+            resting.State.BodyMode = BodyModeIndex.Stand;
+            resting.BodyChunks[1].ContactFloor = true;
+            resting.Movement.ApplyInput(new VirtualInput(0, 0, false, false,
+                VirtualPosture.Sit), world);
+            True(restingSounds.PlayCount == 1 &&
+                restingSounds.LastSound.Id == "Slugcat_Down_On_Fours",
+                "desktop Sit posture maps to Player's down-edge sound");
         }
 
         private static void BodyChunksShareFrozenSnapshot()
@@ -2368,6 +2614,613 @@ namespace RainWorldDesktopPet.Tests
             }
         }
 
+        private static void RainWorldSoundCatalogParsesGameDirectives()
+        {
+            RainWorldSoundCatalog catalog = RainWorldSoundCatalog.Parse(
+                "Volume: 6.0\n" +
+                "Volume exponent: 1.8\n" +
+                "Slugcat_Normal_Jump : jump2/vol=0.4\n" +
+                "Bomb_Explode/PLAYALL/rangeFac=2.5/dopplerFac=0/vol=0.75/pitch=0.9/ignoreEffects=0.25/silentChance=0.2 : ScavSpearBang/vol=0.6/pitch=0.8/ignoreEffects=0.5, Clang2B/minVol=0.2/maxVol=0.4/minPitch=0.9/maxPitch=1.1\n" +
+                "Slugcat_Skid_On_Ground_Init : Skitter1B/vol=0.4/Skitter1C/vol=0.5\n");
+            Equal(3, catalog.Count, "global volume directives are not SoundIDs");
+            Near(6.0, catalog.MasterVolume, 0.000001, "global listener volume");
+            Near(1.8, catalog.VolumeExponent, 0.000001, "volume exponent");
+            RainWorldSoundDefinition jump;
+            True(catalog.TryGet("Slugcat_Normal_Jump", out jump), "jump SoundID");
+            Equal(1, jump.Clips.Count, "jump clip reference count");
+            Near(0.4, jump.Clips[0].MinimumVolume, 0.000001, "jump clip volume");
+            RainWorldSoundDefinition bomb;
+            True(catalog.TryGet("Bomb_Explode", out bomb) && bomb.PlayAll,
+                "PLAYALL directive");
+            Near(2.5, bomb.RangeFactor, 0.000001, "trigger range factor");
+            Near(0.0, bomb.DopplerFactor, 0.000001, "disabled trigger Doppler");
+            Near(0.75, bomb.MinimumVolume, 0.000001, "trigger volume");
+            Near(0.9, bomb.MinimumPitch, 0.000001, "trigger pitch");
+            Near(0.25, bomb.IgnoreEffects, 0.000001, "trigger effect bypass");
+            Near(0.2, bomb.SilentChance, 0.000001, "trigger silent chance");
+            Equal(2, bomb.Clips.Count, "PLAYALL clip count");
+            Near(0.5, bomb.Clips[0].IgnoreEffects, 0.000001,
+                "clip effect bypass");
+            Near(0.2, bomb.Clips[1].MinimumVolume, 0.000001, "minimum volume");
+            Near(1.1, bomb.Clips[1].MaximumPitch, 0.000001, "maximum pitch");
+            RainWorldSoundDefinition malformedVanillaLine;
+            True(catalog.TryGet("Slugcat_Skid_On_Ground_Init", out malformedVanillaLine),
+                "vanilla slash-separated clip line");
+            Equal(2, malformedVanillaLine.Clips.Count,
+                "slash-separated clips remain independently playable");
+
+            RainWorldSoundCatalog modCatalog = RainWorldSoundCatalog.Parse(
+                "[ADD]SlugcatMeowNormal : MeowNormal1/vol=0.6\n");
+            RainWorldSoundDefinition meow;
+            True(modCatalog.TryGet("SlugcatMeowNormal", out meow),
+                "Workshop [ADD] directive is stripped from the SoundID");
+
+            HashSet<string> permitted = new HashSet<string>(
+                StringComparer.OrdinalIgnoreCase)
+                { "Slugcat_Normal_Jump", "Bomb_Explode" };
+            RainWorldSoundCatalog filtered = RainWorldSoundCatalog.Parse(
+                "Slugcat_Normal_Jump : jump2/vol=0.4\n" +
+                "Bomb_Explode/PLAYALL : ScavSpearBang, Clang2B\n" +
+                "Zapper_Zap : Zapper\n", permitted);
+            Equal(2, filtered.Count, "filtered permitted SoundID count");
+            RainWorldSoundDefinition rejected;
+            True(!filtered.TryGet("Zapper_Zap", out rejected),
+                "unrelated SoundID metadata is not retained");
+            ISet<string> referenced = filtered.ReferencedClipNames();
+            Equal(3, referenced.Count, "only permitted clip names are retained");
+            True(referenced.Contains("jump2") && referenced.Contains("ScavSpearBang") &&
+                referenced.Contains("Clang2B"), "permitted clip references survive filtering");
+
+            Near(1.0, RainWorldAudioEngine.CalculateSpatialGain(
+                Vec2.Zero, Vec2.Zero, 1000.0, 1.0), 0.000001,
+                "sound at the listener keeps full volume");
+            Near(0.0, RainWorldAudioEngine.CalculateSpatialGain(
+                new Vec2(2000.0, 0.0), Vec2.Zero, 1000.0, 1.0), 0.000001,
+                "default range reaches silence at two listener radii");
+            Near(0.8, RainWorldAudioEngine.CalculateSpatialGain(
+                new Vec2(2000.0, 0.0), Vec2.Zero, 1000.0, 2.5), 0.000001,
+                "explosion range factor extends attenuation");
+            Near(1.05, RainWorldAudioEngine.CalculateDopplerPitch(
+                new Vec2(1000.0, 0.0), new Vec2(-10.0, 0.0),
+                Vec2.Zero, 1.0), 0.000001, "approaching source raises pitch");
+            Near(0.95, RainWorldAudioEngine.CalculateDopplerPitch(
+                new Vec2(1000.0, 0.0), new Vec2(10.0, 0.0),
+                Vec2.Zero, 1.0), 0.000001, "departing source lowers pitch");
+            Near(1.0, RainWorldAudioEngine.CalculateDopplerPitch(
+                new Vec2(1000.0, 0.0), new Vec2(-10.0, 0.0),
+                Vec2.Zero, 0.0), 0.000001, "zero Doppler factor bypasses shift");
+            Near(Math.Pow(0.1, 1.8),
+                RainWorldAudioEngine.CalculateOutputVolume(
+                    1.0, 1.0, 0.1, 1.0, 6.0, 1.8), 0.000001,
+                "documented listener clamp and exponent shape device level");
+            Near(0.54, RainWorldAudioEngine.ApplyCategoryOutputGain(
+                "Slugcat_Step_A", 0.4), 0.000001,
+                "permitted movement sounds receive 35 percent more output gain");
+            Near(0.4, RainWorldAudioEngine.ApplyCategoryOutputGain(
+                "Fire_Spear_Explode", 0.4), 0.000001,
+                "Downpour ability sounds keep their authored output level");
+            Near(1.0, RainWorldAudioEngine.ApplyCategoryOutputGain(
+                "Slugcat_Normal_Jump", 0.9), 0.000001,
+                "movement output gain remains device-safe at unity");
+        }
+
+        private static void MovementPcmLoudnessNormalizationUsesBoundedRms()
+        {
+            byte[] pcm = new byte[8];
+            short[] samples = { 16384, -16384, 16384, -16384 };
+            for (int i = 0; i < samples.Length; i++)
+            {
+                pcm[i * 2] = (byte)(samples[i] & 0xff);
+                pcm[i * 2 + 1] = (byte)((samples[i] >> 8) & 0xff);
+            }
+            RainWorldPcmClip clip = new RainWorldPcmClip(
+                "rms-test", pcm, 0, pcm.Length, 1, 44100, 16);
+            Near(0.5, RainWorldAudioEngine.CalculatePcmRms(clip),
+                0.000001, "PCM16 RMS amplitude");
+            WaveOutVoice mixedVoice = new WaveOutVoice(clip, 1.0, 0.0,
+                1.0, false, 44100);
+            double[] mixedLeft = new double[4];
+            double[] mixedRight = new double[4];
+            mixedVoice.MixInto(mixedLeft, mixedRight, 4, 1.0);
+            for (int mixedFrame = 0; mixedFrame < 4; mixedFrame++)
+            {
+                Near(samples[mixedFrame] / 32768.0, mixedLeft[mixedFrame],
+                    0.000001, "software mixer preserves PCM frame " + mixedFrame);
+                Near(mixedLeft[mixedFrame], mixedRight[mixedFrame],
+                    0.000001, "mono voice is centered in stereo " + mixedFrame);
+            }
+            True(mixedVoice.IsDone,
+                "one-shot cursor ends only after its final PCM frame");
+            Near(2.0, RainWorldAudioEngine.CalculateLoudnessNormalizationGain(
+                0.1, 0.2), 0.000001, "quiet clip gain toward average");
+            Near(0.25, RainWorldAudioEngine.CalculateLoudnessNormalizationGain(
+                1.0, 0.1), 0.000001, "loud clip attenuation is bounded");
+            Near(4.0, RainWorldAudioEngine.CalculateLoudnessNormalizationGain(
+                0.01, 0.1), 0.000001, "quiet clip amplification is bounded");
+            Near(0.33, RainWorldAudioEngine.ApplyEventOutputGain(
+                "Slugcat_Terrain_Impact_Hard", 0.2), 0.000001,
+                "terrain impact gain is applied after movement normalization");
+            Near(0.07, RainWorldAudioEngine.ApplyEventOutputGain(
+                "Slugcat_Floor_Impact_Standard", 0.2), 0.000001,
+                "landing output is reduced independently from terrain impacts");
+            Near(0.52, RainWorldAudioEngine.ApplyEventOutputGain(
+                "SM_Spear_Pull", 0.2), 0.000001,
+                "quiet Spearmaster extraction audio receives a dedicated gain");
+            Near(0.2, RainWorldAudioEngine.ApplyEventOutputGain(
+                "Slugcat_Normal_Jump", 0.2), 0.000001,
+                "non-impact movement keeps its normalized output");
+            Near(0.25, WaveOutMixer.CalculateLimiterTarget(3.8),
+                0.000001, "overlapping peaks are reduced below clipping");
+            Near(1.0, WaveOutMixer.CalculateLimiterTarget(0.5),
+                0.000001, "single quiet sounds keep their authored level");
+            byte[] overlapPcm = new byte[WaveOutMixer.OutputSampleRate /
+                1000 * WaveOutMixer.BufferMilliseconds * 2];
+            for (int sampleIndex = 0; sampleIndex < overlapPcm.Length / 2;
+                sampleIndex++)
+            {
+                short sample = (sampleIndex & 1) == 0
+                    ? short.MaxValue
+                    : short.MinValue;
+                overlapPcm[sampleIndex * 2] = (byte)(sample & 0xff);
+                overlapPcm[sampleIndex * 2 + 1] =
+                    (byte)((sample >> 8) & 0xff);
+            }
+            RainWorldPcmClip overlapClip = new RainWorldPcmClip(
+                "overlap-test", overlapPcm, 0, overlapPcm.Length, 1,
+                WaveOutMixer.OutputSampleRate, 16);
+            double[] overlapLeft = new double[overlapPcm.Length / 2];
+            double[] overlapRight = new double[overlapLeft.Length];
+            for (int voiceIndex = 0;
+                voiceIndex < RainWorldAudioEngine.MaximumVoices; voiceIndex++)
+            {
+                WaveOutVoice overlapVoice = new WaveOutVoice(overlapClip,
+                    1.0, 0.0, 1.0, false,
+                    WaveOutMixer.OutputSampleRate);
+                overlapVoice.MixInto(overlapLeft, overlapRight,
+                    overlapLeft.Length, 2.0);
+            }
+            double overlapPeak = 0.0;
+            for (int sampleIndex = 0; sampleIndex < overlapLeft.Length;
+                sampleIndex++)
+                overlapPeak = Math.Max(overlapPeak,
+                    Math.Max(Math.Abs(overlapLeft[sampleIndex]),
+                        Math.Abs(overlapRight[sampleIndex])));
+            double overlapLimiter =
+                WaveOutMixer.CalculateLimiterTarget(overlapPeak);
+            True(overlapPeak > 100.0,
+                "128 shared-PCM voices exercise the worst overlap path");
+            True(overlapPeak * overlapLimiter <=
+                WaveOutMixer.LimiterPeak + 0.000001,
+                "200 percent 128-voice mix remains below the PCM clip peak");
+            Equal(4, WaveOutMixer.OutputBufferCount,
+                "one reusable four-buffer output ring");
+            Equal(10, WaveOutMixer.BufferMilliseconds,
+                "each output buffer stays low latency");
+            Equal(512, RainWorldAudioEngine.MaximumQueuedCommands,
+                "bounded command queue absorbs simultaneous pet bursts");
+            Equal(128, RainWorldAudioEngine.MaximumVoices,
+                "simultaneous voice capacity avoids ordinary one-shot loss");
+            Equal(32, RainWorldAudioEngine.ReservedPriorityVoices,
+                "reserved terrain, ability, and meow voices");
+            Equal(256, RainWorldAudioEngine.MaximumCommandsPerWorkerCycle,
+                "worker drains a burst before its sounds become stale");
+            True(RainWorldAudioEngine.CanAdmitVoices(94, 2, false),
+                "ordinary PLAYALL reserves all layers atomically");
+            True(!RainWorldAudioEngine.CanAdmitVoices(95, 2, false),
+                "ordinary PLAYALL never starts with only one layer available");
+            True(RainWorldAudioEngine.CanAdmitVoices(126, 2, true),
+                "priority explosion can use the complete voice range");
+            True(!RainWorldAudioEngine.CanAdmitVoices(127, 2, true),
+                "priority PLAYALL never truncates its final layer");
+            Equal(12, RainWorldAudioEngine.LoopStopFadeMilliseconds,
+                "loop stop uses a sub-frame anti-click ramp");
+            True(RainWorldAudioEngine.IsPrioritySound("SM_Spear_Pull"),
+                "Spearmaster pull gets reserved voice admission");
+            True(RainWorldAudioEngine.IsPrioritySound(
+                "Slugcat_Terrain_Impact_Hard"),
+                "terrain impact gets reserved voice admission");
+            True(RainWorldAudioEngine.IsPrioritySound("SlugcatMeowPupShort"),
+                "meows use reserved voice admission instead of being dropped");
+            True(RainWorldAudioEngine.IsPrioritySound("Bomb_Explode"),
+                "Downpour explosions bypass ordinary command admission");
+            True(!RainWorldAudioEngine.IsPrioritySound("Slugcat_Step_A"),
+                "ordinary movement stays below the reserved voice band");
+        }
+
+        private static void AudioMasterVolumeSupportsZeroToTwoRange()
+        {
+            Near(0.0, AudioVolumeSettings.Clamp(-0.5), 0.000001,
+                "master volume lower clamp");
+            Near(2.0, AudioVolumeSettings.Clamp(3.0), 0.000001,
+                "master volume upper clamp");
+            Near(1.0, AudioVolumeSettings.Clamp(double.NaN), 0.000001,
+                "invalid saved volume uses the default");
+            Near(0.8, RainWorldAudioEngine.ApplyMasterOutputGain(0.4, 2.0),
+                0.000001, "two hundred percent doubles final device output");
+            Near(1.0, RainWorldAudioEngine.ApplyMasterOutputGain(0.75, 2.0),
+                0.000001, "master amplification remains device safe");
+            using (RainWorldAudioEngine audio = new RainWorldAudioEngine(
+                null, new Rectangle(0, 0, 1920, 1080)))
+            {
+                audio.SetMasterVolume(1.8);
+                Near(1.8, audio.MasterVolume, 0.000001,
+                    "engine accepts live slider volume");
+            }
+        }
+
+        private static void AudioMuteDefaultsOnAndRestoresSavedChoice()
+        {
+            True(AudioMuteSettings.Default,
+                "a new installation starts with audio muted");
+            True(AudioMuteSettings.ParseSavedValue("true"),
+                "a saved muted choice is restored");
+            True(!AudioMuteSettings.ParseSavedValue("false"),
+                "a saved unmuted choice is restored");
+            True(AudioMuteSettings.ParseSavedValue("invalid"),
+                "an invalid setting falls back to the safe muted default");
+        }
+
+        private static void PushToMeowProfilesAndCadenceMatchDll()
+        {
+            string root = Path.Combine(Path.GetTempPath(),
+                "push-to-meow-profile-test-" + Guid.NewGuid().ToString("N"));
+            try
+            {
+                Directory.CreateDirectory(Path.Combine(root, "plugins"));
+                Directory.CreateDirectory(Path.Combine(root, "modify", "soundeffects"));
+                Directory.CreateDirectory(Path.Combine(root, "soundeffects"));
+                Directory.CreateDirectory(Path.Combine(root, "pushtomeow"));
+                File.WriteAllBytes(Path.Combine(root, "plugins", "PushToMeowMod.dll"),
+                    new byte[] { 0 });
+                File.WriteAllBytes(Path.Combine(root, "soundeffects", "MeowNormal1.wav"),
+                    new byte[] { 0 });
+                File.WriteAllText(Path.Combine(root, "modinfo.json"),
+                    "{\"version\":\"1.2.4\"}");
+                File.WriteAllText(Path.Combine(root, "modify", "soundeffects", "sounds.txt"),
+                    "[ADD]SlugcatMeowNormal : MeowNormal1/vol=0.6\n");
+                File.WriteAllText(Path.Combine(root, "pushtomeow", "custom_meows.json"),
+                    "{\"custom_meows\":[" +
+                    "{\"slugcat_id\":\"White\",\"short_meow_soundid\":\"SlugcatMeowNormalShort\",\"long_meow_soundid\":\"SlugcatMeowNormal\",\"short_meow_pup_soundid\":\"SlugcatMeowPupShort\",\"long_meow_pup_soundid\":\"SlugcatMeowPup\"}," +
+                    "{\"slugcat_id\":\"Gourmand\",\"short_meow_soundid\":\"SlugcatMeowFatShort\",\"long_meow_soundid\":\"SlugcatMeowFat\",\"volume_multiplier\":1.15}," +
+                    "{\"slugcat_id\":\"Artificer\",\"short_meow_soundid\":\"SlugcatMeowCoarseShort\",\"long_meow_soundid\":\"SlugcatMeowCoarse\",\"volume_multiplier\":1.2}," +
+                    "{\"slugcat_id\":\"Spear\",\"short_meow_soundid\":\"SlugcatMeowSpearShort\",\"long_meow_soundid\":\"SlugcatMeowSpear\",\"volume_multiplier\":0.55}," +
+                    "{\"slugcat_id\":\"Saint\",\"short_meow_soundid\":\"SlugcatMeowSaintShort\",\"long_meow_soundid\":\"SlugcatMeowSaint\"}]}");
+
+                string reason;
+                PushToMeowLibrary library = PushToMeowLibrary.LoadFromRoot(root,
+                    true, out reason);
+                True(library != null, "profile fixture loads: " + reason);
+                True(library.Version == "1.2.4", "mod version");
+                PushToMeowSound sound;
+                True(library.TryResolve(SlugcatId.White, true, true, out sound),
+                    "White pup short voice");
+                True(sound.SoundId == "SlugcatMeowPupShort", "dedicated pup SoundID");
+                Near(1.0, sound.Pitch, 0.000001,
+                    "dedicated custom pup sound resets pitch");
+                library.TryResolve(SlugcatId.Gourmand, false, false, out sound);
+                True(sound.SoundId == "SlugcatMeowFat", "Gourmand voice family");
+                Near(0.85 * 1.15, sound.Volume, 0.000001, "Gourmand volume");
+                library.TryResolve(SlugcatId.Artificer, false, true, out sound);
+                True(sound.SoundId == "SlugcatMeowCoarseShort", "Artificer voice family");
+                library.TryResolve(SlugcatId.SpearMaster, false, false, out sound);
+                True(sound.SoundId == "SlugcatMeowSpear", "Spearmaster voice family");
+                Near(0.85 * 0.55, sound.Volume, 0.000001, "Spearmaster volume");
+                library.TryResolve(SlugcatId.Rivulet, false, true, out sound);
+                True(sound.SoundId == "SlugcatMeowRivuletAShort",
+                    "default alternate option disabled uses Rivulet A");
+                Near(0.85 * 0.8, sound.Volume, 0.000001, "Rivulet volume");
+                library.TryResolve(SlugcatId.Saint, false, false, out sound);
+                True(sound.SoundId == "SlugcatMeowSaint", "Saint whisper voice family");
+
+                SlugcatId[] allIds =
+                {
+                    SlugcatId.White, SlugcatId.Yellow, SlugcatId.Red,
+                    SlugcatId.Gourmand, SlugcatId.Artificer,
+                    SlugcatId.SpearMaster, SlugcatId.Rivulet, SlugcatId.Saint
+                };
+                string[] adultLongIds =
+                {
+                    "SlugcatMeowNormal", "SlugcatMeowNormal",
+                    "SlugcatMeowNormal", "SlugcatMeowFat",
+                    "SlugcatMeowCoarse", "SlugcatMeowSpear",
+                    "SlugcatMeowRivuletA", "SlugcatMeowSaint"
+                };
+                for (int i = 0; i < allIds.Length; i++)
+                {
+                    True(library.TryResolve(allIds[i], false, false, out sound) &&
+                        sound.SoundId == adultLongIds[i],
+                        allIds[i] + " adult long voice");
+                    string expectedPup = i < 3
+                        ? "SlugcatMeowPup" : adultLongIds[i];
+                    True(library.TryResolve(allIds[i], true, false, out sound) &&
+                        sound.SoundId == expectedPup,
+                        allIds[i] + " pup long voice");
+                    Near(i < 3 ? 1.0 : 1.3, sound.Pitch, 0.000001,
+                        allIds[i] + " pup pitch rule");
+                }
+
+                Near(24.0, PushToMeowController.CalculateIntervalSeconds(0.0, 0.0),
+                    0.000001, "hungry minimum interval");
+                Near(85.0, PushToMeowController.CalculateIntervalSeconds(1.0, 1.0),
+                    0.000001, "fed maximum interval");
+            }
+            finally
+            {
+                if (Directory.Exists(root)) Directory.Delete(root, true);
+            }
+        }
+
+        private static void PushToMeowAnimationsMatchDll()
+        {
+            DesktopCollisionWorld world = new DesktopCollisionWorld(new WindowEnumerator());
+            SlugcatId[] ids =
+            {
+                SlugcatId.White, SlugcatId.Yellow, SlugcatId.Red,
+                SlugcatId.Gourmand, SlugcatId.Artificer,
+                SlugcatId.SpearMaster, SlugcatId.Rivulet, SlugcatId.Saint
+            };
+            for (int idIndex = 0; idIndex < ids.Length; idIndex++)
+            {
+                for (int pup = 0; pup < 2; pup++)
+                {
+                    Slugcat slugcat = new Slugcat(
+                        new Vec2(200.0 + idIndex * 20.0, 200.0), ids[idIndex]);
+                    slugcat.SetPupAppearance(pup != 0);
+                    SlugcatGraphics graphics = new SlugcatGraphics(slugcat);
+                    AttentionSystem attention = new AttentionSystem();
+                    attention.SetTarget(AttentionKind.RandomPoint,
+                        slugcat.Center + new Vec2(50.0, 0.0));
+                    graphics.TriggerMeowAnimation(true);
+
+                    graphics.Step(attention, world);
+                    SlugcatPose delayed = graphics.BuildPose(1.0, attention);
+                    True(!delayed.Blink,
+                        ids[idIndex] + " waits one fixed tick for DLL's 33 ms timer");
+                    if (ids[idIndex] == SlugcatId.SpearMaster)
+                    {
+                        for (int segment = 0;
+                            segment < graphics.Tail.Segments.Length; segment++)
+                            Near(-slugcat.State.Facing * 2.0,
+                                graphics.Tail.Segments[segment].Velocity.X, 0.000001,
+                                "Spearmaster tail horizontal fling " + segment);
+                    }
+
+                    graphics.Step(attention, world);
+                    SlugcatPose pose = graphics.BuildPose(1.0, attention);
+                    True(pose.Blink, ids[idIndex] + " meow uses closed eyes");
+                    OriginalFaceState face = SpriteRenderer.ResolveOriginalFaceState(pose);
+                    True(face.FaceElement.StartsWith(pup != 0 ? "PFaceB" : "FaceB",
+                        StringComparison.Ordinal),
+                        ids[idIndex] + " selects its closed-eye face family");
+
+                    pose.BodyMode = BodyModeIndex.Stand;
+                    pose.InputX = 1;
+                    OriginalFaceState movingFace =
+                        SpriteRenderer.ResolveOriginalFaceState(pose);
+                    True(string.Equals((pup != 0 ? "PFaceB" : "FaceB") + "4",
+                        movingFace.FaceElement, StringComparison.Ordinal),
+                        ids[idIndex] + " moving meow uses closed-eye movement frame");
+                    True(movingFace.HeadElement.EndsWith("6",
+                        StringComparison.Ordinal),
+                        ids[idIndex] + " standing movement keeps head frame 6");
+                    Near(0.0, movingFace.FacePosition.X - movingFace.HeadPosition.X,
+                        0.000001,
+                        ids[idIndex] + " moving meow centers the face horizontally");
+                    True(string.Equals("StandMovement", movingFace.Reason,
+                        StringComparison.Ordinal),
+                        ids[idIndex] + " moving meow keeps movement face branch");
+
+                    pose.BodyMode = BodyModeIndex.Crawl;
+                    OriginalFaceState crawlingFace =
+                        SpriteRenderer.ResolveOriginalFaceState(pose);
+                    True(string.Equals((pup != 0 ? "PFaceB" : "FaceB") + "4",
+                        crawlingFace.FaceElement, StringComparison.Ordinal),
+                        ids[idIndex] + " crawling meow uses closed-eye movement frame");
+                    True(crawlingFace.HeadElement.EndsWith("7",
+                        StringComparison.Ordinal),
+                        ids[idIndex] + " crawl keeps head frame 7");
+                    Near(0.0, crawlingFace.FacePosition.X - crawlingFace.HeadPosition.X,
+                        0.000001,
+                        ids[idIndex] + " crawling meow centers the face horizontally");
+                    True(string.Equals("Crawl", crawlingFace.Reason,
+                        StringComparison.Ordinal),
+                        ids[idIndex] + " crawling meow keeps crawl face branch");
+                    if (ids[idIndex] == SlugcatId.SpearMaster)
+                    {
+                        True(pose.LookDirection.X > 0.5,
+                            "Spearmaster keeps normal attention while meowing");
+                    }
+                    else
+                    {
+                        True(pose.LookDirection.Y < -0.9,
+                            ids[idIndex] + " meow looks straight up");
+                        Near(-1.0, face.FacePosition.Y - face.HeadPosition.Y,
+                            0.000001,
+                            ids[idIndex] + " lifted face offset in desktop Y");
+                        Near(-1.0,
+                            movingFace.FacePosition.Y - movingFace.HeadPosition.Y,
+                            0.000001,
+                            ids[idIndex] + " moving meow keeps lifted face offset");
+                        Near(-1.0,
+                            crawlingFace.FacePosition.Y - crawlingFace.HeadPosition.Y,
+                            0.000001,
+                            ids[idIndex] + " crawling meow keeps lifted face offset");
+                    }
+
+                    for (int releaseTick = 0; releaseTick < 9; releaseTick++)
+                        graphics.Step(attention, world);
+                    SlugcatPose released = graphics.BuildPose(1.0, attention);
+                    True(!released.Blink,
+                        ids[idIndex] + " short meow blink ends without sticking");
+                    if (ids[idIndex] != SlugcatId.SpearMaster)
+                        True(released.LookDirection.X > 0.5,
+                            ids[idIndex] + " upward meow look releases on time");
+                }
+            }
+        }
+
+        private static void AudioAdmissionKeepsCharacterMovementDownpourAbilitiesAndMeows()
+        {
+            True(RainWorldAudioEngine.IsPermittedCharacterSound("Slugcat_Step_A"),
+                "footstep is a character movement sound");
+            True(RainWorldAudioEngine.IsPermittedCharacterSound("Slugcat_Wall_Jump"),
+                "jump is a character movement sound");
+            True(RainWorldAudioEngine.IsPermittedCharacterSound("Slugcat_Roll_LOOP"),
+                "roll loop is a character movement sound");
+            True(!RainWorldAudioEngine.IsPermittedCharacterSound("Slugcat_Skid_On_Ground_Init"),
+                "ground skid start is excluded from playback");
+            True(!RainWorldAudioEngine.IsPermittedCharacterSound("Slugcat_Skid_On_Ground_LOOP"),
+                "ground skid loop is excluded from playback");
+            True(!RainWorldAudioEngine.IsPermittedCharacterSound("Slugcat_Enter_Wall_Slide"),
+                "wall-slide entry is excluded from playback");
+            True(!RainWorldAudioEngine.IsPermittedCharacterSound("Slugcat_Wall_Slide_LOOP"),
+                "wall-slide loop is excluded from playback");
+            True(!RainWorldAudioEngine.IsPermittedCharacterSound("Slugcat_Belly_Slide_Init"),
+                "belly-slide start is excluded from playback");
+            True(!RainWorldAudioEngine.IsPermittedCharacterSound("Slugcat_Belly_Slide_LOOP"),
+                "belly-slide loop is excluded from playback");
+            True(RainWorldAudioEngine.IsPermittedCharacterSound("Slugcat_Floor_Impact_Standard"),
+                "floor landing impact is a character movement sound");
+            True(RainWorldAudioEngine.IsTerrainImpactSound(
+                "Slugcat_Terrain_Impact_Hard"),
+                "hard terrain impact receives priority playback");
+            True(RainWorldAudioEngine.IsPermittedCharacterSound("SlugcatMeowPupShort"),
+                "Push To Meow pup voice remains available");
+            True(RainWorldAudioEngine.IsPermittedCharacterSound("Fire_Spear_Explode"),
+                "Artificer explosion is a Downpour ability sound");
+            True(RainWorldAudioEngine.IsPermittedCharacterSound("SM_Spear_Pull"),
+                "Spearmaster needle pull is a Downpour ability sound");
+            True(RainWorldAudioEngine.IsPermittedCharacterSound("Slugcat_Throw_Spear"),
+                "Spearmaster spear throw is a Downpour ability sound");
+            True(RainWorldAudioEngine.IsPermittedCharacterSound("Spear_Stick_In_Wall"),
+                "Spearmaster-created spear impact is admitted");
+            True(RainWorldAudioEngine.IsPermittedCharacterSound("Tube_Worm_Shoot_Tongue"),
+                "Saint tongue launch is a Downpour ability sound");
+            True(!RainWorldAudioEngine.IsPermittedCharacterSound("Zapper_Zap"),
+                "unrelated world ability sound is excluded");
+            True(!RainWorldAudioEngine.IsPermittedCharacterSound("Tube_Worm_Tongue_Hit_Creature"),
+                "unsupported creature tongue interaction is excluded");
+            True(!RainWorldAudioEngine.IsPermittedCharacterSound("UI_Slugcat_Stunned_Init"),
+                "non-movement UI stun sound is excluded");
+        }
+
+        private static void SlugcatSoundCallsUseAudioSink()
+        {
+            RecordingSoundSink sink = new RecordingSoundSink();
+            Slugcat slugcat = new Slugcat(new Vec2(100.0, 100.0));
+            slugcat.SetAudioSink(sink, "test-source");
+            slugcat.EmitSound("Slugcat_Normal_Jump", slugcat.Center, 0.75, 1.1, 3);
+            slugcat.StartSoundLoop("Slugcat_Roll_LOOP", "roll", slugcat.Center, 0.5, 1.0);
+            slugcat.StopSoundLoop("Slugcat_Roll_LOOP", "roll", slugcat.Center);
+            Equal(1, sink.PlayCount, "one-shot event count");
+            Equal(1, sink.StartLoopCount, "loop start count");
+            Equal(1, sink.StopLoopCount, "loop stop count");
+            True(sink.LastSound != null && sink.LastSound.SourceId == "test-source",
+                "sound source identity");
+        }
+
+        private static void ExpandedMovementSoundsFollowOriginalStates()
+        {
+            DesktopCollisionWorld world = new DesktopCollisionWorld(new WindowEnumerator());
+            world.RefreshFromSnapshots(new DesktopWindowSnapshot[0]);
+
+            RecordingSoundSink skidSink = new RecordingSoundSink();
+            Slugcat skid = new Slugcat(new Vec2(100.0, 100.0));
+            skid.SetAudioSink(skidSink, "skid-source");
+            skid.BodyChunks[0].ContactFloor = true;
+            skid.BodyChunks[1].ContactFloor = true;
+            skid.BodyChunks[0].Velocity.X = 4.0;
+            skid.BodyChunks[1].Velocity.X = 4.0;
+            skid.State.BodyMode = BodyModeIndex.Stand;
+            skid.State.Standing = true;
+            skid.State.SlideDirection = 1;
+            skid.State.InitSlideCounter = 11;
+            skid.Movement.ApplyInput(new VirtualInput(-1, 0, false, false), world);
+            Equal(0, skidSink.PlayCount, "skid start stays silent");
+            Equal(0, skidSink.StartLoopCount, "skid loop stays silent");
+            skid.BodyChunks[0].ContactFloor = true;
+            skid.BodyChunks[1].ContactFloor = true;
+            skid.Movement.ApplyInput(VirtualInput.Neutral, world);
+            Equal(0, skidSink.StopLoopCount, "skid has no loop to stop");
+
+            RecordingSoundSink wallSink = new RecordingSoundSink();
+            Slugcat wall = new Slugcat(new Vec2(100.0, 100.0));
+            wall.SetAudioSink(wallSink, "wall-source");
+            wall.BodyChunks[0].ContactRight = true;
+            wall.BodyChunks[0].Velocity.Y = 0.5;
+            wall.Movement.ApplyInput(new VirtualInput(1, 0, false, false), world);
+            Equal(0, wallSink.PlayCount, "wall-slide entry stays silent");
+            Equal(0, wallSink.StartLoopCount, "wall-slide loop stays silent");
+            wall.BodyChunks[0].ContactRight = false;
+            wall.Movement.ApplyInput(VirtualInput.Neutral, world);
+            Equal(0, wallSink.StopLoopCount, "wall slide has no loop to stop");
+
+            RecordingSoundSink landingSink = new RecordingSoundSink();
+            Slugcat landing = new Slugcat(new Vec2(100.0, 100.0));
+            landing.SetAudioSink(landingSink, "landing-source");
+            landing.State.Standing = true;
+            landing.Movement.TerrainImpact(new TerrainImpactData
+            {
+                BodyChunkIndex = 1,
+                FirstContact = true,
+                ImpactDirection = new Vec2(0.0, -1.0),
+                ImpactSpeed = 10.0
+            });
+            Equal(1, landingSink.PlayCount, "landing sound count");
+            True(landingSink.LastSound != null &&
+                landingSink.LastSound.Id == "Slugcat_Floor_Impact_Standard",
+                "standing lower chunk selects the standard floor impact");
+            Near(2.0 / 3.0, landingSink.LastSound.Volume, 0.000001,
+                "floor impact volume follows Player's 8-to-11 inverse lerp");
+
+            RecordingSoundSink retainedContactSink = new RecordingSoundSink();
+            Slugcat retainedContact = new Slugcat(new Vec2(100.0, 100.0));
+            retainedContact.SetAudioSink(retainedContactSink, "retained-contact");
+            retainedContact.Movement.TerrainImpact(new TerrainImpactData
+            {
+                BodyChunkIndex = 0,
+                FirstContact = false,
+                ImpactDirection = new Vec2(1.0, 0.0),
+                ImpactSpeed = 20.0
+            });
+            Equal(1, retainedContactSink.PlayCount,
+                "high-speed retained wall contact still emits an impact");
+            True(retainedContactSink.LastSound != null &&
+                retainedContactSink.LastSound.Id == "Slugcat_Terrain_Impact_Hard",
+                "fast wall collision selects the hard impact sound");
+
+            RecordingSoundSink retainedBumpSink = new RecordingSoundSink();
+            Slugcat retainedBump = new Slugcat(new Vec2(100.0, 100.0));
+            retainedBump.SetAudioSink(retainedBumpSink, "retained-bump");
+            retainedBump.Movement.TerrainImpact(new TerrainImpactData
+            {
+                BodyChunkIndex = 0,
+                FirstContact = false,
+                ImpactDirection = new Vec2(1.0, 0.0),
+                ImpactSpeed = 10.0
+            });
+            Equal(0, retainedBumpSink.PlayCount,
+                "ordinary retained contact does not repeat impact audio");
+        }
+
+        private static void CrawlTurnDoesNotEmitFootstep()
+        {
+            DesktopCollisionWorld world = new DesktopCollisionWorld(new WindowEnumerator());
+            world.RefreshFromSnapshots(new DesktopWindowSnapshot[0]);
+            RecordingSoundSink sink = new RecordingSoundSink();
+            Slugcat slugcat = new Slugcat(new Vec2(100.0, 100.0));
+            slugcat.SetAudioSink(sink, "crawl-turn-source");
+            slugcat.BodyChunks[0].ContactFloor = true;
+            slugcat.BodyChunks[1].ContactFloor = true;
+            slugcat.State.BodyMode = BodyModeIndex.Crawl;
+            slugcat.State.Standing = false;
+            slugcat.State.Animation = AnimationIndex.CrawlTurn;
+            slugcat.State.AnimationFrame = 10;
+            slugcat.Movement.ApplyInput(new VirtualInput(-1, 0, false, false), world);
+            Equal(0, sink.PlayCount,
+                "CrawlTurn frame wrap must not emit a crawling or walking step");
+        }
+
         private static void SlugpupAvailabilityFollowsMoreSlugcatsInstallMarker()
         {
             string root = Path.Combine(Path.GetTempPath(),
@@ -2520,6 +3373,101 @@ namespace RainWorldDesktopPet.Tests
                 "movement must interpret climb VirtualInput without direct AI movement");
             True(slugcat.BodyChunks[0].Velocity.Y + slugcat.BodyChunks[1].Velocity.Y >= 0.0,
                 "wall slide's standing support must not create net upward screen-space travel");
+        }
+
+        private static void WallClimbReleasesAfterIntentEnds()
+        {
+            Slugcat slugcat = new Slugcat(new Vec2(400.0, 400.0));
+            DesktopCollisionWorld world = new DesktopCollisionWorld(
+                new WindowEnumerator());
+            world.Refresh(IntPtr.Zero);
+            slugcat.BodyChunks[0].ContactRight = true;
+            slugcat.Movement.ApplyInput(new VirtualInput(1, 0, false, false),
+                world);
+            True(slugcat.State.BodyMode == BodyModeIndex.WallClimb,
+                "current matching wall input enters WallClimb");
+
+            slugcat.Movement.ApplyInput(VirtualInput.Neutral, world);
+            True(slugcat.State.BodyMode != BodyModeIndex.WallClimb,
+                "neutral horizontal input immediately releases WallClimb even while contact remains");
+
+            slugcat.State.BodyMode = BodyModeIndex.WallClimb;
+            slugcat.State.Facing = 1;
+            slugcat.BodyChunks[0].ContactRight = false;
+            slugcat.BodyChunks[0].PreviousContactRight = true;
+            slugcat.Movement.ApplyInput(new VirtualInput(1, 0, false, false),
+                world);
+            True(slugcat.State.BodyMode == BodyModeIndex.WallClimb,
+                "one previous-contact tick masks connection-solver wall flicker");
+            slugcat.BodyChunks[0].PreviousContactRight = false;
+            slugcat.Movement.ApplyInput(new VirtualInput(1, 0, false, false),
+                world);
+            True(slugcat.State.BodyMode != BodyModeIndex.WallClimb,
+                "stale directional input cannot preserve WallClimb without current or previous contact");
+
+            VirtualInput attachedNeutral =
+                DesktopPetAI.ComposeAttachedSaintInput(VirtualInput.Neutral, -1);
+            Equal(0, attachedNeutral.X,
+                "attached Saint does not invent horizontal wall input");
+            Equal(-1, attachedNeutral.Y,
+                "attached Saint still controls tongue shortening");
+            VirtualInput attachedMoving = DesktopPetAI.ComposeAttachedSaintInput(
+                new VirtualInput(-1, 0, false, false), 0);
+            Equal(-1, attachedMoving.X,
+                "attached Saint preserves an active horizontal movement intent");
+        }
+
+        private static void WallClimbRenderPoseReleasesSmoothly()
+        {
+            Slugcat slugcat = new Slugcat(new Vec2(400.0, 400.0));
+            DesktopCollisionWorld world = new DesktopCollisionWorld(
+                new WindowEnumerator());
+            world.Refresh(IntPtr.Zero);
+            slugcat.State.Facing = 1;
+            slugcat.State.BodyMode = BodyModeIndex.WallClimb;
+            slugcat.BodyChunks[0].ContactRight = true;
+            slugcat.BodyChunks[1].ContactRight = true;
+            SlugcatGraphics graphics = new SlugcatGraphics(slugcat);
+            AttentionSystem attention = new AttentionSystem();
+
+            graphics.Step(attention, world);
+            SlugcatPose pose = graphics.BuildPose(1.0, attention);
+            Vec2 wallChest = pose.Chest;
+            Near(1.0, pose.WallClimbBlend, 0.000001,
+                "active WallClimb uses the complete authored wall pose");
+
+            slugcat.State.BodyMode = BodyModeIndex.Default;
+            double previousBlend = 1.0;
+            for (int tick = 1; tick <= 5; tick++)
+            {
+                graphics.Step(attention, world);
+                pose = graphics.BuildPose(1.0, attention);
+                double expectedBlend = Math.Max(0.0,
+                    1.0 - tick * SlugcatGraphics.WallClimbReleasePerTick);
+                Near(expectedBlend, pose.WallClimbBlend, 0.000001,
+                    "wall render blend follows its five-tick release at tick " + tick);
+                True(pose.WallClimbBlend <= previousBlend,
+                    "wall render blend must not rise after logical release");
+                True(pose.BodyMode == BodyModeIndex.Default,
+                    "render smoothing must not retain the logical WallClimb state");
+                previousBlend = pose.WallClimbBlend;
+
+                if (tick == 1)
+                {
+                    Vec2 directChest = slugcat.BodyChunks[0].Position;
+                    double completeJump = Vec2.Distance(wallChest, directChest);
+                    double smoothedJump = Vec2.Distance(wallChest, pose.Chest);
+                    True(smoothedJump > 0.000001 && smoothedJump < completeJump,
+                        "the first release tick must advance toward, not snap to, the next pose");
+                    True(SpriteRenderer.IsVisualWallClimb(pose),
+                        "wall legs and arm orientation stay coherent during release");
+                }
+            }
+
+            Near(0.0, pose.WallClimbBlend, 0.000001,
+                "wall render blend reaches the next pose after five ticks");
+            True(!SpriteRenderer.IsVisualWallClimb(pose),
+                "wall sprite selection ends only after the body transition completes");
         }
 
         private static void OriginalBlockedWallPoseAppliesToSlugcatAndSlugpup()
@@ -5460,6 +6408,24 @@ namespace RainWorldDesktopPet.Tests
         private static void True(bool value, string message)
         {
             if (!value) throw new InvalidOperationException(message);
+        }
+
+        private sealed class RecordingSoundSink : ISoundEventSink
+        {
+            public string Status { get { return "test"; } }
+            public int PlayCount;
+            public int StartLoopCount;
+            public int StopLoopCount;
+            public SoundEvent LastSound;
+
+            public void Play(SoundEvent sound) { PlayCount++; LastSound = sound; }
+            public void StartLoop(SoundEvent sound, string loopKey)
+            {
+                StartLoopCount++;
+                LastSound = sound;
+            }
+            public void StopLoop(string sourceId, string loopKey) { StopLoopCount++; }
+            public void StopSource(string sourceId) { }
         }
 
         private static void Equal(int expected, int actual, string message)

@@ -445,7 +445,7 @@ namespace RainWorldDesktopPet.AI
             // layer and leaves the original movement/physics implementation untouched.
             VirtualInput abilityInput;
             if (TryProduceAbilityInput(slugcat, mouse, mouseAttention, context,
-                out abilityInput)) input = abilityInput;
+                input, out abilityInput)) input = abilityInput;
 
             UpdateAttention(slugcat, mouse, context, mouseAttention);
             Attention.Step();
@@ -793,7 +793,7 @@ namespace RainWorldDesktopPet.AI
 
         private bool TryProduceAbilityInput(Slugcat slugcat, MouseTracker mouse,
             MouseAttentionState mouseAttention, UtilityContext context,
-            out VirtualInput input)
+            VirtualInput movementInput, out VirtualInput input)
         {
             input = VirtualInput.Neutral;
             SpearmasterAbilityController spear =
@@ -819,7 +819,8 @@ namespace RainWorldDesktopPet.AI
             SaintAbilityController saint =
                 slugcat.AbilityController as SaintAbilityController;
             if (saint != null)
-                return ProduceSaintInput(slugcat, saint, context, out input);
+                return ProduceSaintInput(slugcat, saint, context,
+                    movementInput, out input);
             ResetSaintTransition();
 
             ArtificerAbilityController artificer =
@@ -875,7 +876,7 @@ namespace RainWorldDesktopPet.AI
 
         private bool ProduceSaintInput(Slugcat slugcat,
             SaintAbilityController saint, UtilityContext context,
-            out VirtualInput input)
+            VirtualInput movementInput, out VirtualInput input)
         {
             input = VirtualInput.Neutral;
             if (saint.Mode == SaintTongueMode.AttachedToTerrain)
@@ -937,8 +938,8 @@ namespace RainWorldDesktopPet.AI
                 // Pull toward an overhead anchor, but give a floor-side anchor slack
                 // instead of pinning Saint down against the same surface.
                 int ropeLengthInput = anchorAbove ? -1 : (anchorBelow ? 1 : 0);
-                input = new VirtualInput(desiredDirection, ropeLengthInput,
-                    false, false);
+                input = ComposeAttachedSaintInput(movementInput,
+                    ropeLengthInput);
                 return true;
             }
             saintAttachedTicks = 0;
@@ -1009,6 +1010,17 @@ namespace RainWorldDesktopPet.AI
             input = new VirtualInput(desiredDirection, 0, true, false);
             movementUrge = Math.Max(0.10, movementUrge - 0.12);
             return true;
+        }
+
+        internal static VirtualInput ComposeAttachedSaintInput(
+            VirtualInput movementInput, int ropeLengthInput)
+        {
+            // Tongue length owns vertical input while attached. Horizontal
+            // movement still belongs to the current behavior; using the stale
+            // desiredDirection here can keep WallClimb alive after that
+            // behavior has already returned neutral.
+            return new VirtualInput(movementInput.X, ropeLengthInput,
+                false, false);
         }
 
         private bool RequiresExplosiveTransition()

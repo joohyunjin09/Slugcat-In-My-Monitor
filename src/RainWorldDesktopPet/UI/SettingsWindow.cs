@@ -21,6 +21,9 @@ namespace RainWorldDesktopPet.UI
         private readonly ComboBox languageSelector;
         private readonly CheckBox debugCheck;
         private readonly CheckBox pauseCheck;
+        private readonly CheckBox audioMuteCheck;
+        private readonly TrackBar audioVolumeTrack;
+        private readonly Label audioVolumeValueLabel;
         private readonly Button retryButton;
         private readonly Label statusLabel;
         private bool updating;
@@ -165,9 +168,60 @@ namespace RainWorldDesktopPet.UI
             {
                 if (!updating) app.SettingsPaused = pauseCheck.Checked;
             };
+            audioMuteCheck = new CheckBox
+            {
+                Text = T("사운드 음소거", "Mute Audio"),
+                AutoSize = true,
+                Margin = new Padding(3, 9, 18, 3)
+            };
+            audioMuteCheck.CheckedChanged += delegate
+            {
+                if (!updating) app.SettingsAudioMuted = audioMuteCheck.Checked;
+            };
+            Label audioVolumeLabel = new Label
+            {
+                Text = T("음량 (최대 200%)", "Volume (up to 200%)"),
+                AutoSize = true,
+                Margin = new Padding(3, 10, 0, 3)
+            };
+            audioVolumeTrack = new TrackBar
+            {
+                Minimum = 0,
+                Maximum = 200,
+                Value = 100,
+                TickFrequency = 25,
+                SmallChange = 5,
+                LargeChange = 10,
+                Width = 190,
+                AutoSize = true,
+                Margin = new Padding(3, 1, 0, 0)
+            };
+            audioVolumeValueLabel = new Label
+            {
+                Text = "100%",
+                AutoSize = true,
+                MinimumSize = new Size(42, 0),
+                Margin = new Padding(3, 10, 12, 3)
+            };
+            audioVolumeTrack.ValueChanged += delegate
+            {
+                audioVolumeValueLabel.Text = audioVolumeTrack.Value + "%";
+                if (!updating)
+                    app.SettingsAudioVolumePercent = audioVolumeTrack.Value;
+            };
+            audioVolumeTrack.MouseUp += delegate
+            { app.SettingsPersistAudioVolume(); };
+            audioVolumeTrack.KeyUp += delegate
+            { app.SettingsPersistAudioVolume(); };
+            audioVolumeTrack.Leave += delegate
+            { app.SettingsPersistAudioVolume(); };
             retryButton = ActionButton(T("렌더링 재시도", "Retry Rendering"), delegate { app.SettingsRetryRendering(); RefreshFromApp(); });
             behaviorLayout.Controls.Add(debugCheck);
             behaviorLayout.Controls.Add(pauseCheck);
+            behaviorLayout.Controls.Add(audioMuteCheck);
+            behaviorLayout.Controls.Add(audioVolumeLabel);
+            behaviorLayout.Controls.Add(audioVolumeTrack);
+            behaviorLayout.Controls.Add(audioVolumeValueLabel);
             behaviorLayout.Controls.Add(retryButton);
             behaviorLayout.Controls.Add(new Label
             {
@@ -234,6 +288,13 @@ namespace RainWorldDesktopPet.UI
                 retryButton.Enabled = app.SettingsCanRetryRendering;
                 debugCheck.Checked = app.SettingsDebugEnabled;
                 pauseCheck.Checked = app.SettingsPaused;
+                audioMuteCheck.Checked = app.SettingsAudioMuted;
+                int audioVolume = Math.Max(audioVolumeTrack.Minimum,
+                    Math.Min(audioVolumeTrack.Maximum,
+                        app.SettingsAudioVolumePercent));
+                if (audioVolumeTrack.Value != audioVolume)
+                    audioVolumeTrack.Value = audioVolume;
+                audioVolumeValueLabel.Text = audioVolume + "%";
                 bool canUseSlugpup = app.SettingsCanUseSlugpupAppearance();
                 pupAppearanceCheck.Enabled = canUseSlugpup;
                 pupAppearanceCheck.Text = canUseSlugpup
@@ -270,9 +331,9 @@ namespace RainWorldDesktopPet.UI
                     }
                 }
                 statusLabel.Text = T("실행 중인 슬러그캣: " + names.Length +
-                        "마리 · 트레이 아이콘을 왼쪽 클릭하면 이 창을 다시 열 수 있습니다.",
+                        "마리 · " + app.SettingsAudioStatus,
                     names.Length + " active Slugcat" + (names.Length == 1 ? string.Empty : "s") +
-                        ". Left-click the tray icon to reopen this window.");
+                        " · " + app.SettingsAudioStatus);
             }
             finally { updating = false; }
         }
