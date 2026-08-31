@@ -330,10 +330,9 @@ namespace RainWorldDesktopPet.UI
                         break;
                     }
                 }
-                statusLabel.Text = T("실행 중인 슬러그캣: " + names.Length +
-                        "마리 · " + app.SettingsAudioStatus,
-                    names.Length + " active Slugcat" + (names.Length == 1 ? string.Empty : "s") +
-                        " · " + app.SettingsAudioStatus);
+                statusLabel.Text = T("실행 중인 슬러그캣: " + names.Length + "마리",
+                    names.Length + " active Slugcat" +
+                        (names.Length == 1 ? string.Empty : "s"));
             }
             finally { updating = false; }
         }
