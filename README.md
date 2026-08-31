@@ -29,7 +29,7 @@ uses the required files from the local installation in read-only form.
   become floors, ledges, and walls.
 - **Autonomous behavior:** each pet has its own personality, attention, rest cycle, route
   choices, and character-specific movement.
-- **Direct commands:** right-click a Slugcat to open a Rain World-inspired radial command
+- **Direct commands:** right-click a Slugcat to open a radial command
   wheel with Stop, Move, and Follow Me.
 - **Up to eight Slugcats:** add, select, resize, change, or remove pets independently.
 - **Mouse interaction:** pick up and throw Slugcats, move food, and let pets react to the
