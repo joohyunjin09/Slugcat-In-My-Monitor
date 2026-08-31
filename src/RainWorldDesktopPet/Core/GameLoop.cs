@@ -640,6 +640,9 @@ namespace RainWorldDesktopPet.Core
                     skin.Name + " does not provide a complete " + part + " sprite group.");
                 return false;
             }
+            // Decode at the explicit selection boundary so the following render
+            // frame never pays an atlas-load stall.
+            skin.PrepareForRendering();
             dmsPartSelections[part] = skin.Id;
             Renderer.SetDmsPart(part, skin);
             reason = null;
@@ -676,6 +679,7 @@ namespace RainWorldDesktopPet.Core
                     "The source mod is installed but disabled in Rain World Remix: ") + skin.ModName;
                 return false;
             }
+            skin.PrepareForRendering();
             ClearDmsParts();
             foreach (string part in skin.AvailableParts)
             {

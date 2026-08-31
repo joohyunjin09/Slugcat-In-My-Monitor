@@ -61,6 +61,9 @@ namespace
     {
         ComPtr<IDCompositionSurface> CompositionSurface;
         ComPtr<IDCompositionVisual> Visual;
+        ComPtr<ID3D11Texture2D> RenderTexture;
+        ComPtr<ID3D11RenderTargetView> RenderTargetView;
+        ComPtr<ID2D1Bitmap1> D2DTarget;
         UINT Width = 0;
         UINT Height = 0;
         bool Active = false;
@@ -266,17 +269,62 @@ float4 PSMain(PixelInput input) : SV_TARGET { float2 p=input.uv*2-1;
             return Device->CreateBlendState(&blend,&EffectBlendState);
         }
 
+        static void ReleaseSurfaceResources(Surface& surface)
+        {
+            surface.D2DTarget.Reset();
+            surface.RenderTargetView.Reset();
+            surface.RenderTexture.Reset();
+            surface.Visual.Reset();
+            surface.CompositionSurface.Reset();
+            surface.Width=0; surface.Height=0; surface.Active=false;
+            surface.InactiveSince=0;
+        }
+
+        HRESULT EnsureRenderTarget(Surface& surface,bool requireD2DTarget)
+        {
+            HRESULT hr=S_OK;
+            if (!surface.RenderTexture)
+            {
+                D3D11_TEXTURE2D_DESC description={};
+                description.Width=surface.Width;
+                description.Height=surface.Height;
+                description.MipLevels=1;
+                description.ArraySize=1;
+                description.Format=DXGI_FORMAT_B8G8R8A8_UNORM;
+                description.SampleDesc.Count=1;
+                description.Usage=D3D11_USAGE_DEFAULT;
+                description.BindFlags=D3D11_BIND_RENDER_TARGET|
+                    D3D11_BIND_SHADER_RESOURCE;
+                if (FAILED(hr=Device->CreateTexture2D(&description,nullptr,
+                    &surface.RenderTexture))) return hr;
+                if (FAILED(hr=Device->CreateRenderTargetView(
+                    surface.RenderTexture.Get(),nullptr,
+                    &surface.RenderTargetView))) return hr;
+            }
+            if (!requireD2DTarget || surface.D2DTarget) return S_OK;
+            ComPtr<IDXGISurface> dxgiSurface;
+            if (FAILED(hr=surface.RenderTexture.As(&dxgiSurface))) return hr;
+            D2D1_BITMAP_PROPERTIES1 properties=D2D1::BitmapProperties1(
+                D2D1_BITMAP_OPTIONS_TARGET|D2D1_BITMAP_OPTIONS_CANNOT_DRAW,
+                D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM,
+                    D2D1_ALPHA_MODE_PREMULTIPLIED),96.0f,96.0f);
+            return SpriteContext->CreateBitmapFromDxgiSurface(dxgiSurface.Get(),
+                &properties,&surface.D2DTarget);
+        }
+
         HRESULT EnsureSurface(std::array<Surface,MaximumSurfaces>& list,
-            IDCompositionVisual* parent,int slot,UINT width,UINT height)
+            IDCompositionVisual* parent,int slot,UINT width,UINT height,
+            bool requireRenderTarget,bool requireD2DTarget)
         {
             if (slot<0 || slot>=MaximumSurfaces || !width || !height) return E_INVALIDARG;
             Surface& s=list[slot];
-            if (s.CompositionSurface && s.Width==width && s.Height==height) return S_OK;
+            if (s.CompositionSurface && s.Width==width && s.Height==height)
+                return requireRenderTarget?
+                    EnsureRenderTarget(s,requireD2DTarget):S_OK;
             if (s.Visual) {
                 HRESULT remove=parent->RemoveVisual(s.Visual.Get());
                 if (FAILED(remove)) return remove;
-                s.Visual.Reset(); s.CompositionSurface.Reset();
-                s.Width=0; s.Height=0; s.Active=false; s.InactiveSince=0;
+                ReleaseSurfaceResources(s);
             }
             HRESULT hr=CompositionDevice->CreateSurface(width,height,
                 DXGI_FORMAT_B8G8R8A8_UNORM,DXGI_ALPHA_MODE_PREMULTIPLIED,
@@ -285,7 +333,8 @@ float4 PSMain(PixelInput input) : SV_TARGET { float2 p=input.uv*2-1;
             if (FAILED(hr=CompositionDevice->CreateVisual(&s.Visual))) return hr;
             if (FAILED(hr=s.Visual->SetContent(s.CompositionSurface.Get()))) return hr;
             if (FAILED(hr=parent->AddVisual(s.Visual.Get(),TRUE,nullptr))) return hr;
-            s.Width=width; s.Height=height; s.Active=true; s.InactiveSince=0; return S_OK;
+            s.Width=width; s.Height=height; s.Active=true; s.InactiveSince=0;
+            return requireRenderTarget?EnsureRenderTarget(s,requireD2DTarget):S_OK;
         }
 
         static HRESULT SetVisual(Surface& s,float x,float y)
@@ -300,7 +349,8 @@ float4 PSMain(PixelInput input) : SV_TARGET { float2 p=input.uv*2-1;
             UINT stride,float x,float y)
         {
             if (!pixels || stride<width*4) return E_INVALIDARG;
-            HRESULT hr=EnsureSurface(Surfaces,BaseRoot.Get(),slot,width,height);
+            HRESULT hr=EnsureSurface(Surfaces,BaseRoot.Get(),slot,width,height,
+                false,false);
             if (FAILED(hr)) return hr;
             Surface& s=Surfaces[slot]; RECT rect={0,0,(LONG)width,(LONG)height};
             POINT offset={}; ComPtr<IDXGISurface> drawing;
@@ -312,6 +362,30 @@ float4 PSMain(PixelInput input) : SV_TARGET { float2 p=input.uv*2-1;
             HRESULT end=s.CompositionSurface->EndDraw();
             if (FAILED(upload)) return upload; if (FAILED(end)) return end;
             return SetVisual(s,x,y);
+        }
+
+        HRESULT CopyRenderTargetToComposition(Surface& surface)
+        {
+            if (!surface.RenderTexture || !surface.CompositionSurface)
+                return E_UNEXPECTED;
+            RECT rect={0,0,(LONG)surface.Width,(LONG)surface.Height};
+            POINT offset={};
+            ComPtr<IDXGISurface> drawing;
+            HRESULT hr=surface.CompositionSurface->BeginDraw(&rect,
+                IID_PPV_ARGS(&drawing),&offset);
+            if (FAILED(hr)) return hr;
+            ComPtr<ID3D11Texture2D> destination;
+            HRESULT copy=drawing.As(&destination);
+            if (SUCCEEDED(copy))
+            {
+                D3D11_BOX source={0,0,0,surface.Width,surface.Height,1};
+                Context->CopySubresourceRegion(destination.Get(),0,
+                    (UINT)offset.x,(UINT)offset.y,0,
+                    surface.RenderTexture.Get(),0,&source);
+            }
+            HRESULT end=surface.CompositionSurface->EndDraw();
+            if (FAILED(copy)) return copy;
+            return end;
         }
 
         HRESULT RegisterGpuTexture(const void* pixels,UINT width,UINT height,
@@ -466,58 +540,26 @@ float4 PSMain(PixelInput input) : SV_TARGET { float2 p=input.uv*2-1;
             UINT width,UINT height,float x,float y)
         {
             if ((commandCount&&!commands)||(pointCount&&!points)) return E_INVALIDARG;
-            HRESULT hr=EnsureSurface(Surfaces,BaseRoot.Get(),slot,width,height);
+            HRESULT hr=EnsureSurface(Surfaces,BaseRoot.Get(),slot,width,height,
+                true,true);
             if (FAILED(hr)) return hr;
-            Surface& surface=Surfaces[slot]; RECT rect={0,0,(LONG)width,(LONG)height};
-            POINT offset={}; ComPtr<IDXGISurface> drawing;
-            if (FAILED(hr=surface.CompositionSurface->BeginDraw(&rect,
-                IID_PPV_ARGS(&drawing),&offset))) return hr;
-
+            Surface& surface=Surfaces[slot];
             HRESULT draw=S_OK;
-            ComPtr<ID3D11Texture2D> texture;
-            ComPtr<ID3D11RenderTargetView> target;
-            if (SUCCEEDED(draw=drawing.As(&texture)))
-                draw=Device->CreateRenderTargetView(texture.Get(),nullptr,&target);
-            if (SUCCEEDED(draw))
-            {
-                const float clear[4]={0,0,0,0};
-                if (Context1) {
-                    D3D11_RECT area={offset.x,offset.y,offset.x+(LONG)width,
-                        offset.y+(LONG)height};
-                    Context1->ClearView(target.Get(),clear,&area,1);
-                } else Context->ClearRenderTargetView(target.Get(),clear);
-            }
-
-            ComPtr<ID2D1Bitmap1> d2dTarget;
-            if (SUCCEEDED(draw))
-            {
-                D2D1_BITMAP_PROPERTIES1 properties=D2D1::BitmapProperties1(
-                    D2D1_BITMAP_OPTIONS_TARGET|D2D1_BITMAP_OPTIONS_CANNOT_DRAW,
-                    D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM,
-                        D2D1_ALPHA_MODE_PREMULTIPLIED),96.0f,96.0f);
-                draw=SpriteContext->CreateBitmapFromDxgiSurface(drawing.Get(),
-                    &properties,&d2dTarget);
-            }
-            if (SUCCEEDED(draw))
-            {
-                SpriteContext->SetTarget(d2dTarget.Get());
-                SpriteContext->BeginDraw();
-                SpriteContext->SetTransform(D2D1::Matrix3x2F::Translation(
-                    (float)offset.x,(float)offset.y));
-                SpriteContext->PushAxisAlignedClip(D2D1::RectF(0.0f,0.0f,
-                    (float)width,(float)height),D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
-                for (UINT index=0;index<commandCount && SUCCEEDED(draw);++index)
-                    draw=DrawGpuCommand(commands[index],points,pointCount,
-                        (float)offset.x,(float)offset.y);
-                SpriteTintEffect->SetInput(0,nullptr);
-                SpriteContext->PopAxisAlignedClip();
-                HRESULT endDraw=SpriteContext->EndDraw();
-                SpriteContext->SetTarget(nullptr);
-                if (SUCCEEDED(draw)) draw=endDraw;
-            }
-            HRESULT end=surface.CompositionSurface->EndDraw();
+            SpriteContext->SetTarget(surface.D2DTarget.Get());
+            SpriteContext->BeginDraw();
+            SpriteContext->SetTransform(D2D1::Matrix3x2F::Identity());
+            SpriteContext->Clear(D2D1::ColorF(0.0f,0.0f,0.0f,0.0f));
+            SpriteContext->PushAxisAlignedClip(D2D1::RectF(0.0f,0.0f,
+                (float)width,(float)height),D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+            for (UINT index=0;index<commandCount && SUCCEEDED(draw);++index)
+                draw=DrawGpuCommand(commands[index],points,pointCount,0.0f,0.0f);
+            SpriteTintEffect->SetInput(0,nullptr);
+            SpriteContext->PopAxisAlignedClip();
+            HRESULT endDraw=SpriteContext->EndDraw();
+            SpriteContext->SetTarget(nullptr);
             if (FAILED(draw)) return draw;
-            if (FAILED(end)) return end;
+            if (FAILED(endDraw)) return endDraw;
+            if (FAILED(hr=CopyRenderTargetToComposition(surface))) return hr;
             return SetVisual(surface,x,y);
         }
 
@@ -544,15 +586,11 @@ float4 PSMain(PixelInput input) : SV_TARGET { float2 p=input.uv*2-1;
         {
             if (FAILED(EffectStatus)) return EffectStatus;
             if (!effects || !count || count>MaximumSmokeEffects) return E_INVALIDARG;
-            HRESULT hr=EnsureSurface(EffectSurfaces,EffectRoot.Get(),slot,width,height);
+            HRESULT hr=EnsureSurface(EffectSurfaces,EffectRoot.Get(),slot,width,height,
+                true,false);
             if (FAILED(hr)) return hr;
-            Surface& s=EffectSurfaces[slot]; RECT rect={0,0,(LONG)width,(LONG)height};
-            POINT offset={}; ComPtr<IDXGISurface> drawing;
-            if (FAILED(hr=s.CompositionSurface->BeginDraw(&rect,IID_PPV_ARGS(&drawing),&offset))) return hr;
-            HRESULT draw=S_OK; ComPtr<ID3D11Texture2D> texture;
-            ComPtr<ID3D11RenderTargetView> target;
-            if (SUCCEEDED(draw=drawing.As(&texture)))
-                draw=Device->CreateRenderTargetView(texture.Get(),nullptr,&target);
+            Surface& s=EffectSurfaces[slot];
+            HRESULT draw=S_OK;
 
             // Rain World's 16:9 render grid is 1366x768. Use the smaller
             // client-axis scale so virtual pixels stay square on widescreen
@@ -569,8 +607,8 @@ float4 PSMain(PixelInput input) : SV_TARGET { float2 p=input.uv*2-1;
                     if (pixelScale<.001f) pixelScale=.001f;
                 }
             }
-            float screenBiasX=x-(float)offset.x;
-            float screenBiasY=y-(float)offset.y;
+            float screenBiasX=x;
+            float screenBiasY=y;
 
             std::vector<EffectVertex> vertices;
             if (SUCCEEDED(draw)) { vertices.reserve(count*12);
@@ -587,12 +625,11 @@ float4 PSMain(PixelInput input) : SV_TARGET { float2 p=input.uv*2-1;
                 if (SUCCEEDED(draw)) { std::memcpy(mapped.pData,vertices.data(),
                     vertices.size()*sizeof(EffectVertex)); Context->Unmap(EffectVertexBuffer.Get(),0); } }
             if (SUCCEEDED(draw)) { const float clear[4]={0,0,0,0};
-                if (Context1) { D3D11_RECT area={offset.x,offset.y,offset.x+(LONG)width,
-                    offset.y+(LONG)height}; Context1->ClearView(target.Get(),clear,&area,1); }
-                else Context->ClearRenderTargetView(target.Get(),clear);
-                D3D11_VIEWPORT vp={(float)offset.x,(float)offset.y,(float)width,(float)height,0,1};
+                Context->ClearRenderTargetView(s.RenderTargetView.Get(),clear);
+                D3D11_VIEWPORT vp={0.0f,0.0f,(float)width,(float)height,0,1};
                 UINT stride=sizeof(EffectVertex),zero=0; const float factor[4]={0,0,0,0};
-                Context->OMSetRenderTargets(1,target.GetAddressOf(),nullptr);
+                ID3D11RenderTargetView* target=s.RenderTargetView.Get();
+                Context->OMSetRenderTargets(1,&target,nullptr);
                 Context->OMSetBlendState(EffectBlendState.Get(),factor,0xffffffff);
                 Context->RSSetViewports(1,&vp); Context->IASetInputLayout(EffectInputLayout.Get());
                 Context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
@@ -601,8 +638,8 @@ float4 PSMain(PixelInput input) : SV_TARGET { float2 p=input.uv*2-1;
                 Context->PSSetShader(EffectPixelShader.Get(),nullptr,0);
                 Context->Draw((UINT)vertices.size(),0); ID3D11RenderTargetView* none=nullptr;
                 Context->OMSetRenderTargets(1,&none,nullptr); }
-            HRESULT end=s.CompositionSurface->EndDraw();
-            if (FAILED(draw)) return draw; if (FAILED(end)) return end;
+            if (FAILED(draw)) return draw;
+            if (FAILED(hr=CopyRenderTargetToComposition(s))) return hr;
             return SetVisual(s,x,y);
         }
 
@@ -623,8 +660,7 @@ float4 PSMain(PixelInput input) : SV_TARGET { float2 p=input.uv*2-1;
                 if (!s.InactiveSince) { s.InactiveSince=now; continue; }
                 if (now-s.InactiveSince<InactiveSurfaceReleaseMilliseconds) continue;
                 HRESULT hr=parent->RemoveVisual(s.Visual.Get()); if (FAILED(hr)) return hr;
-                s.Visual.Reset(); s.CompositionSurface.Reset();
-                s.Width=0; s.Height=0; s.InactiveSince=0;
+                ReleaseSurfaceResources(s);
             }
             return S_OK;
         }

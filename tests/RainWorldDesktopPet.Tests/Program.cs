@@ -394,9 +394,21 @@ namespace RainWorldDesktopPet.Tests
             {
                 if (workshop.FindById("dressmyslugcat") != null)
                 {
+                    int atlasCountBeforeDiscovery = SharedDmsAtlasCache.LoadedAtlasCount;
+                    long pixelBytesBeforeDiscovery = SharedDmsAtlasCache.DecodedPixelBytes;
                     using (DmsSkinCatalog dms = new DmsSkinCatalog(workshop, log))
                     {
                         True(dms.Skins.Count > 0, "installed DMS must expose at least one valid spritesheet");
+                        Equal(atlasCountBeforeDiscovery, SharedDmsAtlasCache.LoadedAtlasCount,
+                            "DMS discovery must not decode atlas images");
+                        True(pixelBytesBeforeDiscovery == SharedDmsAtlasCache.DecodedPixelBytes,
+                            "DMS discovery must retain no decoded pixel buffers");
+                        using (Bitmap preview = dms.Skins[0].CreatePreview(24))
+                        {
+                            True(preview != null, "a requested DMS preview must load on demand");
+                        }
+                        True(SharedDmsAtlasCache.LoadedAtlasCount > atlasCountBeforeDiscovery,
+                            "only a requested DMS skin should acquire its atlas images");
                         string[] officialParts = { "HEAD", "FACE", "BODY", "ARMS", "HIPS",
                             "LEGS", "TAIL", "FACESCAR", "GILLS", "TAILSPECKLES",
                             "ASCENSION", "PIXEL" };
@@ -474,6 +486,8 @@ namespace RainWorldDesktopPet.Tests
                                 out sprite), "a corrupt optional tail atlas must preserve the base tail");
                         }
                     }
+                    Equal(atlasCountBeforeDiscovery, SharedDmsAtlasCache.LoadedAtlasCount,
+                        "disposing a DMS catalog must release every on-demand atlas lease");
                 }
 
                 List<RainWorldMod> removedDms = workshop.Mods.Where(mod =>
