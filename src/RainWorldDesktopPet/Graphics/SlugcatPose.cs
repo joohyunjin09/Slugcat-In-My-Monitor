@@ -89,6 +89,9 @@ namespace RainWorldDesktopPet.Graphics
         public int Facing;
         public AnimationIndex Animation;
         public BodyModeIndex BodyMode;
+        // Rendering-only release weight for the stabilized desktop WallClimb
+        // pose. The logical body mode still changes immediately with input.
+        public double WallClimbBlend;
         public int AnimationFrame;
         public int InputX;
         public int PreviousInputX;
@@ -145,6 +148,10 @@ namespace RainWorldDesktopPet.Graphics
         public double CharacterRenderScale = SimulationConstants.CharacterRenderScale;
         public SlugcatId SelectedSlugcat;
         public SlugcatSkin CurrentSkin;
+        // Mirrors PlayerGraphics.RenderAsPup for the sprite-selection branch.
+        // The desktop app has no PlayerState.forceFullGrown equivalent, so its
+        // graphics-only Slugpup setting maps directly to this state.
+        public bool RenderAsPup;
         public string OriginalSlugcatId = "White";
         public string VisualProfileName = "Default";
         public string MovementProfileDebug = string.Empty;
@@ -176,6 +183,10 @@ namespace RainWorldDesktopPet.Graphics
         public string BodyElement = "BodyA";
         public string HipsElement = "HipsA";
         public double VisualBodyScale = 1.0;
+        // PlayerGraphics.InitiateSprites: RenderAsPup sets BodyA.scaleY = 0.5.
+        // Keep this sprite-space value separate from the character profile's
+        // horizontal body scale so the HipsA anchor remains source-authentic.
+        public double VisualBodyScaleY = 1.0;
         public double VisualHipsScale = 1.0;
         public double VisualHeadScale = 1.0;
         public double ArmShoulderScale = 1.0;

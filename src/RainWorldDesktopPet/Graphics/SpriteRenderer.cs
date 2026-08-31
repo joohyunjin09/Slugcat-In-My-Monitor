@@ -106,6 +106,15 @@ namespace RainWorldDesktopPet.Graphics
         }
 
         public bool UsesLocalAtlas { get { return atlas != null; } }
+
+        // DMS uses Slugpup as the replacement-map identity, irrespective of
+        // the campaign whose PlayerGraphics is currently rendered as a pup.
+        // This mirrors DressMySlugcat's cached playerState.isPup branch.
+        internal static string ResolveDmsSlugcatId(SlugcatPose pose)
+        {
+            return pose != null && pose.RenderAsPup ? "Slugpup" : pose.OriginalSlugcatId;
+        }
+
         public DmsSkinDefinition ActiveDmsSkin
         {
             get
@@ -753,7 +762,7 @@ namespace RainWorldDesktopPet.Graphics
             double bodyWidth = pose.VisualBodyScale + MathUtil.Lerp(-0.05, 0.05, pose.Breath) * verticality;
 
             Vec2 bodyPosition = pose.Chest + new Vec2(0.0, -0.5 * pose.Breath * (1.0 - verticality));
-            DrawElement(graphics, pose.BodyElement, bodyPosition, bodyAngle, bodyWidth, 1.0,
+            DrawElement(graphics, pose.BodyElement, bodyPosition, bodyAngle, bodyWidth, pose.VisualBodyScaleY,
                 0.5, 0.7894737, pose.VisualBodyColor, SelectTorsoSide(pose));
         }
 
@@ -770,12 +779,12 @@ namespace RainWorldDesktopPet.Graphics
         private void DrawAtlasLegs(ISpriteCanvas graphics, SlugcatPose pose)
         {
             string legsName;
-            if (pose.BodyMode == BodyModeIndex.Stand)
+            if (IsVisualWallClimb(pose))
+                legsName = "LegsAWall";
+            else if (pose.BodyMode == BodyModeIndex.Stand)
                 legsName = "LegsA" + PositiveModulo(pose.AnimationFrame, 7);
             else if (pose.BodyMode == BodyModeIndex.Crawl)
                 legsName = "LegsACrawling" + PositiveModulo(pose.AnimationFrame / 2, 6);
-            else if (pose.BodyMode == BodyModeIndex.WallClimb)
-                legsName = "LegsAWall";
             else
                 legsName = "LegsAAir0";
             double legsAngle = AimScreen(pose.LegsDirection, Vec2.Zero);
@@ -968,9 +977,14 @@ namespace RainWorldDesktopPet.Graphics
                 faceRotation = rawHeadAngle;
                 reason = "ZeroG";
             }
-            else if (pose.BodyMode == BodyModeIndex.Crawl ||
+            else if (!IsVisualWallClimb(pose) &&
+                    (pose.BodyMode == BodyModeIndex.Crawl ||
                      (pose.BodyMode == BodyModeIndex.Stand && pose.InputX != 0))
+                    )
             {
+                // PlayerGraphics.DrawSprites keeps moving faces on image 4;
+                // DefaultFaceSprite still applies Blink, so a meow resolves to
+                // FaceB4/PFaceB4 without losing the upward face offset.
                 bool crawl = pose.BodyMode == BodyModeIndex.Crawl;
                 headFrame = crawl ? 7 : 6;
                 faceFrame = 4;
@@ -986,7 +1000,7 @@ namespace RainWorldDesktopPet.Graphics
                 faceScaleX = SelectDefaultFaceScaleX(pose, rawHeadAngle);
                 if (pose.IsAirborne)
                     reason = pose.IsRising ? "AirborneRising" : "AirborneFalling";
-                else if (pose.BodyMode == BodyModeIndex.WallClimb)
+                else if (IsVisualWallClimb(pose))
                     reason = "WallClimb";
                 else if (pose.BodyMode == BodyModeIndex.ClimbingOnBeam)
                     reason = "Beam";
@@ -998,7 +1012,9 @@ namespace RainWorldDesktopPet.Graphics
 
             if (pose.MouseAttentionActive) reason += "+MouseAttention";
             SlugcatGraphicsProfile profile = ResolvePoseProfile(pose);
-            result.HeadElement = profile.HeadFamily + headFrame;
+            // PlayerGraphics.DrawSprites routes RenderAsPup through cachedHeads[2]
+            // (HeadC0..17), instead of scaling an adult HeadA/B atlas element.
+            result.HeadElement = (pose.RenderAsPup ? "HeadC" : profile.HeadFamily) + headFrame;
             result.HeadPosition = headPosition;
             result.HeadRotation = rawHeadAngle;
             result.HeadScaleX = headScaleX * pose.VisualHeadScale;
@@ -1019,6 +1035,13 @@ namespace RainWorldDesktopPet.Graphics
 
         private static string FaceFamily(SlugcatPose pose)
         {
+            // PlayerGraphics.DefaultFaceSprite selects cachedFaceSpriteNames[1]
+            // for RenderAsPup: PFaceA while awake and PFaceB while blinking.
+            // SaintFaceCondition shares that second (closed-eye) family, so it
+            // must take precedence even when the character is rendered as a pup.
+            if (pose.RenderAsPup)
+                return pose.Blink || ResolvePoseProfile(pose).Id == SlugcatId.Saint
+                    ? "PFaceB" : "PFaceA";
             return ResolvePoseProfile(pose).ResolveFaceFamily(
                 pose.Blink, SelectFaceScaleX(pose));
         }
@@ -1058,10 +1081,10 @@ namespace RainWorldDesktopPet.Graphics
 
         public static double ComputeArmScaleY(SlugcatPose pose, int index)
         {
+            if (IsVisualWallClimb(pose))
+                return pose.Facing == -1 ? -1.0 : 1.0;
             if (pose.BodyMode == BodyModeIndex.Crawl)
                 return pose.Chest.X < pose.Hips.X ? -1.0 : 1.0;
-            if (pose.BodyMode == BodyModeIndex.WallClimb)
-                return pose.Facing == -1 ? -1.0 : 1.0;
             // Custom.DistanceToLine is evaluated in Futile's y-up space.
             // Reflecting it into this renderer's y-down space reverses the
             // signed distance. The arm, hand target and spear keep one shared
@@ -1069,6 +1092,12 @@ namespace RainWorldDesktopPet.Graphics
             return SignedDistanceToLine(pose.Hands[index], pose.Chest, pose.Hips) < 0.0
                 ? 1.0
                 : -1.0;
+        }
+
+        internal static bool IsVisualWallClimb(SlugcatPose pose)
+        {
+            return pose.BodyMode == BodyModeIndex.WallClimb ||
+                pose.WallClimbBlend > 0.000001;
         }
 
         private void DrawElement(ISpriteCanvas graphics, string name, Vec2 position, double angle, double scaleX, double scaleY, double anchorX, double anchorY, Color tint)
@@ -1087,18 +1116,20 @@ namespace RainWorldDesktopPet.Graphics
             AtlasSprite sprite = null;
             DmsSkinDefinition selectedPartSkin = null;
             string dmsPart = null;
+            string dmsSlugcatId = null;
             if (activePose != null)
             {
+                dmsSlugcatId = ResolveDmsSlugcatId(activePose);
                 string generic = DmsSpriteGroups.ToGenericElement(name,
-                    activePose.OriginalSlugcatId);
+                    dmsSlugcatId);
                 dmsPart = DmsSpriteGroups.PartForElement(generic);
                 selectedPartSkin = GetDmsPart(dmsPart);
             }
             bool dmsApplied = selectedPartSkin != null &&
-                selectedPartSkin.TryGetSprite(name, activePose.OriginalSlugcatId, side, out sprite);
+                selectedPartSkin.TryGetSprite(name, dmsSlugcatId, side, out sprite);
             if (!dmsApplied && !atlas.TryGet(name, out sprite)) return;
             if (dmsApplied) tint = selectedPartSkin.ResolveTint(sprite, name,
-                activePose.OriginalSlugcatId, tint,
+                dmsSlugcatId, tint,
                 activePose.HasCustomDmsPartColor(dmsPart));
             AtlasElement element = sprite.Element;
             graphics.Save();

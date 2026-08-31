@@ -64,6 +64,23 @@ namespace RainWorldDesktopPet.AI
         FakeJump
     }
 
+    public enum DesktopPetCommand
+    {
+        Stop,
+        Move,
+        FollowMouse
+    }
+
+    public enum FollowCommandVariation
+    {
+        None,
+        BriefPause,
+        BriefCrouch,
+        ShortDetour,
+        ObserveMouse,
+        LookAway
+    }
+
     public sealed class PlatformTransitionPlan
     {
         public PlatformTransitionMode Mode;
@@ -211,6 +228,11 @@ namespace RainWorldDesktopPet.AI
         private MicroBehavior microBehavior;
         private int microTicksRemaining;
         private int microCooldownTicks;
+        private FollowCommandVariation followCommandVariation;
+        private int followVariationTicks;
+        private int followVariationCountdown;
+        private int followJumpHoldTicks;
+        private int followJumpCooldownTicks;
 
         private int directionCommitmentTicks;
         private readonly int routePreferenceSalt;
@@ -324,10 +346,12 @@ namespace RainWorldDesktopPet.AI
             evaluationCountdown = evaluationPhase == 0 ? 0 : evaluationPhase + 1;
             Attention = new AttentionSystem();
             Behavior = DesktopBehavior.Idle;
+            Command = DesktopPetCommand.Move;
             TransitionPlan = new PlatformTransitionPlan();
         }
 
         public DesktopBehavior Behavior { get; private set; }
+        public DesktopPetCommand Command { get; private set; }
         public AttentionSystem Attention { get; private set; }
         public UtilityContext LastContext { get; private set; }
         public AttentionKind OriginalAttentionKind { get { return originalAttentionKind; } }
@@ -344,6 +368,10 @@ namespace RainWorldDesktopPet.AI
         public AIMood CurrentMood { get { return mood; } }
         public AIDestinationKind DestinationKind { get { return destinationKind; } }
         public MicroBehavior CurrentMicroBehavior { get { return microBehavior; } }
+        public FollowCommandVariation CurrentFollowVariation
+        {
+            get { return followCommandVariation; }
+        }
         public Vec2 IntentTarget { get { return intentTarget; } }
         public double IntentTimeSeconds { get { return behaviorTicks * SimulationConstants.LogicStepSeconds; } }
         public double IntentPreferredSeconds { get { return intentPreferredTicks * SimulationConstants.LogicStepSeconds; } }
@@ -369,6 +397,18 @@ namespace RainWorldDesktopPet.AI
         public double TopUtilityScore1 { get { return topUtilityScore1; } }
         public double TopUtilityScore2 { get { return topUtilityScore2; } }
         public double TopUtilityScore3 { get { return topUtilityScore3; } }
+
+        public void SetCommand(DesktopPetCommand command)
+        {
+            if (Command == command) return;
+            Command = command;
+            followCommandVariation = FollowCommandVariation.None;
+            followVariationTicks = 0;
+            followVariationCountdown = command == DesktopPetCommand.FollowMouse
+                ? 20 + random.Next(0, 41) : 0;
+            followJumpHoldTicks = 0;
+            followJumpCooldownTicks = 0;
+        }
 
         // Allocates only when the debug overlay explicitly requests it. Release
         // AI ticks never build this string.
@@ -445,9 +485,11 @@ namespace RainWorldDesktopPet.AI
             // layer and leaves the original movement/physics implementation untouched.
             VirtualInput abilityInput;
             if (TryProduceAbilityInput(slugcat, mouse, mouseAttention, context,
-                out abilityInput)) input = abilityInput;
+                input, out abilityInput)) input = abilityInput;
 
+            input = ApplyDesktopCommand(input, slugcat, mouse, context);
             UpdateAttention(slugcat, mouse, context, mouseAttention);
+            ApplyDesktopCommandAttention(slugcat, mouse);
             Attention.Step();
             return input;
         }
@@ -793,7 +835,7 @@ namespace RainWorldDesktopPet.AI
 
         private bool TryProduceAbilityInput(Slugcat slugcat, MouseTracker mouse,
             MouseAttentionState mouseAttention, UtilityContext context,
-            out VirtualInput input)
+            VirtualInput movementInput, out VirtualInput input)
         {
             input = VirtualInput.Neutral;
             SpearmasterAbilityController spear =
@@ -819,7 +861,8 @@ namespace RainWorldDesktopPet.AI
             SaintAbilityController saint =
                 slugcat.AbilityController as SaintAbilityController;
             if (saint != null)
-                return ProduceSaintInput(slugcat, saint, context, out input);
+                return ProduceSaintInput(slugcat, saint, context,
+                    movementInput, out input);
             ResetSaintTransition();
 
             ArtificerAbilityController artificer =
@@ -875,7 +918,7 @@ namespace RainWorldDesktopPet.AI
 
         private bool ProduceSaintInput(Slugcat slugcat,
             SaintAbilityController saint, UtilityContext context,
-            out VirtualInput input)
+            VirtualInput movementInput, out VirtualInput input)
         {
             input = VirtualInput.Neutral;
             if (saint.Mode == SaintTongueMode.AttachedToTerrain)
@@ -937,8 +980,8 @@ namespace RainWorldDesktopPet.AI
                 // Pull toward an overhead anchor, but give a floor-side anchor slack
                 // instead of pinning Saint down against the same surface.
                 int ropeLengthInput = anchorAbove ? -1 : (anchorBelow ? 1 : 0);
-                input = new VirtualInput(desiredDirection, ropeLengthInput,
-                    false, false);
+                input = ComposeAttachedSaintInput(movementInput,
+                    ropeLengthInput);
                 return true;
             }
             saintAttachedTicks = 0;
@@ -1009,6 +1052,17 @@ namespace RainWorldDesktopPet.AI
             input = new VirtualInput(desiredDirection, 0, true, false);
             movementUrge = Math.Max(0.10, movementUrge - 0.12);
             return true;
+        }
+
+        internal static VirtualInput ComposeAttachedSaintInput(
+            VirtualInput movementInput, int ropeLengthInput)
+        {
+            // Tongue length owns vertical input while attached. Horizontal
+            // movement still belongs to the current behavior; using the stale
+            // desiredDirection here can keep WallClimb alive after that
+            // behavior has already returned neutral.
+            return new VirtualInput(movementInput.X, ropeLengthInput,
+                false, false);
         }
 
         private bool RequiresExplosiveTransition()
@@ -2127,6 +2181,151 @@ namespace RainWorldDesktopPet.AI
                 default:
                     return input;
             }
+        }
+
+        private VirtualInput ApplyDesktopCommand(VirtualInput autonomousInput,
+            Slugcat slugcat, MouseTracker mouse, UtilityContext context)
+        {
+            if (Command == DesktopPetCommand.Move) return autonomousInput;
+
+            // A stop command suppresses only locomotion intent. The AI, attention,
+            // breathing, blinking, voice controller, graphics, and physics all keep
+            // receiving their normal fixed-step updates.
+            if (Command == DesktopPetCommand.Stop || !slugcat.State.Conscious ||
+                slugcat.State.Dead || slugcat.State.StunCounter > 0)
+            {
+                followJumpHoldTicks = 0;
+                return VirtualInput.Neutral;
+            }
+
+            double horizontal = mouse.Position.X - slugcat.Center.X;
+            int towardMouse = Math.Abs(horizontal) <= 1.0
+                ? slugcat.State.Facing : (horizontal < 0.0 ? -1 : 1);
+            int uprightY = context.Grounded && !slugcat.State.Standing ? -1 : 0;
+            int horizontalInput = Math.Abs(horizontal) > 28.0 ? towardMouse : 0;
+
+            // A normal Player jump starts with jumpBoost=8. Retail consumes it
+            // only while the jump button remains held, so keep the virtual
+            // button down after takeoff instead of turning every follow jump
+            // into a one-tick tap.
+            if (followJumpHoldTicks > 0)
+            {
+                followJumpHoldTicks--;
+                if (followJumpHoldTicks == 0)
+                    followJumpCooldownTicks = 12 + random.Next(0, 9);
+                return new VirtualInput(horizontalInput, 0, true, false);
+            }
+
+            if (followJumpCooldownTicks > 0) followJumpCooldownTicks--;
+            UpdateFollowCommandVariation(context);
+
+            switch (followCommandVariation)
+            {
+                case FollowCommandVariation.BriefPause:
+                case FollowCommandVariation.ObserveMouse:
+                case FollowCommandVariation.LookAway:
+                    return VirtualInput.Neutral;
+                case FollowCommandVariation.BriefCrouch:
+                    return new VirtualInput(0, 1, false, false);
+                case FollowCommandVariation.ShortDetour:
+                    return new VirtualInput(-towardMouse, uprightY, false, false);
+            }
+
+            // Stay close without vibrating across the cursor. Vertical cursor
+            // movement requests the existing original jump path; no command moves
+            // BodyChunks directly.
+            double verticalToMouse = slugcat.Center.Y - mouse.Position.Y;
+            bool jump = followJumpCooldownTicks == 0 && context.Grounded &&
+                mouse.Position.Y < slugcat.Center.Y - 78.0 &&
+                (Math.Abs(horizontal) < 270.0 || context.ObstacleAhead);
+            if (jump)
+                followJumpHoldTicks = FollowJumpHoldDuration(
+                    verticalToMouse, context.ObstacleAhead);
+            return new VirtualInput(horizontalInput, uprightY, jump, false);
+        }
+
+        private static int FollowJumpHoldDuration(double verticalToMouse,
+            bool obstacleAhead)
+        {
+            // Six airborne hold ticks consume the full original 8 -> 0
+            // jumpBoost sequence (1.5 per tick). Smaller height differences
+            // retain shorter, less dramatic jumps for natural variation.
+            if (verticalToMouse >= 140.0) return 6;
+            if (verticalToMouse >= 100.0 || obstacleAhead) return 4;
+            return 2;
+        }
+
+        private void UpdateFollowCommandVariation(UtilityContext context)
+        {
+            if (followVariationTicks > 0)
+            {
+                followVariationTicks--;
+                if (followVariationTicks == 0)
+                {
+                    followCommandVariation = FollowCommandVariation.None;
+                    followVariationCountdown = 68 + random.Next(0, 125);
+                }
+                return;
+            }
+
+            if (followVariationCountdown > 0)
+            {
+                followVariationCountdown--;
+                return;
+            }
+
+            double pick = random.NextDouble();
+            if (pick < 0.25)
+            {
+                followCommandVariation = FollowCommandVariation.BriefPause;
+                followVariationTicks = 5 + random.Next(0, 14);
+            }
+            else if (pick < 0.45 && context.Grounded)
+            {
+                followCommandVariation = FollowCommandVariation.BriefCrouch;
+                followVariationTicks = 9 + random.Next(0, 22);
+            }
+            else if (pick < 0.67)
+            {
+                followCommandVariation = FollowCommandVariation.ShortDetour;
+                followVariationTicks = 6 + random.Next(0, 15);
+            }
+            else if (pick < 0.88)
+            {
+                followCommandVariation = FollowCommandVariation.ObserveMouse;
+                followVariationTicks = 9 + random.Next(0, 28);
+            }
+            else
+            {
+                followCommandVariation = FollowCommandVariation.LookAway;
+                followVariationTicks = 7 + random.Next(0, 20);
+            }
+        }
+
+        private void ApplyDesktopCommandAttention(Slugcat slugcat,
+            MouseTracker mouse)
+        {
+            if (Command != DesktopPetCommand.FollowMouse) return;
+
+            bool canLook = slugcat.State.Conscious && !slugcat.State.Dead &&
+                slugcat.State.StunCounter < 1;
+            if (!canLook)
+            {
+                MouseAttentionActive = false;
+                return;
+            }
+
+            if (followCommandVariation == FollowCommandVariation.LookAway)
+            {
+                int away = mouse.Position.X < slugcat.Center.X ? 1 : -1;
+                Attention.SetTarget(AttentionKind.RandomPoint,
+                    slugcat.Center + new Vec2(away * 85.0, -16.0));
+                MouseAttentionActive = false;
+                return;
+            }
+
+            Attention.SetTarget(AttentionKind.Mouse, mouse.Position);
+            MouseAttentionActive = true;
         }
 
         private void UpdateAttention(Slugcat slugcat, MouseTracker mouse,

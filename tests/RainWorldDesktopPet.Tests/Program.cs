@@ -2,12 +2,14 @@ using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Imaging;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Diagnostics;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Threading;
+using RainWorldDesktopPet.Audio;
 using RainWorldDesktopPet.AI;
 using RainWorldDesktopPet.Core;
 using RainWorldDesktopPet.Creature;
@@ -53,6 +55,21 @@ namespace RainWorldDesktopPet.Tests
                 catch (Exception exception)
                 {
                     Console.WriteLine("Food preview failed: " +
+                        exception.GetType().FullName);
+                    Console.WriteLine(exception.Message);
+                    return 1;
+                }
+            }
+            if (args.Length >= 2 && args[0] == "--command-menu-preview")
+            {
+                try
+                {
+                    RenderCommandMenuPreview(args[1]);
+                    return 0;
+                }
+                catch (Exception exception)
+                {
+                    Console.WriteLine("Command menu preview failed: " +
                         exception.GetType().FullName);
                     Console.WriteLine(exception.Message);
                     return 1;
@@ -126,6 +143,8 @@ namespace RainWorldDesktopPet.Tests
             Run("Monitor floor corners survive post-connection penetration", MonitorCornerSurvivesConnectionPenetration);
             Run("Swept high-speed travel cannot tunnel through a small window", FastHorizontalSmallWindowDoesNotTunnel);
             Run("Dragging passes through window walls", DraggingPassesThroughWindowWalls);
+            Run("Dragging replaces Crawl with the original lost-control pose",
+                DraggingClearsCrawlPoseLikeOriginalPlayer);
             Run("Slugcat dragging blocks desktop pointer interactions",
                 SlugcatDraggingBlocksDesktopInteractions);
             Run("Suspend and resume power events use the recovery path",
@@ -136,9 +155,21 @@ namespace RainWorldDesktopPet.Tests
                 ResumeRecoveryGuardsInvalidInputs);
             Run("Mouse hook hit snapshots preserve click-through and topmost order",
                 MouseHookHitSnapshotsPreserveInputRules);
+            Run("Radial command sectors map to Stop, Move, and Follow Me",
+                RadialCommandSectorsMapCommands);
+            Run("Radial command UI keeps exact easing and readable pixel icons",
+                RadialCommandVisualStyleUsesPixelGridAndSlowEasing);
             Run("World food mouse hit circles ignore Slugcat visual size",
                 WorldFoodMouseHitCirclesIgnoreSlugcatVisualSize);
             Run("AI produces VirtualInput without moving physics directly", AiDoesNotMoveCreature);
+            Run("Stop command suppresses locomotion while AI attention keeps updating",
+                StopCommandOnlySuppressesLocomotion);
+            Run("Command selection waits with neutral locomotion while AI keeps updating",
+                CommandSelectionWaitSuppressesLocomotionOnly);
+            Run("Follow command mostly pursues the cursor with short natural variations",
+                FollowCommandPursuesCursorWithVariations);
+            Run("Follow command holds high jumps through the original jumpBoost window",
+                FollowCommandHoldsHighJumpInput);
             Run("Futile atlas metadata parses frame geometry", AtlasMetadataParses);
             Run("DMS part atlas overrides and restores original sprites", DmsPartAtlasOverrideRestoresBase);
             Run("DMS preserves authored source palettes over user colours", DmsAuthoredColorIsPreservedUntilCustomized);
@@ -146,16 +177,51 @@ namespace RainWorldDesktopPet.Tests
             Run("DMS sprites beside the executable are discovered", DmsSpritesBesideExecutableAreDiscovered);
             Run("Customize colors reach each rendered sprite part", PartColorsReachRenderedPose);
             Run("Rain World locator validates an explicit installation", LocatorValidatesExplicitPath);
+            Run("Rain World sounds.txt preserves trigger and clip transforms",
+                RainWorldSoundCatalogParsesGameDirectives);
+            Run("Movement PCM loudness normalization uses a bounded RMS average",
+                MovementPcmLoudnessNormalizationUsesBoundedRms);
+            Run("Audio master volume supports a persisted zero-to-two range",
+                AudioMasterVolumeSupportsZeroToTwoRange);
+            Run("Audio mute defaults on and restores a saved choice",
+                AudioMuteDefaultsOnAndRestoresSavedChoice);
+            Run("Push To Meow profiles and random cadence match the inspected DLL",
+                PushToMeowProfilesAndCadenceMatchDll);
+            Run("Audio admission keeps movement, Downpour abilities, and Push To Meow",
+                AudioAdmissionKeepsCharacterMovementDownpourAbilitiesAndMeows);
+            Run("Push To Meow animations blink, look up, and wiggle Spearmaster's tail",
+                PushToMeowAnimationsMatchDll);
+            Run("Push To Meow changes a stopped Slugpup to its closed-eye face",
+                PushToMeowAnimatesStoppedSlugpupFace);
+            Run("Slugcat sound calls stay behind the audio sink boundary",
+                SlugcatSoundCallsUseAudioSink);
+            Run("Sliding stays silent and high-speed impacts remain audible",
+                ExpandedMovementSoundsFollowOriginalStates);
+            Run("CrawlTurn direction changes do not emit a footstep",
+                CrawlTurnDoesNotEmitFootstep);
+            Run("Slugpup availability follows the More Slugcats install marker",
+                SlugpupAvailabilityFollowsMoreSlugcatsInstallMarker);
             Run("Required autonomous behavior states are present", RequiredBehaviorsExist);
             Run("Jump and DropDown utility states are reachable", UtilityActionsAreReachable);
             Run("Exploration intent makes free jumps reachable", ExplorationJumpIsReachable);
             Run("Obstacle contact makes an original jump attempt reachable", ObstacleJumpIsReachable);
             Run("Mouse locomotion requires explicit click attention", MouseLocomotionRequiresAttention);
             Run("Wall contact reaches gravity-driven WallClimb through VirtualInput", WallContactReachesClimbMovement);
+            Run("WallClimb releases after movement intent ends", WallClimbReleasesAfterIntentEnds);
+            Run("WallClimb render pose releases without snapping", WallClimbRenderPoseReleasesSmoothly);
+            Run("Original blocked-wall pose applies to Slugcat and Slugpup", OriginalBlockedWallPoseAppliesToSlugcatAndSlugpup);
             Run("WallClimb hands use alternating wall targets", WallClimbHandsTargetTheWall);
             Run("Sleep curl pulls both hands to the original target", SleepCurlHandsShareOriginalTarget);
-            Run("Moving window walls carry a climbing Slugcat", MovingWindowWallCarriesClimber);
-            Run("Moving windows carry both chunks for fast motion in every direction", MovingWindowCarriesConnectedBody);
+            Run("Moving window deltas remain collision metadata",
+                MovingWindowDeltaRemainsCollisionMetadata);
+            Run("Moving windows do not translate the Slugcat body",
+                MovingWindowDoesNotCarryConnectedBody);
+            Run("Raised windows retain support through the thicker collision slab",
+                RaisedWindowPlatformRetainsSupportedChunk);
+            Run("Live window events stay bounded and allocation-stable",
+                LiveWindowEventTrackerStaysBounded);
+            Run("Live window translations move collision boxes without snapshot churn",
+                LiveWindowTranslationsAreIncremental);
             Run("Desktop window enumeration publishes snapshots asynchronously",
                 DesktopRefreshIsAsynchronous);
             Run("Transient HWND enumeration misses retain then expire surfaces", TransientWindowMissesUseGracePeriod);
@@ -164,6 +230,8 @@ namespace RainWorldDesktopPet.Tests
             Run("Monitor-ceiling window tops cannot hide the Slugcat", MonitorCeilingWindowTopIsRejected);
             Run("PlayerGraphics face frame uses the body-head axis", OriginalFaceFrameSelection);
             Run("Original face resolver matches movement and airborne states", OriginalFaceResolverMatchesDllStates);
+            Run("PlayerGraphics look snaps per logic tick and interpolates only while drawing",
+                OriginalLookDirectionUsesRenderInterpolationOnly);
             Run("Original slugcat variants match local DLL constants", OriginalVariantValues);
             Run("PlayerGraphics tail uses the original four-segment layout", OriginalTailLayout);
             Run("All render paths expose one continuous original tail mesh", OriginalTailMeshIsContinuous);
@@ -242,6 +310,18 @@ namespace RainWorldDesktopPet.Tests
             Run("PlayerGraphics arm reflection matches y-up signed distance",
                 ArmScaleReflectionMatchesFutileCoordinates);
             Run("Skin face and head families follow PlayerGraphics branches", SkinFaceFamiliesMatchPlayerGraphics);
+            Run("Slugpup uses the original HeadC and PFace atlas families",
+                SlugpupUsesOriginalAtlasFamilies);
+            Run("DMS maps generic skin frames onto Slugpup sprite families",
+                DmsSlugpupAliasesUseGenericFrames);
+            Run("Slugpup keeps Player BodyChunk radii and halves tail lengths",
+                SlugpupGeometryMatchesPlayerGraphics);
+            Run("Slugpup draw pose uses PlayerGraphics' compact body offsets",
+                SlugpupDrawPoseMatchesPlayerGraphics);
+            Run("Slugpup hips do not inherit desktop attention offsets",
+                SlugpupHipsIgnoreDesktopAttention);
+            Run("Slugpup held items use the PlayerGraphics compact hand anchor",
+                SlugpupHeldItemsUseOriginalHandAnchor);
             Run("Every visual profile remains valid through movement and stun states", AllVisualProfilesRemainStableAcrossStates);
             AbilityParityReplayTests.Register(Run);
 
@@ -253,6 +333,8 @@ namespace RainWorldDesktopPet.Tests
                 Run("Local embedded original atlas loads without DMS", delegate { EmbeddedOriginalAtlasLoads(localInstallation); });
                 Run("Local food atlas renders deep blue, cyan, and warm egg layers",
                     delegate { FoodAtlasRendersOriginalPalette(localInstallation); });
+                Run("Installed Spearmaster pull and grab clips decode as PCM",
+                    delegate { InstalledSpearmasterExtractionClipsDecode(localInstallation); });
                 Run("Installed Workshop mods parse without loading their DLLs",
                     delegate { LocalWorkshopIntegrationsParse(localInstallation); });
             }
@@ -274,6 +356,12 @@ namespace RainWorldDesktopPet.Tests
             Vec2 spawn = DesktopWorldTransform.ToSimulation(new Vec2(
                 work.Left + work.Width * 0.5, work.Bottom)) - new Vec2(0.0, 9.0);
             Slugcat slugcat = new Slugcat(spawn, variant);
+            bool renderAsPup = scenario.StartsWith("pup-", StringComparison.OrdinalIgnoreCase);
+            if (renderAsPup)
+            {
+                slugcat.SetPupAppearance(true);
+                scenario = scenario.Substring("pup-".Length);
+            }
             DesktopPetAI ai = new DesktopPetAI(22);
             double attentionX = scenario == "crawl-right" ? -120.0 : 120.0;
             ai.Attention.SetTarget(AttentionKind.Mouse, slugcat.Center + new Vec2(attentionX, -55.0));
@@ -333,6 +421,7 @@ namespace RainWorldDesktopPet.Tests
             Console.WriteLine("Preview written to " + Path.GetFullPath(outputPath));
             Console.WriteLine(loader.Status);
             Console.WriteLine("Scenario " + scenario);
+            Console.WriteLine("Slugpup " + renderAsPup);
             Console.WriteLine("Skin " + skin);
             Console.WriteLine("DMS " + (dmsSkinId ?? "none"));
         }
@@ -346,9 +435,21 @@ namespace RainWorldDesktopPet.Tests
             {
                 if (workshop.FindById("dressmyslugcat") != null)
                 {
+                    int atlasCountBeforeDiscovery = SharedDmsAtlasCache.LoadedAtlasCount;
+                    long pixelBytesBeforeDiscovery = SharedDmsAtlasCache.DecodedPixelBytes;
                     using (DmsSkinCatalog dms = new DmsSkinCatalog(workshop, log))
                     {
                         True(dms.Skins.Count > 0, "installed DMS must expose at least one valid spritesheet");
+                        Equal(atlasCountBeforeDiscovery, SharedDmsAtlasCache.LoadedAtlasCount,
+                            "DMS discovery must not decode atlas images");
+                        True(pixelBytesBeforeDiscovery == SharedDmsAtlasCache.DecodedPixelBytes,
+                            "DMS discovery must retain no decoded pixel buffers");
+                        using (Bitmap preview = dms.Skins[0].CreatePreview(24))
+                        {
+                            True(preview != null, "a requested DMS preview must load on demand");
+                        }
+                        True(SharedDmsAtlasCache.LoadedAtlasCount > atlasCountBeforeDiscovery,
+                            "only a requested DMS skin should acquire its atlas images");
                         string[] officialParts = { "HEAD", "FACE", "BODY", "ARMS", "HIPS",
                             "LEGS", "TAIL", "FACESCAR", "GILLS", "TAILSPECKLES",
                             "ASCENSION", "PIXEL" };
@@ -397,8 +498,16 @@ namespace RainWorldDesktopPet.Tests
 
                         DmsSkinDefinition template = dms.Find("dressmyslugcat.template");
                         if (template != null)
+                        {
                             True(template.TryGetSprite("FaceC0", "Artificer", DmsSpriteSide.None,
                                 out sprite), "Artificer FaceC sprites must map to the generic FaceA family");
+                            True(template.TryGetSprite("HeadC0", "Slugpup", DmsSpriteSide.None,
+                                out sprite), "Slugpup HeadC sprites must map to the generic DMS HeadA family");
+                            True(template.TryGetSprite("PFaceA0", "Slugpup", DmsSpriteSide.None,
+                                out sprite), "Slugpup PFaceA sprites must map to the generic DMS FaceA family");
+                            True(template.TryGetSprite("PFaceB0", "Slugpup", DmsSpriteSide.None,
+                                out sprite), "Slugpup PFaceB sprites must map to the generic DMS FaceB family");
+                        }
 
                         DmsSkinDefinition bow = dms.Find("InanimateSwagsanity.Bow");
                         if (bow != null)
@@ -418,6 +527,8 @@ namespace RainWorldDesktopPet.Tests
                                 out sprite), "a corrupt optional tail atlas must preserve the base tail");
                         }
                     }
+                    Equal(atlasCountBeforeDiscovery, SharedDmsAtlasCache.LoadedAtlasCount,
+                        "disposing a DMS catalog must release every on-demand atlas lease");
                 }
 
                 List<RainWorldMod> removedDms = workshop.Mods.Where(mod =>
@@ -429,7 +540,226 @@ namespace RainWorldDesktopPet.Tests
                         "missing Dress My Slugcat must leave the base appearance available");
                 }
                 foreach (RainWorldMod mod in removedDms) workshop.Mods.Add(mod);
+
+                RainWorldMod pushToMeow = workshop.FindById("pushtomeow");
+                if (pushToMeow != null)
+                {
+                    using (RainWorldAudioEngine audio = new RainWorldAudioEngine(
+                        installation, new Rectangle(0, 0, 1920, 1080)))
+                    {
+                        Stopwatch timeout = Stopwatch.StartNew();
+                        while (timeout.Elapsed.TotalSeconds < 20.0 &&
+                            audio.Status.IndexOf("indexing", StringComparison.OrdinalIgnoreCase) >= 0)
+                            Thread.Sleep(25);
+                        True(audio.PushToMeowAvailable,
+                            "installed Push To Meow must be available: " + audio.Status);
+                        True(audio.Status.IndexOf(
+                            "31 permitted SoundIDs, 77 matching Rain World clips indexed",
+                            StringComparison.OrdinalIgnoreCase) >= 0,
+                            "only permitted base audio metadata is retained: " +
+                            audio.Status);
+                        True(audio.Status.IndexOf("movement loudness normalized across",
+                            StringComparison.OrdinalIgnoreCase) >= 0,
+                            "movement clip loudness profile is prepared: " +
+                            audio.Status);
+                        True(audio.Status.IndexOf("104/104 permitted meow clips prepared",
+                            StringComparison.OrdinalIgnoreCase) >= 0,
+                            "only supported Slugcat/Slugpup meow WAVs are indexed: " +
+                            audio.Status);
+                        True(audio.CachedBytes <= 24L * 1024L * 1024L,
+                            "audio cache must remain within 24 MiB");
+                        AssertInstalledMeowVoiceMatrix(audio);
+                        AssertInstalledConcurrentAudioBurst(audio);
+                        Console.WriteLine("      " + audio.Status + "; retained " +
+                            (audio.CachedBytes / (1024.0 * 1024.0)).ToString("0.0") +
+                            " MiB");
+                        audio.SetMuted(true);
+                        True(audio.Muted, "mute state is applied immediately");
+                    }
+                }
             }
+        }
+
+        private static void RenderCommandMenuPreview(string outputPath)
+        {
+            using (Bitmap bitmap = new Bitmap(320, 320,
+                PixelFormat.Format32bppPArgb))
+            using (System.Drawing.Graphics graphics =
+                System.Drawing.Graphics.FromImage(bitmap))
+            using (RadialCommandMenu menu = new RadialCommandMenu())
+            {
+                graphics.Clear(Color.Transparent);
+                menu.RenderPreview(graphics, new Rectangle(0, 0,
+                    bitmap.Width, bitmap.Height), new Vec2(160.0, 160.0),
+                    DesktopPetCommand.Move, 2);
+                string directory = Path.GetDirectoryName(Path.GetFullPath(outputPath));
+                if (!Directory.Exists(directory)) Directory.CreateDirectory(directory);
+                bitmap.Save(outputPath, ImageFormat.Png);
+            }
+        }
+
+        private static void InstalledSpearmasterExtractionClipsDecode(
+            RainWorldInstallation installation)
+        {
+            string[] names = { "smSpearPull", "smSpearPull2", "smSpearGrab" };
+            using (RainWorldSoundBank bank = new RainWorldSoundBank(
+                installation, names))
+            {
+                for (int i = 0; i < names.Length; i++)
+                {
+                    IList<string> resolved = bank.ResolveClipNames(names[i]);
+                    Equal(1, resolved.Count,
+                        "installed extraction clip metadata " + names[i]);
+                    RainWorldPcmClip clip;
+                    string reason;
+                    True(bank.TryLoadPcm(resolved[0], out clip, out reason),
+                        "installed extraction clip PCM " + names[i] + ": " + reason);
+                    True(clip != null && clip.DataLength > 0,
+                        "installed extraction clip has samples " + names[i]);
+                }
+            }
+        }
+
+        private static void AssertInstalledMeowVoiceMatrix(
+            RainWorldAudioEngine audio)
+        {
+            SlugcatId[] ids =
+            {
+                SlugcatId.White, SlugcatId.Yellow, SlugcatId.Red,
+                SlugcatId.Gourmand, SlugcatId.Artificer,
+                SlugcatId.SpearMaster, SlugcatId.Rivulet, SlugcatId.Saint
+            };
+            string[] shortIds =
+            {
+                "SlugcatMeowNormalShort", "SlugcatMeowNormalShort",
+                "SlugcatMeowNormalShort", "SlugcatMeowFatShort",
+                "SlugcatMeowCoarseShort", "SlugcatMeowSpearShort",
+                "SlugcatMeowRivuletAShort", "SlugcatMeowSaintShort"
+            };
+            string[] longIds =
+            {
+                "SlugcatMeowNormal", "SlugcatMeowNormal",
+                "SlugcatMeowNormal", "SlugcatMeowFat",
+                "SlugcatMeowCoarse", "SlugcatMeowSpear",
+                "SlugcatMeowRivuletA", "SlugcatMeowSaint"
+            };
+            for (int i = 0; i < ids.Length; i++)
+            {
+                for (int shortMeow = 0; shortMeow < 2; shortMeow++)
+                {
+                    string adultId = shortMeow != 0 ? shortIds[i] : longIds[i];
+                    PushToMeowSound sound;
+                    True(audio.TryResolveMeow(ids[i], false, shortMeow != 0,
+                        out sound) && sound.SoundId == adultId,
+                        ids[i] + " installed adult meow mapping");
+                    string pupId = i < 3
+                        ? (shortMeow != 0 ? "SlugcatMeowPupShort" : "SlugcatMeowPup")
+                        : adultId;
+                    True(audio.TryResolveMeow(ids[i], true, shortMeow != 0,
+                        out sound) && sound.SoundId == pupId,
+                        ids[i] + " installed pup meow mapping");
+                    Near(i < 3 ? 1.0 : 1.3, sound.Pitch, 0.000001,
+                        ids[i] + " installed pup pitch");
+                }
+            }
+        }
+
+        private static void AssertInstalledConcurrentAudioBurst(
+            RainWorldAudioEngine audio)
+        {
+            audio.SetMasterVolume(0.0);
+            Vec2 listener = DesktopWorldTransform.ToSimulation(
+                new Vec2(960.0, 540.0));
+            int droppedBefore = audio.DroppedRequestCount;
+            long renderedBefore = audio.RenderedAudioBufferCount;
+            const long tick = 1000;
+            for (int i = 0; i < 46; i++)
+                audio.Play(new SoundEvent("stress-step-" + i,
+                    "Slugcat_Step_A", listener, 1.0, 1.0, 0, tick));
+            for (int i = 0; i < 16; i++)
+                audio.Play(new SoundEvent("stress-meow-" + i,
+                    "SlugcatMeowNormal", listener, 1.0, 1.0, 0, tick));
+            audio.Play(new SoundEvent("stress-explosion", "Bomb_Explode",
+                listener, 1.0, 1.0, 0, tick));
+
+            Stopwatch timeout = Stopwatch.StartNew();
+            while (timeout.Elapsed.TotalSeconds < 5.0 &&
+                (audio.LastEvent.IndexOf("Bomb_Explode",
+                    StringComparison.OrdinalIgnoreCase) < 0 ||
+                 audio.RenderedAudioBufferCount < renderedBefore + 4) &&
+                audio.Status.IndexOf("playback error",
+                    StringComparison.OrdinalIgnoreCase) < 0)
+                Thread.Sleep(10);
+
+            True(audio.LastEvent.IndexOf("Bomb_Explode",
+                StringComparison.OrdinalIgnoreCase) >= 0,
+                "46 footsteps, 16 meows, and both explosion layers reach the mixer: " +
+                audio.Status + "; last=" + audio.LastEvent);
+            Equal(droppedBefore, audio.DroppedRequestCount,
+                "64-voice installed-audio burst must not drop a request");
+            Equal(1, audio.OutputDeviceCount,
+                "64 mixed voices must share exactly one WinMM device");
+            True(audio.RenderedAudioBufferCount >= renderedBefore + 4,
+                "64 mixed voices render through the complete output ring");
+            True(audio.Status.IndexOf("playback error",
+                StringComparison.OrdinalIgnoreCase) < 0,
+                "64-voice software mix runs without a device error");
+
+            audio.SetMuted(true);
+            Thread.Sleep(100);
+            audio.SetMuted(false);
+            droppedBefore = audio.DroppedRequestCount;
+            renderedBefore = audio.RenderedAudioBufferCount;
+            for (int cycle = 0; cycle < 30; cycle++)
+            {
+                long simulationTick = 2000 + cycle * 4;
+                for (int slugcat = 0; slugcat < 8; slugcat++)
+                {
+                    Vec2 position = listener +
+                        new Vec2((slugcat - 3.5) * 50.0, 0.0);
+                    audio.Play(new SoundEvent("soak-cat-" + slugcat,
+                        (cycle & 1) == 0 ? "Slugcat_Step_A" : "Slugcat_Step_B",
+                        position, 1.0, 1.0, 0, simulationTick));
+                    if (cycle % 10 == 0)
+                    {
+                        audio.Play(new SoundEvent("soak-meow-" + slugcat,
+                            "SlugcatMeowNormalShort", position,
+                            1.0, 1.0, 0, simulationTick));
+                        audio.Play(new SoundEvent("soak-blast-" + slugcat,
+                            slugcat < 4 ? "Bomb_Explode" : "Fire_Spear_Explode",
+                            position, 1.0, 1.0, 0, simulationTick));
+                    }
+                }
+                Thread.Sleep(100);
+            }
+            Thread.Sleep(200);
+            Equal(droppedBefore, audio.DroppedRequestCount,
+                "eight-pet walking, meow, and explosion soak drops no sound; " +
+                "peak voices=" + audio.PeakActiveVoiceCount +
+                "; max render ms=" +
+                audio.MaximumMixerRenderMilliseconds.ToString("0.000",
+                    CultureInfo.InvariantCulture));
+            Equal(1, audio.OutputDeviceCount,
+                "eight-pet soak keeps one WinMM output device");
+            True(audio.RenderedAudioBufferCount >= renderedBefore + 200,
+                "eight-pet soak continuously feeds the reusable output ring");
+            True(audio.Status.IndexOf("playback error",
+                StringComparison.OrdinalIgnoreCase) < 0,
+                "eight-pet soak finishes without a mixer or device error");
+            True(audio.PeakActiveVoiceCount <=
+                RainWorldAudioEngine.MaximumVoices,
+                "eight-pet soak remains inside the bounded cursor capacity");
+            True(audio.MaximumMixerRenderMilliseconds > 0.0 &&
+                audio.MaximumMixerRenderMilliseconds <
+                    WaveOutMixer.BufferMilliseconds,
+                "worst software-mix pass completes inside one output buffer: " +
+                audio.MaximumMixerRenderMilliseconds.ToString("0.000",
+                    CultureInfo.InvariantCulture) + " ms");
+            Console.WriteLine("      eight-pet audio: peak voices=" +
+                audio.PeakActiveVoiceCount + "; max 10 ms-buffer render=" +
+                audio.MaximumMixerRenderMilliseconds.ToString("0.000",
+                    CultureInfo.InvariantCulture) + " ms; devices=" +
+                audio.OutputDeviceCount + "; dropped=0");
         }
 
         private static void Run(string name, Action test)
@@ -1609,6 +1939,8 @@ namespace RainWorldDesktopPet.Tests
             DesktopCollisionWorld world = new DesktopCollisionWorld(new WindowEnumerator());
             world.Refresh(IntPtr.Zero);
             Slugcat slugcat = new Slugcat(new Vec2(300.0, 300.0));
+            RecordingSoundSink sounds = new RecordingSoundSink();
+            slugcat.SetAudioSink(sounds, "posture-test");
             slugcat.State.BodyMode = BodyModeIndex.Stand;
             for (int tick = 0; tick < 5; tick++)
             {
@@ -1622,6 +1954,9 @@ namespace RainWorldDesktopPet.Tests
                         "first down frame keeps the physical Stand mode");
                     True(slugcat.State.Animation != AnimationIndex.DownOnFours,
                         "first down frame is not the final crawl transition");
+                    True(sounds.PlayCount == 1 && sounds.LastSound != null &&
+                        sounds.LastSound.Id == "Slugcat_Down_On_Fours",
+                        "down edge emits Player's one-shot crouch sound");
                 }
             }
             Equal((int)AnimationIndex.DownOnFours, (int)slugcat.State.Animation,
@@ -1640,6 +1975,20 @@ namespace RainWorldDesktopPet.Tests
                 "StandUp begins while the body is still physically low");
             Equal((int)AnimationIndex.StandUp, (int)slugcat.State.Animation,
                 "low body enters StandUp instead of swapping to standing sprite");
+            True(sounds.LastSound != null &&
+                sounds.LastSound.Id == "Slugcat_Stand_Up",
+                "standing transition emits Player's one-shot stand sound");
+
+            Slugcat resting = new Slugcat(new Vec2(500.0, 300.0));
+            RecordingSoundSink restingSounds = new RecordingSoundSink();
+            resting.SetAudioSink(restingSounds, "posture-rest-test");
+            resting.State.BodyMode = BodyModeIndex.Stand;
+            resting.BodyChunks[1].ContactFloor = true;
+            resting.Movement.ApplyInput(new VirtualInput(0, 0, false, false,
+                VirtualPosture.Sit), world);
+            True(restingSounds.PlayCount == 1 &&
+                restingSounds.LastSound.Id == "Slugcat_Down_On_Fours",
+                "desktop Sit posture maps to Player's down-edge sound");
         }
 
         private static void BodyChunksShareFrozenSnapshot()
@@ -2065,6 +2414,129 @@ namespace RainWorldDesktopPet.Tests
                 "a click outside immutable pet bounds must remain click-through");
         }
 
+        private static void DraggingClearsCrawlPoseLikeOriginalPlayer()
+        {
+            DesktopCollisionWorld world = new DesktopCollisionWorld(new WindowEnumerator());
+            world.RefreshFromSnapshots(new DesktopWindowSnapshot[0]);
+            Slugcat slugcat = new Slugcat(new Vec2(300.0, 300.0));
+            slugcat.State.BodyMode = BodyModeIndex.Crawl;
+            slugcat.State.Animation = AnimationIndex.CrawlTurn;
+            slugcat.State.Standing = true;
+            slugcat.State.Grounded = true;
+
+            True(slugcat.Grab(slugcat.BodyChunks[0].Position),
+                "crawl precondition should be grabbable");
+            True(slugcat.State.BodyMode == BodyModeIndex.Stunned &&
+                 slugcat.State.Animation == AnimationIndex.None &&
+                 !slugcat.State.Standing && !slugcat.State.Grounded,
+                "external control should immediately replace the Crawl render inputs");
+            Equal(0, slugcat.State.StunCounter,
+                "mouse dragging must not allocate a post-release stun duration");
+            True(slugcat.State.Conscious,
+                "mouse dragging changes the body pose without fabricating unconsciousness");
+
+            slugcat.Step(VirtualInput.Neutral, world,
+                slugcat.Center + new Vec2(60.0, -20.0), Vec2.Zero);
+            True(slugcat.State.BodyMode == BodyModeIndex.Stunned &&
+                 slugcat.State.Animation == AnimationIndex.None,
+                "the lost-control pose should remain stable for the complete drag");
+
+            slugcat.Release(Vec2.Zero);
+            True(slugcat.State.BodyMode == BodyModeIndex.Default &&
+                 slugcat.State.Animation == AnimationIndex.None &&
+                 !slugcat.State.Standing && !slugcat.State.Grounded,
+                "release should derive the next posture from physics instead of restoring Crawl");
+        }
+
+        private static void RadialCommandSectorsMapCommands()
+        {
+            Near(60.0, RadialCommandMenu.RotationDegrees, 0.000001,
+                "command wheel clockwise rotation");
+            Near(90.0, RadialCommandMenu.BottomGapAngleDegrees, 0.000001,
+                "lower command-wheel split points straight down");
+            True(RadialCommandMenu.CommandAtAngle(30.0) == DesktopPetCommand.Stop,
+                "rotated right sector should stop the selected Slugcat");
+            True(RadialCommandMenu.CommandAtAngle(150.0) == DesktopPetCommand.Move,
+                "rotated lower-left sector should restore autonomous movement");
+            True(RadialCommandMenu.CommandAtAngle(-90.0) ==
+                DesktopPetCommand.FollowMouse,
+                "rotated upper sector should enable mouse following");
+        }
+
+        private static void RadialCommandVisualStyleUsesPixelGridAndSlowEasing()
+        {
+            Near(0.5, RadialCommandMenu.OpeningDurationSeconds, 0.000001,
+                "command menu opening duration");
+            Near(0.5, RadialCommandMenu.ClosingDurationSeconds, 0.000001,
+                "command menu closing duration");
+            Near(0.23, RadialCommandMenu.HoverInDurationSeconds, 0.000001,
+                "hover brightening duration");
+            Near(0.23, RadialCommandMenu.HoverOutDurationSeconds, 0.000001,
+                "hover release duration");
+            Equal(2, RadialCommandMenu.RenderPixelScale,
+                "the command wheel should render on a two-pixel grid");
+            Equal(11, RadialCommandMenu.CommandIconWidth,
+                "command icon logical width");
+            Equal(9, RadialCommandMenu.CommandIconHeight,
+                "command icon logical height");
+            string stopIcon = RadialCommandMenu.IconPatternFor(
+                DesktopPetCommand.Stop);
+            string moveIcon = RadialCommandMenu.IconPatternFor(
+                DesktopPetCommand.Move);
+            string followIcon = RadialCommandMenu.IconPatternFor(
+                DesktopPetCommand.FollowMouse);
+            Equal(99, stopIcon.Length, "stop icon pixel count");
+            Equal(99, moveIcon.Length, "move icon pixel count");
+            Equal(99, followIcon.Length, "follow icon pixel count");
+            True(stopIcon != moveIcon && stopIcon != followIcon &&
+                moveIcon != followIcon,
+                "all three commands need distinct icon silhouettes");
+            True(moveIcon.Substring(4 * 11, 11) == "..########.",
+                "move icon should be a right-facing play triangle");
+            True(followIcon.Substring(4 * 11, 11) == "..########." &&
+                followIcon[1 * 11 + 7] == '#' &&
+                followIcon[7 * 11 + 7] == '#',
+                "follow icon should be a fixed right-facing arrow");
+            Near(0.0, RadialCommandMenu.SmootherStep(0.0), 0.000001,
+                "smooth easing start");
+            Near(0.5, RadialCommandMenu.SmootherStep(0.5), 0.000001,
+                "smooth easing midpoint");
+            Near(1.0, RadialCommandMenu.SmootherStep(1.0), 0.000001,
+                "smooth easing end");
+
+            using (Bitmap bitmap = new Bitmap(320, 320,
+                PixelFormat.Format32bppPArgb))
+            using (System.Drawing.Graphics graphics =
+                System.Drawing.Graphics.FromImage(bitmap))
+            using (RadialCommandMenu menu = new RadialCommandMenu())
+            {
+                graphics.Clear(Color.Transparent);
+                menu.RenderPreview(graphics, new Rectangle(0, 0, 320, 320),
+                    new Vec2(160.0, 160.0), DesktopPetCommand.Move, 2);
+
+                const int left = 16;
+                const int top = 16;
+                const int diameter = 288;
+                bool pixelGridBroken = false;
+                for (int y = top; y < top + diameter && !pixelGridBroken; y += 2)
+                {
+                    for (int x = left; x < left + diameter; x += 2)
+                    {
+                        int color = bitmap.GetPixel(x, y).ToArgb();
+                        if (bitmap.GetPixel(x + 1, y).ToArgb() != color ||
+                            bitmap.GetPixel(x, y + 1).ToArgb() != color ||
+                            bitmap.GetPixel(x + 1, y + 1).ToArgb() != color)
+                        {
+                            pixelGridBroken = true;
+                            break;
+                        }
+                    }
+                }
+                True(!pixelGridBroken,
+                    "segments and command icons should share the two-pixel grid");
+            }
+        }
+
         private static void AiDoesNotMoveCreature()
         {
             DesktopCollisionWorld world = new DesktopCollisionWorld(new WindowEnumerator());
@@ -2078,6 +2550,132 @@ namespace RainWorldDesktopPet.Tests
             Vec2 after = slugcat.Center;
             Near(0.0, Vec2.Distance(before, after), 0.000001, "AI must not set position");
             True(input.X >= -1 && input.X <= 1, "virtual horizontal input range");
+        }
+
+        private static void StopCommandOnlySuppressesLocomotion()
+        {
+            DesktopCollisionWorld world = new DesktopCollisionWorld(new WindowEnumerator());
+            world.RefreshFromSnapshots(new DesktopWindowSnapshot[0]);
+            Slugcat slugcat = new Slugcat(new Vec2(300.0, 300.0));
+            DesktopPetAI ai = new DesktopPetAI(9012);
+            MouseTracker mouse = new MouseTracker();
+            mouse.Sample(SimulationConstants.LogicStepSeconds);
+            ai.SetCommand(DesktopPetCommand.Stop);
+
+            Vec2 firstAttention = ai.Attention.Smoothed;
+            for (int tick = 0; tick < 80; tick++)
+            {
+                VirtualInput input = ai.Step(slugcat, world, mouse);
+                True(input.X == 0 && input.Y == 0 && !input.Jump && !input.Pickup,
+                    "stop command should neutralize locomotion intent at tick " + tick);
+            }
+
+            True(Vec2.Distance(firstAttention, ai.Attention.Smoothed) > 0.01,
+                "stop command should not freeze AI attention and face targets");
+            ai.SetCommand(DesktopPetCommand.Move);
+            True(ai.Command == DesktopPetCommand.Move,
+                "move command should restore the unmodified autonomous AI mode");
+        }
+
+        private static void CommandSelectionWaitSuppressesLocomotionOnly()
+        {
+            DesktopCollisionWorld world = new DesktopCollisionWorld(new WindowEnumerator());
+            world.RefreshFromSnapshots(new DesktopWindowSnapshot[0]);
+            Slugcat slugcat = new Slugcat(new Vec2(300.0, 300.0));
+            DesktopPetAI ai = new DesktopPetAI(19012);
+            MouseTracker mouse = new MouseTracker();
+            mouse.Sample(SimulationConstants.LogicStepSeconds);
+
+            Vec2 firstAttention = ai.Attention.Smoothed;
+            for (int tick = 0; tick < 80; tick++)
+            {
+                VirtualInput autonomous = ai.Step(slugcat, world, mouse);
+                VirtualInput waiting = GameLoop.ApplyCommandSelectionGate(
+                    autonomous, true);
+                True(waiting.X == 0 && waiting.Y == 0 &&
+                    !waiting.Jump && !waiting.Pickup,
+                    "selection wait should neutralize locomotion at tick " + tick);
+            }
+
+            True(Vec2.Distance(firstAttention, ai.Attention.Smoothed) > 0.01,
+                "selection wait should not freeze AI attention or face targets");
+            VirtualInput expected = new VirtualInput(1, -1, true, true);
+            VirtualInput resumed = GameLoop.ApplyCommandSelectionGate(
+                expected, false);
+            True(resumed.X == expected.X && resumed.Y == expected.Y &&
+                resumed.Jump == expected.Jump && resumed.Pickup == expected.Pickup,
+                "closing the menu should immediately restore the existing command input");
+        }
+
+        private static void FollowCommandPursuesCursorWithVariations()
+        {
+            DesktopCollisionWorld world = new DesktopCollisionWorld(new WindowEnumerator());
+            world.RefreshFromSnapshots(new DesktopWindowSnapshot[0]);
+            MouseTracker mouse = new MouseTracker();
+            mouse.Sample(SimulationConstants.LogicStepSeconds);
+            Slugcat slugcat = new Slugcat(mouse.Position - new Vec2(480.0, 0.0));
+            DesktopPetAI ai = new DesktopPetAI(77123);
+            ai.SetCommand(DesktopPetCommand.FollowMouse);
+
+            int towardTicks = 0;
+            int neutralTicks = 0;
+            int detourTicks = 0;
+            bool sawVariation = false;
+            for (int tick = 0; tick < 720; tick++)
+            {
+                VirtualInput input = ai.Step(slugcat, world, mouse);
+                if (input.X > 0) towardTicks++;
+                else if (input.X < 0) detourTicks++;
+                else neutralTicks++;
+                if (ai.CurrentFollowVariation != FollowCommandVariation.None)
+                    sawVariation = true;
+            }
+
+            True(towardTicks > 480,
+                "follow command should spend most ticks pursuing the cursor");
+            True(sawVariation && neutralTicks > 0 && detourTicks > 0,
+                "follow command should pause/look and briefly move away sometimes");
+            True(ai.Attention.Kind == AttentionKind.Mouse ||
+                ai.CurrentFollowVariation == FollowCommandVariation.LookAway,
+                "follow attention should normally remain on the cursor");
+        }
+
+        private static void FollowCommandHoldsHighJumpInput()
+        {
+            DesktopCollisionWorld world = new DesktopCollisionWorld(new WindowEnumerator());
+            world.RefreshFromSnapshots(new DesktopWindowSnapshot[0]);
+            MouseTracker mouse = new MouseTracker();
+            mouse.Sample(SimulationConstants.LogicStepSeconds);
+            Slugcat slugcat = new Slugcat(mouse.Position + new Vec2(-40.0, 180.0));
+            slugcat.State.Grounded = true;
+            slugcat.State.Standing = true;
+            DesktopPetAI ai = new DesktopPetAI(88123);
+            ai.SetCommand(DesktopPetCommand.FollowMouse);
+
+            VirtualInput launch = ai.Step(slugcat, world, mouse);
+            True(launch.Jump,
+                "a cursor far above the grounded Slugcat should start a jump");
+
+            slugcat.State.Grounded = false;
+            for (int airborneTick = 0; airborneTick < 6; airborneTick++)
+            {
+                VirtualInput held = ai.Step(slugcat, world, mouse);
+                True(held.Jump,
+                    "high follow jump should hold through boost tick " + airborneTick);
+            }
+
+            VirtualInput released = ai.Step(slugcat, world, mouse);
+            True(!released.Jump,
+                "follow jump should release after consuming the full boost window");
+
+            slugcat.State.Grounded = true;
+            for (int cooldownTick = 0; cooldownTick < 10; cooldownTick++)
+            {
+                VirtualInput coolingDown = ai.Step(slugcat, world, mouse);
+                True(!coolingDown.Jump,
+                    "follow jump cooldown should suppress repeated low hops at tick " +
+                    cooldownTick);
+            }
         }
 
         private static void AtlasMetadataParses()
@@ -2338,6 +2936,684 @@ namespace RainWorldDesktopPet.Tests
             }
         }
 
+        private static void RainWorldSoundCatalogParsesGameDirectives()
+        {
+            RainWorldSoundCatalog catalog = RainWorldSoundCatalog.Parse(
+                "Volume: 6.0\n" +
+                "Volume exponent: 1.8\n" +
+                "Slugcat_Normal_Jump : jump2/vol=0.4\n" +
+                "Bomb_Explode/PLAYALL/rangeFac=2.5/dopplerFac=0/vol=0.75/pitch=0.9/ignoreEffects=0.25/silentChance=0.2 : ScavSpearBang/vol=0.6/pitch=0.8/ignoreEffects=0.5, Clang2B/minVol=0.2/maxVol=0.4/minPitch=0.9/maxPitch=1.1\n" +
+                "Slugcat_Skid_On_Ground_Init : Skitter1B/vol=0.4/Skitter1C/vol=0.5\n");
+            Equal(3, catalog.Count, "global volume directives are not SoundIDs");
+            Near(6.0, catalog.MasterVolume, 0.000001, "global listener volume");
+            Near(1.8, catalog.VolumeExponent, 0.000001, "volume exponent");
+            RainWorldSoundDefinition jump;
+            True(catalog.TryGet("Slugcat_Normal_Jump", out jump), "jump SoundID");
+            Equal(1, jump.Clips.Count, "jump clip reference count");
+            Near(0.4, jump.Clips[0].MinimumVolume, 0.000001, "jump clip volume");
+            RainWorldSoundDefinition bomb;
+            True(catalog.TryGet("Bomb_Explode", out bomb) && bomb.PlayAll,
+                "PLAYALL directive");
+            Near(2.5, bomb.RangeFactor, 0.000001, "trigger range factor");
+            Near(0.0, bomb.DopplerFactor, 0.000001, "disabled trigger Doppler");
+            Near(0.75, bomb.MinimumVolume, 0.000001, "trigger volume");
+            Near(0.9, bomb.MinimumPitch, 0.000001, "trigger pitch");
+            Near(0.25, bomb.IgnoreEffects, 0.000001, "trigger effect bypass");
+            Near(0.2, bomb.SilentChance, 0.000001, "trigger silent chance");
+            Equal(2, bomb.Clips.Count, "PLAYALL clip count");
+            Near(0.5, bomb.Clips[0].IgnoreEffects, 0.000001,
+                "clip effect bypass");
+            Near(0.2, bomb.Clips[1].MinimumVolume, 0.000001, "minimum volume");
+            Near(1.1, bomb.Clips[1].MaximumPitch, 0.000001, "maximum pitch");
+            RainWorldSoundDefinition malformedVanillaLine;
+            True(catalog.TryGet("Slugcat_Skid_On_Ground_Init", out malformedVanillaLine),
+                "vanilla slash-separated clip line");
+            Equal(2, malformedVanillaLine.Clips.Count,
+                "slash-separated clips remain independently playable");
+
+            RainWorldSoundCatalog modCatalog = RainWorldSoundCatalog.Parse(
+                "[ADD]SlugcatMeowNormal : MeowNormal1/vol=0.6\n");
+            RainWorldSoundDefinition meow;
+            True(modCatalog.TryGet("SlugcatMeowNormal", out meow),
+                "Workshop [ADD] directive is stripped from the SoundID");
+
+            HashSet<string> permitted = new HashSet<string>(
+                StringComparer.OrdinalIgnoreCase)
+                { "Slugcat_Normal_Jump", "Bomb_Explode" };
+            RainWorldSoundCatalog filtered = RainWorldSoundCatalog.Parse(
+                "Slugcat_Normal_Jump : jump2/vol=0.4\n" +
+                "Bomb_Explode/PLAYALL : ScavSpearBang, Clang2B\n" +
+                "Zapper_Zap : Zapper\n", permitted);
+            Equal(2, filtered.Count, "filtered permitted SoundID count");
+            RainWorldSoundDefinition rejected;
+            True(!filtered.TryGet("Zapper_Zap", out rejected),
+                "unrelated SoundID metadata is not retained");
+            ISet<string> referenced = filtered.ReferencedClipNames();
+            Equal(3, referenced.Count, "only permitted clip names are retained");
+            True(referenced.Contains("jump2") && referenced.Contains("ScavSpearBang") &&
+                referenced.Contains("Clang2B"), "permitted clip references survive filtering");
+
+            Near(1.0, RainWorldAudioEngine.CalculateSpatialGain(
+                Vec2.Zero, Vec2.Zero, 1000.0, 1.0), 0.000001,
+                "sound at the listener keeps full volume");
+            Near(0.0, RainWorldAudioEngine.CalculateSpatialGain(
+                new Vec2(2000.0, 0.0), Vec2.Zero, 1000.0, 1.0), 0.000001,
+                "default range reaches silence at two listener radii");
+            Near(0.8, RainWorldAudioEngine.CalculateSpatialGain(
+                new Vec2(2000.0, 0.0), Vec2.Zero, 1000.0, 2.5), 0.000001,
+                "explosion range factor extends attenuation");
+            Near(1.05, RainWorldAudioEngine.CalculateDopplerPitch(
+                new Vec2(1000.0, 0.0), new Vec2(-10.0, 0.0),
+                Vec2.Zero, 1.0), 0.000001, "approaching source raises pitch");
+            Near(0.95, RainWorldAudioEngine.CalculateDopplerPitch(
+                new Vec2(1000.0, 0.0), new Vec2(10.0, 0.0),
+                Vec2.Zero, 1.0), 0.000001, "departing source lowers pitch");
+            Near(1.0, RainWorldAudioEngine.CalculateDopplerPitch(
+                new Vec2(1000.0, 0.0), new Vec2(-10.0, 0.0),
+                Vec2.Zero, 0.0), 0.000001, "zero Doppler factor bypasses shift");
+            Near(Math.Pow(0.1, 1.8),
+                RainWorldAudioEngine.CalculateOutputVolume(
+                    1.0, 1.0, 0.1, 1.0, 6.0, 1.8), 0.000001,
+                "documented listener clamp and exponent shape device level");
+            Near(0.54, RainWorldAudioEngine.ApplyCategoryOutputGain(
+                "Slugcat_Step_A", 0.4), 0.000001,
+                "permitted movement sounds receive 35 percent more output gain");
+            Near(0.4, RainWorldAudioEngine.ApplyCategoryOutputGain(
+                "Fire_Spear_Explode", 0.4), 0.000001,
+                "Downpour ability sounds keep their authored output level");
+            Near(1.0, RainWorldAudioEngine.ApplyCategoryOutputGain(
+                "Slugcat_Normal_Jump", 0.9), 0.000001,
+                "movement output gain remains device-safe at unity");
+        }
+
+        private static void MovementPcmLoudnessNormalizationUsesBoundedRms()
+        {
+            byte[] pcm = new byte[8];
+            short[] samples = { 16384, -16384, 16384, -16384 };
+            for (int i = 0; i < samples.Length; i++)
+            {
+                pcm[i * 2] = (byte)(samples[i] & 0xff);
+                pcm[i * 2 + 1] = (byte)((samples[i] >> 8) & 0xff);
+            }
+            RainWorldPcmClip clip = new RainWorldPcmClip(
+                "rms-test", pcm, 0, pcm.Length, 1, 44100, 16);
+            Near(0.5, RainWorldAudioEngine.CalculatePcmRms(clip),
+                0.000001, "PCM16 RMS amplitude");
+            WaveOutVoice mixedVoice = new WaveOutVoice(clip, 1.0, 0.0,
+                1.0, false, 44100);
+            double[] mixedLeft = new double[4];
+            double[] mixedRight = new double[4];
+            mixedVoice.MixInto(mixedLeft, mixedRight, 4, 1.0);
+            for (int mixedFrame = 0; mixedFrame < 4; mixedFrame++)
+            {
+                Near(samples[mixedFrame] / 32768.0, mixedLeft[mixedFrame],
+                    0.000001, "software mixer preserves PCM frame " + mixedFrame);
+                Near(mixedLeft[mixedFrame], mixedRight[mixedFrame],
+                    0.000001, "mono voice is centered in stereo " + mixedFrame);
+            }
+            True(mixedVoice.IsDone,
+                "one-shot cursor ends only after its final PCM frame");
+            Near(2.0, RainWorldAudioEngine.CalculateLoudnessNormalizationGain(
+                0.1, 0.2), 0.000001, "quiet clip gain toward average");
+            Near(0.25, RainWorldAudioEngine.CalculateLoudnessNormalizationGain(
+                1.0, 0.1), 0.000001, "loud clip attenuation is bounded");
+            Near(4.0, RainWorldAudioEngine.CalculateLoudnessNormalizationGain(
+                0.01, 0.1), 0.000001, "quiet clip amplification is bounded");
+            Near(0.33, RainWorldAudioEngine.ApplyEventOutputGain(
+                "Slugcat_Terrain_Impact_Hard", 0.2), 0.000001,
+                "terrain impact gain is applied after movement normalization");
+            Near(0.07, RainWorldAudioEngine.ApplyEventOutputGain(
+                "Slugcat_Floor_Impact_Standard", 0.2), 0.000001,
+                "landing output is reduced independently from terrain impacts");
+            Near(0.52, RainWorldAudioEngine.ApplyEventOutputGain(
+                "SM_Spear_Pull", 0.2), 0.000001,
+                "quiet Spearmaster extraction audio receives a dedicated gain");
+            Near(0.2, RainWorldAudioEngine.ApplyEventOutputGain(
+                "Slugcat_Normal_Jump", 0.2), 0.000001,
+                "non-impact movement keeps its normalized output");
+            Near(0.25, WaveOutMixer.CalculateLimiterTarget(3.8),
+                0.000001, "overlapping peaks are reduced below clipping");
+            Near(1.0, WaveOutMixer.CalculateLimiterTarget(0.5),
+                0.000001, "single quiet sounds keep their authored level");
+            byte[] overlapPcm = new byte[WaveOutMixer.OutputSampleRate /
+                1000 * WaveOutMixer.BufferMilliseconds * 2];
+            for (int sampleIndex = 0; sampleIndex < overlapPcm.Length / 2;
+                sampleIndex++)
+            {
+                short sample = (sampleIndex & 1) == 0
+                    ? short.MaxValue
+                    : short.MinValue;
+                overlapPcm[sampleIndex * 2] = (byte)(sample & 0xff);
+                overlapPcm[sampleIndex * 2 + 1] =
+                    (byte)((sample >> 8) & 0xff);
+            }
+            RainWorldPcmClip overlapClip = new RainWorldPcmClip(
+                "overlap-test", overlapPcm, 0, overlapPcm.Length, 1,
+                WaveOutMixer.OutputSampleRate, 16);
+            double[] overlapLeft = new double[overlapPcm.Length / 2];
+            double[] overlapRight = new double[overlapLeft.Length];
+            for (int voiceIndex = 0;
+                voiceIndex < RainWorldAudioEngine.MaximumVoices; voiceIndex++)
+            {
+                WaveOutVoice overlapVoice = new WaveOutVoice(overlapClip,
+                    1.0, 0.0, 1.0, false,
+                    WaveOutMixer.OutputSampleRate);
+                overlapVoice.MixInto(overlapLeft, overlapRight,
+                    overlapLeft.Length, 2.0);
+            }
+            double overlapPeak = 0.0;
+            for (int sampleIndex = 0; sampleIndex < overlapLeft.Length;
+                sampleIndex++)
+                overlapPeak = Math.Max(overlapPeak,
+                    Math.Max(Math.Abs(overlapLeft[sampleIndex]),
+                        Math.Abs(overlapRight[sampleIndex])));
+            double overlapLimiter =
+                WaveOutMixer.CalculateLimiterTarget(overlapPeak);
+            True(overlapPeak > 100.0,
+                "128 shared-PCM voices exercise the worst overlap path");
+            True(overlapPeak * overlapLimiter <=
+                WaveOutMixer.LimiterPeak + 0.000001,
+                "200 percent 128-voice mix remains below the PCM clip peak");
+            Equal(4, WaveOutMixer.OutputBufferCount,
+                "one reusable four-buffer output ring");
+            Equal(10, WaveOutMixer.BufferMilliseconds,
+                "each output buffer stays low latency");
+            Equal(512, RainWorldAudioEngine.MaximumQueuedCommands,
+                "bounded command queue absorbs simultaneous pet bursts");
+            Equal(128, RainWorldAudioEngine.MaximumVoices,
+                "simultaneous voice capacity avoids ordinary one-shot loss");
+            Equal(32, RainWorldAudioEngine.ReservedPriorityVoices,
+                "reserved terrain, ability, and meow voices");
+            Equal(256, RainWorldAudioEngine.MaximumCommandsPerWorkerCycle,
+                "worker drains a burst before its sounds become stale");
+            True(RainWorldAudioEngine.CanAdmitVoices(94, 2, false),
+                "ordinary PLAYALL reserves all layers atomically");
+            True(!RainWorldAudioEngine.CanAdmitVoices(95, 2, false),
+                "ordinary PLAYALL never starts with only one layer available");
+            True(RainWorldAudioEngine.CanAdmitVoices(126, 2, true),
+                "priority explosion can use the complete voice range");
+            True(!RainWorldAudioEngine.CanAdmitVoices(127, 2, true),
+                "priority PLAYALL never truncates its final layer");
+            Equal(12, RainWorldAudioEngine.LoopStopFadeMilliseconds,
+                "loop stop uses a sub-frame anti-click ramp");
+            True(RainWorldAudioEngine.IsPrioritySound("SM_Spear_Pull"),
+                "Spearmaster pull gets reserved voice admission");
+            True(RainWorldAudioEngine.IsPrioritySound(
+                "Slugcat_Terrain_Impact_Hard"),
+                "terrain impact gets reserved voice admission");
+            True(RainWorldAudioEngine.IsPrioritySound("SlugcatMeowPupShort"),
+                "meows use reserved voice admission instead of being dropped");
+            True(RainWorldAudioEngine.IsPrioritySound("Bomb_Explode"),
+                "Downpour explosions bypass ordinary command admission");
+            True(!RainWorldAudioEngine.IsPrioritySound("Slugcat_Step_A"),
+                "ordinary movement stays below the reserved voice band");
+        }
+
+        private static void AudioMasterVolumeSupportsZeroToTwoRange()
+        {
+            Near(0.0, AudioVolumeSettings.Clamp(-0.5), 0.000001,
+                "master volume lower clamp");
+            Near(2.0, AudioVolumeSettings.Clamp(3.0), 0.000001,
+                "master volume upper clamp");
+            Near(1.0, AudioVolumeSettings.Clamp(double.NaN), 0.000001,
+                "invalid saved volume uses the default");
+            Near(0.8, RainWorldAudioEngine.ApplyMasterOutputGain(0.4, 2.0),
+                0.000001, "two hundred percent doubles final device output");
+            Near(1.0, RainWorldAudioEngine.ApplyMasterOutputGain(0.75, 2.0),
+                0.000001, "master amplification remains device safe");
+            using (RainWorldAudioEngine audio = new RainWorldAudioEngine(
+                null, new Rectangle(0, 0, 1920, 1080)))
+            {
+                audio.SetMasterVolume(1.8);
+                Near(1.8, audio.MasterVolume, 0.000001,
+                    "engine accepts live slider volume");
+            }
+        }
+
+        private static void AudioMuteDefaultsOnAndRestoresSavedChoice()
+        {
+            True(AudioMuteSettings.Default,
+                "a new installation starts with audio muted");
+            True(AudioMuteSettings.ParseSavedValue("true"),
+                "a saved muted choice is restored");
+            True(!AudioMuteSettings.ParseSavedValue("false"),
+                "a saved unmuted choice is restored");
+            True(AudioMuteSettings.ParseSavedValue("invalid"),
+                "an invalid setting falls back to the safe muted default");
+        }
+
+        private static void PushToMeowProfilesAndCadenceMatchDll()
+        {
+            string root = Path.Combine(Path.GetTempPath(),
+                "push-to-meow-profile-test-" + Guid.NewGuid().ToString("N"));
+            try
+            {
+                Directory.CreateDirectory(Path.Combine(root, "plugins"));
+                Directory.CreateDirectory(Path.Combine(root, "modify", "soundeffects"));
+                Directory.CreateDirectory(Path.Combine(root, "soundeffects"));
+                Directory.CreateDirectory(Path.Combine(root, "pushtomeow"));
+                File.WriteAllBytes(Path.Combine(root, "plugins", "PushToMeowMod.dll"),
+                    new byte[] { 0 });
+                File.WriteAllBytes(Path.Combine(root, "soundeffects", "MeowNormal1.wav"),
+                    new byte[] { 0 });
+                File.WriteAllText(Path.Combine(root, "modinfo.json"),
+                    "{\"version\":\"1.2.4\"}");
+                File.WriteAllText(Path.Combine(root, "modify", "soundeffects", "sounds.txt"),
+                    "[ADD]SlugcatMeowNormal : MeowNormal1/vol=0.6\n");
+                File.WriteAllText(Path.Combine(root, "pushtomeow", "custom_meows.json"),
+                    "{\"custom_meows\":[" +
+                    "{\"slugcat_id\":\"White\",\"short_meow_soundid\":\"SlugcatMeowNormalShort\",\"long_meow_soundid\":\"SlugcatMeowNormal\",\"short_meow_pup_soundid\":\"SlugcatMeowPupShort\",\"long_meow_pup_soundid\":\"SlugcatMeowPup\"}," +
+                    "{\"slugcat_id\":\"Gourmand\",\"short_meow_soundid\":\"SlugcatMeowFatShort\",\"long_meow_soundid\":\"SlugcatMeowFat\",\"volume_multiplier\":1.15}," +
+                    "{\"slugcat_id\":\"Artificer\",\"short_meow_soundid\":\"SlugcatMeowCoarseShort\",\"long_meow_soundid\":\"SlugcatMeowCoarse\",\"volume_multiplier\":1.2}," +
+                    "{\"slugcat_id\":\"Spear\",\"short_meow_soundid\":\"SlugcatMeowSpearShort\",\"long_meow_soundid\":\"SlugcatMeowSpear\",\"volume_multiplier\":0.55}," +
+                    "{\"slugcat_id\":\"Saint\",\"short_meow_soundid\":\"SlugcatMeowSaintShort\",\"long_meow_soundid\":\"SlugcatMeowSaint\"}]}");
+
+                string reason;
+                PushToMeowLibrary library = PushToMeowLibrary.LoadFromRoot(root,
+                    true, out reason);
+                True(library != null, "profile fixture loads: " + reason);
+                True(library.Version == "1.2.4", "mod version");
+                PushToMeowSound sound;
+                True(library.TryResolve(SlugcatId.White, true, true, out sound),
+                    "White pup short voice");
+                True(sound.SoundId == "SlugcatMeowPupShort", "dedicated pup SoundID");
+                Near(1.0, sound.Pitch, 0.000001,
+                    "dedicated custom pup sound resets pitch");
+                library.TryResolve(SlugcatId.Gourmand, false, false, out sound);
+                True(sound.SoundId == "SlugcatMeowFat", "Gourmand voice family");
+                Near(0.85 * 1.15, sound.Volume, 0.000001, "Gourmand volume");
+                library.TryResolve(SlugcatId.Artificer, false, true, out sound);
+                True(sound.SoundId == "SlugcatMeowCoarseShort", "Artificer voice family");
+                library.TryResolve(SlugcatId.SpearMaster, false, false, out sound);
+                True(sound.SoundId == "SlugcatMeowSpear", "Spearmaster voice family");
+                Near(0.85 * 0.55, sound.Volume, 0.000001, "Spearmaster volume");
+                library.TryResolve(SlugcatId.Rivulet, false, true, out sound);
+                True(sound.SoundId == "SlugcatMeowRivuletAShort",
+                    "default alternate option disabled uses Rivulet A");
+                Near(0.85 * 0.8, sound.Volume, 0.000001, "Rivulet volume");
+                library.TryResolve(SlugcatId.Saint, false, false, out sound);
+                True(sound.SoundId == "SlugcatMeowSaint", "Saint whisper voice family");
+
+                SlugcatId[] allIds =
+                {
+                    SlugcatId.White, SlugcatId.Yellow, SlugcatId.Red,
+                    SlugcatId.Gourmand, SlugcatId.Artificer,
+                    SlugcatId.SpearMaster, SlugcatId.Rivulet, SlugcatId.Saint
+                };
+                string[] adultLongIds =
+                {
+                    "SlugcatMeowNormal", "SlugcatMeowNormal",
+                    "SlugcatMeowNormal", "SlugcatMeowFat",
+                    "SlugcatMeowCoarse", "SlugcatMeowSpear",
+                    "SlugcatMeowRivuletA", "SlugcatMeowSaint"
+                };
+                for (int i = 0; i < allIds.Length; i++)
+                {
+                    True(library.TryResolve(allIds[i], false, false, out sound) &&
+                        sound.SoundId == adultLongIds[i],
+                        allIds[i] + " adult long voice");
+                    string expectedPup = i < 3
+                        ? "SlugcatMeowPup" : adultLongIds[i];
+                    True(library.TryResolve(allIds[i], true, false, out sound) &&
+                        sound.SoundId == expectedPup,
+                        allIds[i] + " pup long voice");
+                    Near(i < 3 ? 1.0 : 1.3, sound.Pitch, 0.000001,
+                        allIds[i] + " pup pitch rule");
+                }
+
+                Near(24.0, PushToMeowController.CalculateIntervalSeconds(0.0, 0.0),
+                    0.000001, "hungry minimum interval");
+                Near(85.0, PushToMeowController.CalculateIntervalSeconds(1.0, 1.0),
+                    0.000001, "fed maximum interval");
+            }
+            finally
+            {
+                if (Directory.Exists(root)) Directory.Delete(root, true);
+            }
+        }
+
+        private static void PushToMeowAnimationsMatchDll()
+        {
+            DesktopCollisionWorld world = new DesktopCollisionWorld(new WindowEnumerator());
+            SlugcatId[] ids =
+            {
+                SlugcatId.White, SlugcatId.Yellow, SlugcatId.Red,
+                SlugcatId.Gourmand, SlugcatId.Artificer,
+                SlugcatId.SpearMaster, SlugcatId.Rivulet, SlugcatId.Saint
+            };
+            for (int idIndex = 0; idIndex < ids.Length; idIndex++)
+            {
+                for (int pup = 0; pup < 2; pup++)
+                {
+                    Slugcat slugcat = new Slugcat(
+                        new Vec2(200.0 + idIndex * 20.0, 200.0), ids[idIndex]);
+                    slugcat.SetPupAppearance(pup != 0);
+                    SlugcatGraphics graphics = new SlugcatGraphics(slugcat);
+                    AttentionSystem attention = new AttentionSystem();
+                    attention.SetTarget(AttentionKind.RandomPoint,
+                        slugcat.Center + new Vec2(50.0, 0.0));
+                    graphics.TriggerMeowAnimation(true);
+
+                    graphics.Step(attention, world);
+                    SlugcatPose delayed = graphics.BuildPose(1.0, attention);
+                    True(!delayed.Blink,
+                        ids[idIndex] + " waits one fixed tick for DLL's 33 ms timer");
+                    if (ids[idIndex] == SlugcatId.SpearMaster)
+                    {
+                        for (int segment = 0;
+                            segment < graphics.Tail.Segments.Length; segment++)
+                            Near(-slugcat.State.Facing * 2.0,
+                                graphics.Tail.Segments[segment].Velocity.X, 0.000001,
+                                "Spearmaster tail horizontal fling " + segment);
+                    }
+
+                    graphics.Step(attention, world);
+                    SlugcatPose pose = graphics.BuildPose(1.0, attention);
+                    True(pose.Blink, ids[idIndex] + " meow uses closed eyes");
+                    OriginalFaceState face = SpriteRenderer.ResolveOriginalFaceState(pose);
+                    True(face.FaceElement.StartsWith(pup != 0 ? "PFaceB" : "FaceB",
+                        StringComparison.Ordinal),
+                        ids[idIndex] + " selects its closed-eye face family");
+
+                    pose.BodyMode = BodyModeIndex.Stand;
+                    pose.InputX = 1;
+                    OriginalFaceState movingFace =
+                        SpriteRenderer.ResolveOriginalFaceState(pose);
+                    True(string.Equals((pup != 0 ? "PFaceB" : "FaceB") + "4",
+                        movingFace.FaceElement, StringComparison.Ordinal),
+                        ids[idIndex] + " moving meow uses closed-eye movement frame");
+                    True(movingFace.HeadElement.EndsWith("6",
+                        StringComparison.Ordinal),
+                        ids[idIndex] + " standing movement keeps head frame 6");
+                    Near(0.0, movingFace.FacePosition.X - movingFace.HeadPosition.X,
+                        0.000001,
+                        ids[idIndex] + " moving meow centers the face horizontally");
+                    True(string.Equals("StandMovement", movingFace.Reason,
+                        StringComparison.Ordinal),
+                        ids[idIndex] + " moving meow keeps movement face branch");
+
+                    pose.BodyMode = BodyModeIndex.Crawl;
+                    OriginalFaceState crawlingFace =
+                        SpriteRenderer.ResolveOriginalFaceState(pose);
+                    True(string.Equals((pup != 0 ? "PFaceB" : "FaceB") + "4",
+                        crawlingFace.FaceElement, StringComparison.Ordinal),
+                        ids[idIndex] + " crawling meow uses closed-eye movement frame");
+                    True(crawlingFace.HeadElement.EndsWith("7",
+                        StringComparison.Ordinal),
+                        ids[idIndex] + " crawl keeps head frame 7");
+                    Near(0.0, crawlingFace.FacePosition.X - crawlingFace.HeadPosition.X,
+                        0.000001,
+                        ids[idIndex] + " crawling meow centers the face horizontally");
+                    True(string.Equals("Crawl", crawlingFace.Reason,
+                        StringComparison.Ordinal),
+                        ids[idIndex] + " crawling meow keeps crawl face branch");
+                    if (ids[idIndex] == SlugcatId.SpearMaster)
+                    {
+                        True(pose.LookDirection.X > 0.5,
+                            "Spearmaster keeps normal attention while meowing");
+                    }
+                    else
+                    {
+                        True(pose.LookDirection.Y < -0.9,
+                            ids[idIndex] + " meow looks straight up");
+                        Near(-1.0, face.FacePosition.Y - face.HeadPosition.Y,
+                            0.000001,
+                            ids[idIndex] + " lifted face offset in desktop Y");
+                        Near(-1.0,
+                            movingFace.FacePosition.Y - movingFace.HeadPosition.Y,
+                            0.000001,
+                            ids[idIndex] + " moving meow keeps lifted face offset");
+                        Near(-1.0,
+                            crawlingFace.FacePosition.Y - crawlingFace.HeadPosition.Y,
+                            0.000001,
+                            ids[idIndex] + " crawling meow keeps lifted face offset");
+                    }
+
+                    for (int releaseTick = 0; releaseTick < 9; releaseTick++)
+                        graphics.Step(attention, world);
+                    SlugcatPose released = graphics.BuildPose(1.0, attention);
+                    True(!released.Blink,
+                        ids[idIndex] + " short meow blink ends without sticking");
+                    if (ids[idIndex] != SlugcatId.SpearMaster)
+                        True(released.LookDirection.X > 0.5,
+                            ids[idIndex] + " upward meow look releases on time");
+                }
+            }
+        }
+
+        private static void PushToMeowAnimatesStoppedSlugpupFace()
+        {
+            DesktopCollisionWorld world = new DesktopCollisionWorld(new WindowEnumerator());
+            world.RefreshFromSnapshots(new DesktopWindowSnapshot[0]);
+            MouseTracker mouse = new MouseTracker();
+            Slugcat slugcat = new Slugcat(new Vec2(240.0, 240.0), SlugcatId.White);
+            slugcat.SetPupAppearance(true);
+            slugcat.State.Grounded = true;
+            slugcat.State.Standing = true;
+            slugcat.State.BodyMode = BodyModeIndex.Stand;
+            DesktopPetAI ai = new DesktopPetAI(88241);
+            ai.SetCommand(DesktopPetCommand.Stop);
+            ai.Attention.SetTarget(AttentionKind.RandomPoint,
+                slugcat.Center + new Vec2(50.0, 0.0));
+            SlugcatGraphics graphics = new SlugcatGraphics(slugcat);
+
+            VirtualInput stoppedInput = ai.Step(slugcat, world, mouse);
+            True(stoppedInput.X == 0 && stoppedInput.Y == 0 &&
+                !stoppedInput.Jump && !stoppedInput.Throw,
+                "Stop command keeps locomotion neutral before the meow");
+            graphics.Step(ai.Attention, world);
+            OriginalFaceState awake = SpriteRenderer.ResolveOriginalFaceState(
+                graphics.BuildPose(1.0, ai.Attention));
+            True(awake.FaceElement.StartsWith("PFaceA", StringComparison.Ordinal),
+                "stopped Slugpup starts on its awake face family");
+
+            TestPushToMeowSource source = new TestPushToMeowSource();
+            PushToMeowController controller = new PushToMeowController(source, 9117);
+            controller.Step(slugcat, graphics, 0.5, controller.NextMeowTick);
+            True(source.ResolveCount == 1,
+                "automatic stopped-Slugpup meow resolves one voice");
+
+            graphics.Step(ai.Attention, world);
+            True(!graphics.BuildPose(1.0, ai.Attention).Blink,
+                "DLL 33 ms delay keeps the first fixed tick open");
+            graphics.Step(ai.Attention, world);
+            SlugcatPose meowingPose = graphics.BuildPose(1.0, ai.Attention);
+            OriginalFaceState meowing =
+                SpriteRenderer.ResolveOriginalFaceState(meowingPose);
+            True(meowingPose.Blink &&
+                meowing.FaceElement.StartsWith("PFaceB", StringComparison.Ordinal),
+                "stopped Slugpup switches to its closed-eye PFaceB family");
+            True(meowingPose.LookDirection.Y < -0.9,
+                "stopped Slugpup keeps Push To Meow's upward look");
+            True(ai.Command == DesktopPetCommand.Stop,
+                "facial animation does not release the Stop command");
+        }
+
+        private static void AudioAdmissionKeepsCharacterMovementDownpourAbilitiesAndMeows()
+        {
+            True(RainWorldAudioEngine.IsPermittedCharacterSound("Slugcat_Step_A"),
+                "footstep is a character movement sound");
+            True(RainWorldAudioEngine.IsPermittedCharacterSound("Slugcat_Wall_Jump"),
+                "jump is a character movement sound");
+            True(RainWorldAudioEngine.IsPermittedCharacterSound("Slugcat_Roll_LOOP"),
+                "roll loop is a character movement sound");
+            True(!RainWorldAudioEngine.IsPermittedCharacterSound("Slugcat_Skid_On_Ground_Init"),
+                "ground skid start is excluded from playback");
+            True(!RainWorldAudioEngine.IsPermittedCharacterSound("Slugcat_Skid_On_Ground_LOOP"),
+                "ground skid loop is excluded from playback");
+            True(!RainWorldAudioEngine.IsPermittedCharacterSound("Slugcat_Enter_Wall_Slide"),
+                "wall-slide entry is excluded from playback");
+            True(!RainWorldAudioEngine.IsPermittedCharacterSound("Slugcat_Wall_Slide_LOOP"),
+                "wall-slide loop is excluded from playback");
+            True(!RainWorldAudioEngine.IsPermittedCharacterSound("Slugcat_Belly_Slide_Init"),
+                "belly-slide start is excluded from playback");
+            True(!RainWorldAudioEngine.IsPermittedCharacterSound("Slugcat_Belly_Slide_LOOP"),
+                "belly-slide loop is excluded from playback");
+            True(RainWorldAudioEngine.IsPermittedCharacterSound("Slugcat_Floor_Impact_Standard"),
+                "floor landing impact is a character movement sound");
+            True(RainWorldAudioEngine.IsTerrainImpactSound(
+                "Slugcat_Terrain_Impact_Hard"),
+                "hard terrain impact receives priority playback");
+            True(RainWorldAudioEngine.IsPermittedCharacterSound("SlugcatMeowPupShort"),
+                "Push To Meow pup voice remains available");
+            True(RainWorldAudioEngine.IsPermittedCharacterSound("Fire_Spear_Explode"),
+                "Artificer explosion is a Downpour ability sound");
+            True(RainWorldAudioEngine.IsPermittedCharacterSound("SM_Spear_Pull"),
+                "Spearmaster needle pull is a Downpour ability sound");
+            True(RainWorldAudioEngine.IsPermittedCharacterSound("Slugcat_Throw_Spear"),
+                "Spearmaster spear throw is a Downpour ability sound");
+            True(RainWorldAudioEngine.IsPermittedCharacterSound("Spear_Stick_In_Wall"),
+                "Spearmaster-created spear impact is admitted");
+            True(RainWorldAudioEngine.IsPermittedCharacterSound("Tube_Worm_Shoot_Tongue"),
+                "Saint tongue launch is a Downpour ability sound");
+            True(!RainWorldAudioEngine.IsPermittedCharacterSound("Zapper_Zap"),
+                "unrelated world ability sound is excluded");
+            True(!RainWorldAudioEngine.IsPermittedCharacterSound("Tube_Worm_Tongue_Hit_Creature"),
+                "unsupported creature tongue interaction is excluded");
+            True(!RainWorldAudioEngine.IsPermittedCharacterSound("UI_Slugcat_Stunned_Init"),
+                "non-movement UI stun sound is excluded");
+        }
+
+        private static void SlugcatSoundCallsUseAudioSink()
+        {
+            RecordingSoundSink sink = new RecordingSoundSink();
+            Slugcat slugcat = new Slugcat(new Vec2(100.0, 100.0));
+            slugcat.SetAudioSink(sink, "test-source");
+            slugcat.EmitSound("Slugcat_Normal_Jump", slugcat.Center, 0.75, 1.1, 3);
+            slugcat.StartSoundLoop("Slugcat_Roll_LOOP", "roll", slugcat.Center, 0.5, 1.0);
+            slugcat.StopSoundLoop("Slugcat_Roll_LOOP", "roll", slugcat.Center);
+            Equal(1, sink.PlayCount, "one-shot event count");
+            Equal(1, sink.StartLoopCount, "loop start count");
+            Equal(1, sink.StopLoopCount, "loop stop count");
+            True(sink.LastSound != null && sink.LastSound.SourceId == "test-source",
+                "sound source identity");
+        }
+
+        private static void ExpandedMovementSoundsFollowOriginalStates()
+        {
+            DesktopCollisionWorld world = new DesktopCollisionWorld(new WindowEnumerator());
+            world.RefreshFromSnapshots(new DesktopWindowSnapshot[0]);
+
+            RecordingSoundSink skidSink = new RecordingSoundSink();
+            Slugcat skid = new Slugcat(new Vec2(100.0, 100.0));
+            skid.SetAudioSink(skidSink, "skid-source");
+            skid.BodyChunks[0].ContactFloor = true;
+            skid.BodyChunks[1].ContactFloor = true;
+            skid.BodyChunks[0].Velocity.X = 4.0;
+            skid.BodyChunks[1].Velocity.X = 4.0;
+            skid.State.BodyMode = BodyModeIndex.Stand;
+            skid.State.Standing = true;
+            skid.State.SlideDirection = 1;
+            skid.State.InitSlideCounter = 11;
+            skid.Movement.ApplyInput(new VirtualInput(-1, 0, false, false), world);
+            Equal(0, skidSink.PlayCount, "skid start stays silent");
+            Equal(0, skidSink.StartLoopCount, "skid loop stays silent");
+            skid.BodyChunks[0].ContactFloor = true;
+            skid.BodyChunks[1].ContactFloor = true;
+            skid.Movement.ApplyInput(VirtualInput.Neutral, world);
+            Equal(0, skidSink.StopLoopCount, "skid has no loop to stop");
+
+            RecordingSoundSink wallSink = new RecordingSoundSink();
+            Slugcat wall = new Slugcat(new Vec2(100.0, 100.0));
+            wall.SetAudioSink(wallSink, "wall-source");
+            wall.BodyChunks[0].ContactRight = true;
+            wall.BodyChunks[0].Velocity.Y = 0.5;
+            wall.Movement.ApplyInput(new VirtualInput(1, 0, false, false), world);
+            Equal(0, wallSink.PlayCount, "wall-slide entry stays silent");
+            Equal(0, wallSink.StartLoopCount, "wall-slide loop stays silent");
+            wall.BodyChunks[0].ContactRight = false;
+            wall.Movement.ApplyInput(VirtualInput.Neutral, world);
+            Equal(0, wallSink.StopLoopCount, "wall slide has no loop to stop");
+
+            RecordingSoundSink landingSink = new RecordingSoundSink();
+            Slugcat landing = new Slugcat(new Vec2(100.0, 100.0));
+            landing.SetAudioSink(landingSink, "landing-source");
+            landing.State.Standing = true;
+            landing.Movement.TerrainImpact(new TerrainImpactData
+            {
+                BodyChunkIndex = 1,
+                FirstContact = true,
+                ImpactDirection = new Vec2(0.0, -1.0),
+                ImpactSpeed = 10.0
+            });
+            Equal(1, landingSink.PlayCount, "landing sound count");
+            True(landingSink.LastSound != null &&
+                landingSink.LastSound.Id == "Slugcat_Floor_Impact_Standard",
+                "standing lower chunk selects the standard floor impact");
+            Near(2.0 / 3.0, landingSink.LastSound.Volume, 0.000001,
+                "floor impact volume follows Player's 8-to-11 inverse lerp");
+
+            RecordingSoundSink retainedContactSink = new RecordingSoundSink();
+            Slugcat retainedContact = new Slugcat(new Vec2(100.0, 100.0));
+            retainedContact.SetAudioSink(retainedContactSink, "retained-contact");
+            retainedContact.Movement.TerrainImpact(new TerrainImpactData
+            {
+                BodyChunkIndex = 0,
+                FirstContact = false,
+                ImpactDirection = new Vec2(1.0, 0.0),
+                ImpactSpeed = 20.0
+            });
+            Equal(1, retainedContactSink.PlayCount,
+                "high-speed retained wall contact still emits an impact");
+            True(retainedContactSink.LastSound != null &&
+                retainedContactSink.LastSound.Id == "Slugcat_Terrain_Impact_Hard",
+                "fast wall collision selects the hard impact sound");
+
+            RecordingSoundSink retainedBumpSink = new RecordingSoundSink();
+            Slugcat retainedBump = new Slugcat(new Vec2(100.0, 100.0));
+            retainedBump.SetAudioSink(retainedBumpSink, "retained-bump");
+            retainedBump.Movement.TerrainImpact(new TerrainImpactData
+            {
+                BodyChunkIndex = 0,
+                FirstContact = false,
+                ImpactDirection = new Vec2(1.0, 0.0),
+                ImpactSpeed = 10.0
+            });
+            Equal(0, retainedBumpSink.PlayCount,
+                "ordinary retained contact does not repeat impact audio");
+        }
+
+        private static void CrawlTurnDoesNotEmitFootstep()
+        {
+            DesktopCollisionWorld world = new DesktopCollisionWorld(new WindowEnumerator());
+            world.RefreshFromSnapshots(new DesktopWindowSnapshot[0]);
+            RecordingSoundSink sink = new RecordingSoundSink();
+            Slugcat slugcat = new Slugcat(new Vec2(100.0, 100.0));
+            slugcat.SetAudioSink(sink, "crawl-turn-source");
+            slugcat.BodyChunks[0].ContactFloor = true;
+            slugcat.BodyChunks[1].ContactFloor = true;
+            slugcat.State.BodyMode = BodyModeIndex.Crawl;
+            slugcat.State.Standing = false;
+            slugcat.State.Animation = AnimationIndex.CrawlTurn;
+            slugcat.State.AnimationFrame = 10;
+            slugcat.Movement.ApplyInput(new VirtualInput(-1, 0, false, false), world);
+            Equal(0, sink.PlayCount,
+                "CrawlTurn frame wrap must not emit a crawling or walking step");
+        }
+
+        private static void SlugpupAvailabilityFollowsMoreSlugcatsInstallMarker()
+        {
+            string root = Path.Combine(Path.GetTempPath(),
+                "slugcat-more-slugcats-test-" + Guid.NewGuid().ToString("N"));
+            try
+            {
+                RainWorldInstallation installation = new RainWorldInstallation(root);
+                True(!installation.HasMoreSlugcatsExpansion,
+                    "missing More Slugcats modinfo must disable Slugpup");
+
+                Directory.CreateDirectory(Path.GetDirectoryName(
+                    installation.MoreSlugcatsModInfoPath));
+                File.WriteAllText(installation.MoreSlugcatsModInfoPath,
+                    "{ \"id\": \"moreslugcats\" }");
+                True(installation.HasMoreSlugcatsExpansion,
+                    "canonical More Slugcats modinfo must enable Slugpup");
+            }
+            finally
+            {
+                if (Directory.Exists(root)) Directory.Delete(root, true);
+            }
+        }
+
         private static void RequiredBehaviorsExist()
         {
             string[] names =
@@ -2465,8 +3741,181 @@ namespace RainWorldDesktopPet.Tests
             slugcat.Movement.ApplyInput(input, world);
             True(slugcat.State.BodyMode == BodyModeIndex.WallClimb,
                 "movement must interpret climb VirtualInput without direct AI movement");
-            True(slugcat.BodyChunks[0].Velocity.Y >= 0.0 && slugcat.BodyChunks[1].Velocity.Y >= 0.0,
-                "wall slide must not inject upward screen-space velocity");
+            True(slugcat.BodyChunks[0].Velocity.Y + slugcat.BodyChunks[1].Velocity.Y >= 0.0,
+                "wall slide's standing support must not create net upward screen-space travel");
+        }
+
+        private static void WallClimbReleasesAfterIntentEnds()
+        {
+            Slugcat slugcat = new Slugcat(new Vec2(400.0, 400.0));
+            DesktopCollisionWorld world = new DesktopCollisionWorld(
+                new WindowEnumerator());
+            world.Refresh(IntPtr.Zero);
+            slugcat.BodyChunks[0].ContactRight = true;
+            slugcat.Movement.ApplyInput(new VirtualInput(1, 0, false, false),
+                world);
+            True(slugcat.State.BodyMode == BodyModeIndex.WallClimb,
+                "current matching wall input enters WallClimb");
+
+            slugcat.Movement.ApplyInput(VirtualInput.Neutral, world);
+            True(slugcat.State.BodyMode != BodyModeIndex.WallClimb,
+                "neutral horizontal input immediately releases WallClimb even while contact remains");
+
+            slugcat.State.BodyMode = BodyModeIndex.WallClimb;
+            slugcat.State.Facing = 1;
+            slugcat.BodyChunks[0].ContactRight = false;
+            slugcat.BodyChunks[0].PreviousContactRight = true;
+            slugcat.Movement.ApplyInput(new VirtualInput(1, 0, false, false),
+                world);
+            True(slugcat.State.BodyMode == BodyModeIndex.WallClimb,
+                "one previous-contact tick masks connection-solver wall flicker");
+            slugcat.BodyChunks[0].PreviousContactRight = false;
+            slugcat.Movement.ApplyInput(new VirtualInput(1, 0, false, false),
+                world);
+            True(slugcat.State.BodyMode != BodyModeIndex.WallClimb,
+                "stale directional input cannot preserve WallClimb without current or previous contact");
+
+            VirtualInput attachedNeutral =
+                DesktopPetAI.ComposeAttachedSaintInput(VirtualInput.Neutral, -1);
+            Equal(0, attachedNeutral.X,
+                "attached Saint does not invent horizontal wall input");
+            Equal(-1, attachedNeutral.Y,
+                "attached Saint still controls tongue shortening");
+            VirtualInput attachedMoving = DesktopPetAI.ComposeAttachedSaintInput(
+                new VirtualInput(-1, 0, false, false), 0);
+            Equal(-1, attachedMoving.X,
+                "attached Saint preserves an active horizontal movement intent");
+        }
+
+        private static void WallClimbRenderPoseReleasesSmoothly()
+        {
+            Slugcat slugcat = new Slugcat(new Vec2(400.0, 400.0));
+            DesktopCollisionWorld world = new DesktopCollisionWorld(
+                new WindowEnumerator());
+            world.Refresh(IntPtr.Zero);
+            slugcat.State.Facing = 1;
+            slugcat.State.BodyMode = BodyModeIndex.WallClimb;
+            slugcat.BodyChunks[0].ContactRight = true;
+            slugcat.BodyChunks[1].ContactRight = true;
+            SlugcatGraphics graphics = new SlugcatGraphics(slugcat);
+            AttentionSystem attention = new AttentionSystem();
+
+            graphics.Step(attention, world);
+            SlugcatPose pose = graphics.BuildPose(1.0, attention);
+            Vec2 wallChest = pose.Chest;
+            Near(1.0, pose.WallClimbBlend, 0.000001,
+                "active WallClimb uses the complete authored wall pose");
+
+            slugcat.State.BodyMode = BodyModeIndex.Default;
+            double previousBlend = 1.0;
+            for (int tick = 1; tick <= 5; tick++)
+            {
+                graphics.Step(attention, world);
+                pose = graphics.BuildPose(1.0, attention);
+                double expectedBlend = Math.Max(0.0,
+                    1.0 - tick * SlugcatGraphics.WallClimbReleasePerTick);
+                Near(expectedBlend, pose.WallClimbBlend, 0.000001,
+                    "wall render blend follows its five-tick release at tick " + tick);
+                True(pose.WallClimbBlend <= previousBlend,
+                    "wall render blend must not rise after logical release");
+                True(pose.BodyMode == BodyModeIndex.Default,
+                    "render smoothing must not retain the logical WallClimb state");
+                previousBlend = pose.WallClimbBlend;
+
+                if (tick == 1)
+                {
+                    Vec2 directChest = slugcat.BodyChunks[0].Position;
+                    double completeJump = Vec2.Distance(wallChest, directChest);
+                    double smoothedJump = Vec2.Distance(wallChest, pose.Chest);
+                    True(smoothedJump > 0.000001 && smoothedJump < completeJump,
+                        "the first release tick must advance toward, not snap to, the next pose");
+                    True(SpriteRenderer.IsVisualWallClimb(pose),
+                        "wall legs and arm orientation stay coherent during release");
+                }
+            }
+
+            Near(0.0, pose.WallClimbBlend, 0.000001,
+                "wall render blend reaches the next pose after five ticks");
+            True(!SpriteRenderer.IsVisualWallClimb(pose),
+                "wall sprite selection ends only after the body transition completes");
+        }
+
+        private static void OriginalBlockedWallPoseAppliesToSlugcatAndSlugpup()
+        {
+            MonitorInfo monitor = new MonitorInfo("WALL-POSE-MONITOR",
+                new Rectangle(0, 0, 1200, 900), new Rectangle(0, 0, 1200, 850), true);
+            DesktopCollisionWorld world = CreateSyntheticWorld(
+                new[] { monitor }, new DesktopWindowSnapshot[0]);
+            double wall = DesktopWorldTransform.ToSimulationLength(monitor.Bounds.Right);
+            double floor = DesktopWorldTransform.ToSimulationLength(monitor.FloorY);
+
+            foreach (bool renderAsPup in new[] { false, true })
+            {
+                Slugcat slugcat = new Slugcat(new Vec2(400.0, 400.0));
+                slugcat.SetPupAppearance(renderAsPup);
+                slugcat.Reposition(new Vec2(wall - SimulationConstants.HipsChunkRadius,
+                    floor - SimulationConstants.HipsChunkRadius));
+                slugcat.State.BodyMode = BodyModeIndex.Stand;
+                // Reproduce the ordinary standing-to-crawl transition that can
+                // already be active when the pet reaches the monitor edge.
+                // WallClimb must replace it rather than letting the pet fold
+                // down while it keeps pressing into the wall.
+                slugcat.State.Animation = AnimationIndex.DownOnFours;
+
+                // This runs the real desktop order: body chunks resolve against
+                // both the ground and the right monitor wall before the source
+                // Player.MovementUpdate-equivalent receives horizontal input.
+                // The wall contact must remain continuous; losing it for even one
+                // tick would alternate the rendered Stand and WallClimb poses.
+                for (int tick = 0; tick < 24; tick++)
+                {
+                    slugcat.Step(new VirtualInput(1, 0, false, false), world,
+                        Vec2.Zero, Vec2.Zero);
+                    True(slugcat.State.BodyMode == BodyModeIndex.WallClimb,
+                        "blocked-wall body mode must not flicker at tick " + tick +
+                        " chest=" + slugcat.BodyChunks[0].Position +
+                        " hips=" + slugcat.BodyChunks[1].Position +
+                        " chestRight=" + slugcat.BodyChunks[0].ContactRight +
+                        " hipsRight=" + slugcat.BodyChunks[1].ContactRight);
+                    True(slugcat.State.Animation == AnimationIndex.None,
+                        "blocked-wall pose must cancel DownOnFours at tick " + tick);
+                }
+                Vec2 originalChest = slugcat.BodyChunks[0].Position;
+                Vec2 originalHips = slugcat.BodyChunks[1].Position;
+
+                SlugcatGraphics graphics = new SlugcatGraphics(slugcat);
+                AttentionSystem attention = new AttentionSystem();
+                graphics.Step(attention, world);
+                SlugcatPose pose = graphics.BuildPose(1.0, attention);
+                True(pose.BodyMode == BodyModeIndex.WallClimb,
+                    "render pose should retain the wall-climb body mode");
+                True(pose.RenderAsPup == renderAsPup,
+                    "wall pose must preserve the selected adult or pup render state");
+
+                Vec2 expectedChest = originalHips - new Vec2(0.0,
+                    slugcat.EffectiveBodyConnectionDistance);
+                if (renderAsPup)
+                    expectedChest = Vec2.Lerp(expectedChest, originalHips, 0.475);
+                double wallOffset = slugcat.BodyChunks[1].ContactFloor ? 3.0 : 5.0;
+                expectedChest += new Vec2(-wallOffset, -2.0);
+                Near(expectedChest.X, pose.Chest.X, 0.000001,
+                    "wall pose chest x follows PlayerGraphics for the selected render state");
+                Near(expectedChest.Y, pose.Chest.Y, 0.000001,
+                    "wall pose chest y follows PlayerGraphics for the selected render state");
+                True(pose.Chest.Y < pose.Hips.Y,
+                    "blocked-wall render pose must keep the chest above the hips");
+                True(graphics.Arms[0].TargetPosition.X > slugcat.BodyChunks[0].Position.X &&
+                    graphics.Arms[1].TargetPosition.X > slugcat.BodyChunks[0].Position.X,
+                    "both original wall-pose hands should stay on the contacted wall");
+            }
+
+            Slugcat oppositeInput = new Slugcat(new Vec2(400.0, 400.0));
+            oppositeInput.Reposition(new Vec2(wall - SimulationConstants.HipsChunkRadius,
+                floor - SimulationConstants.HipsChunkRadius));
+            oppositeInput.Step(new VirtualInput(-1, 0, false, false), world,
+                Vec2.Zero, Vec2.Zero);
+            True(oppositeInput.State.BodyMode != BodyModeIndex.WallClimb,
+                "opposite horizontal input must not select the contacted-wall pose");
         }
 
         private static void OriginalFaceFrameSelection()
@@ -2562,6 +4011,47 @@ namespace RainWorldDesktopPet.Tests
             True(state.FaceElement == "FaceDead", "dead face element");
         }
 
+        private static void OriginalLookDirectionUsesRenderInterpolationOnly()
+        {
+            Slugcat slugcat = new Slugcat(new Vec2(300.0, 300.0));
+            SlugcatGraphics graphics = new SlugcatGraphics(slugcat);
+            DesktopCollisionWorld world = new DesktopCollisionWorld(new WindowEnumerator());
+            AttentionSystem attention = new AttentionSystem();
+
+            Vec2 firstTarget = graphics.Head.Position + new Vec2(200.0, 0.0);
+            attention.SetTarget(AttentionKind.Mouse, firstTarget);
+            attention.Step();
+            graphics.Step(attention, world);
+            Vec2 previousLook = graphics.BuildPose(1.0, attention).LookDirection;
+
+            Vec2 headAtLookUpdate = graphics.Head.Position;
+            Vec2 secondTarget = headAtLookUpdate + new Vec2(0.0, -200.0);
+            attention.SetTarget(AttentionKind.Mouse, secondTarget);
+            attention.Step();
+            True(Vec2.Distance(attention.Smoothed, secondTarget) > 1.0,
+                "test setup must retain a lagging smoothed attention point");
+
+            Vec2 expectedCurrent = (secondTarget - headAtLookUpdate).Normalized;
+            graphics.Step(attention, world);
+            Vec2 atPreviousTick = graphics.BuildPose(0.0, attention).LookDirection;
+            Vec2 halfway = graphics.BuildPose(0.5, attention).LookDirection;
+            Vec2 atCurrentTick = graphics.BuildPose(1.0, attention).LookDirection;
+
+            Near(previousLook.X, atPreviousTick.X, 0.000001,
+                "timeStacker zero keeps last look x");
+            Near(previousLook.Y, atPreviousTick.Y, 0.000001,
+                "timeStacker zero keeps last look y");
+            Near(expectedCurrent.X, atCurrentTick.X, 0.000001,
+                "current logic tick follows the raw target x without extra smoothing");
+            Near(expectedCurrent.Y, atCurrentTick.Y, 0.000001,
+                "current logic tick follows the raw target y without extra smoothing");
+            Vec2 expectedHalfway = Vec2.Lerp(previousLook, expectedCurrent, 0.5);
+            Near(expectedHalfway.X, halfway.X, 0.000001,
+                "draw interpolation blends the last and current look x");
+            Near(expectedHalfway.Y, halfway.Y, 0.000001,
+                "draw interpolation blends the last and current look y");
+        }
+
         private static void WallClimbHandsTargetTheWall()
         {
             DesktopCollisionWorld world = new DesktopCollisionWorld(new WindowEnumerator());
@@ -2579,9 +4069,11 @@ namespace RainWorldDesktopPet.Tests
                 "both wall-climb hands should target the contacted wall side");
             True(graphics.Arms[1].TargetPosition.X > slugcat.BodyChunks[0].Position.X,
                 "both wall-climb hands should target the contacted wall side");
-            Near(slugcat.BodyChunks[0].Position.Y - 3.0, graphics.Arms[0].TargetPosition.Y, 0.000001,
+            double wallChestY = slugcat.BodyChunks[1].Position.Y -
+                slugcat.EffectiveBodyConnectionDistance - 2.0;
+            Near(wallChestY - 3.0, graphics.Arms[0].TargetPosition.Y, 0.000001,
                 "upper wall hand offset");
-            Near(slugcat.BodyChunks[0].Position.Y + 7.0, graphics.Arms[1].TargetPosition.Y, 0.000001,
+            Near(wallChestY + 7.0, graphics.Arms[1].TargetPosition.Y, 0.000001,
                 "lower wall hand offset");
         }
 
@@ -2605,7 +4097,7 @@ namespace RainWorldDesktopPet.Tests
                 "right sleep hand target");
         }
 
-        private static void MovingWindowWallCarriesClimber()
+        private static void MovingWindowDeltaRemainsCollisionMetadata()
         {
             DesktopCollisionWorld world = new DesktopCollisionWorld(new WindowEnumerator());
             List<DesktopWindowSnapshot> snapshots = new List<DesktopWindowSnapshot>();
@@ -2624,20 +4116,6 @@ namespace RainWorldDesktopPet.Tests
             Near(20.0 / 2.2, wallDelta.X, 0.000001, "translated left-wall x delta");
             Near(30.0 / 2.2, wallDelta.Y, 0.000001, "translated left-wall y delta");
 
-            Slugcat slugcat = new Slugcat(new Vec2(80.0, 180.0));
-            slugcat.State.BodyMode = BodyModeIndex.WallClimb;
-            slugcat.BodyChunks[0].WallSurfaceId = 4321;
-            slugcat.BodyChunks[0].WallSurfaceKind = DesktopSurfaceKind.WindowLeftWall;
-            Vec2 chestBefore = slugcat.BodyChunks[0].Position;
-            Vec2 hipsBefore = slugcat.BodyChunks[1].Position;
-            Vec2 applied = slugcat.ApplyMovingSurfaceDelta(world);
-            Near(20.0 / 2.2, applied.X, 0.000001, "applied wall x delta");
-            Near(30.0 / 2.2, applied.Y, 0.000001, "applied wall y delta");
-            Near(0.0, Vec2.Distance(chestBefore + applied, slugcat.BodyChunks[0].Position), 0.000001,
-                "climbing chest follows wall");
-            Near(0.0, Vec2.Distance(hipsBefore + applied, slugcat.BodyChunks[1].Position), 0.000001,
-                "climbing hips follows wall");
-
             snapshots[0].Bounds = Rectangle.FromLTRB(140, 130, 320, 330);
             world.RefreshFromSnapshots(snapshots);
             Near(0.0, world.GetSurfaceMovement(4321, DesktopSurfaceKind.WindowTop).X, 0.000001,
@@ -2648,7 +4126,7 @@ namespace RainWorldDesktopPet.Tests
                 "left-edge resize leaves the right wall fixed");
         }
 
-        private static void MovingWindowCarriesConnectedBody()
+        private static void MovingWindowDoesNotCarryConnectedBody()
         {
             Rectangle work = System.Windows.Forms.Screen.PrimaryScreen.WorkingArea;
             Vec2[] movements =
@@ -2660,7 +4138,6 @@ namespace RainWorldDesktopPet.Tests
             for (int movement = 0; movement < movements.Length; movement++)
             {
                 Vec2 desktopDelta = movements[movement];
-                Vec2 delta = DesktopWorldTransform.ToSimulationDelta(desktopDelta);
                 int left = work.Left + work.Width / 3;
                 int top = work.Top + Math.Max(180, work.Height / 3);
                 DesktopCollisionWorld world = new DesktopCollisionWorld(new WindowEnumerator());
@@ -2687,12 +4164,10 @@ namespace RainWorldDesktopPet.Tests
                     left + (int)desktopDelta.X, top + (int)desktopDelta.Y,
                     left + 300 + (int)desktopDelta.X, top + 180 + (int)desktopDelta.Y);
                 world.RefreshFromSnapshots(snapshots);
-                Vec2 applied = slugcat.ApplyMovingSurfaceDelta(world);
-                Near(0.0, Vec2.Distance(delta, applied), 0.000001, "platform delta " + movement);
-                Near(0.0, Vec2.Distance(chestBefore + delta, slugcat.BodyChunks[0].Position),
-                    0.000001, "chest carry " + movement);
-                Near(0.0, Vec2.Distance(hipsBefore + delta, slugcat.BodyChunks[1].Position),
-                    0.000001, "hips carry " + movement);
+                Near(0.0, Vec2.Distance(chestBefore, slugcat.BodyChunks[0].Position),
+                    0.000001, "window movement does not carry chest " + movement);
+                Near(0.0, Vec2.Distance(hipsBefore, slugcat.BodyChunks[1].Position),
+                    0.000001, "window movement does not carry hips " + movement);
                 Near(connectionBefore, Vec2.Distance(slugcat.BodyChunks[0].Position,
                     slugcat.BodyChunks[1].Position), 0.000001, "body integrity " + movement);
             }
@@ -3320,6 +4795,19 @@ namespace RainWorldDesktopPet.Tests
                     True(set.TryGet("FaceC" + i, out face), "Artificer right face " + i);
                     True(set.TryGet("FaceD" + i, out face), "Artificer left face " + i);
                     True(set.TryGet("FaceE" + i, out face), "Sofanthiel face " + i);
+                    True(set.TryGet("PFaceA" + i, out face), "original slugpup awake face " + i);
+                    True(face.Atlas.ImagePath.EndsWith("#rainworldmsc",
+                        StringComparison.OrdinalIgnoreCase), "PFaceA uses the installed MSC atlas");
+                    True(set.TryGet("PFaceB" + i, out face), "original slugpup blink face " + i);
+                    True(face.Atlas.ImagePath.EndsWith("#rainworldmsc",
+                        StringComparison.OrdinalIgnoreCase), "PFaceB uses the installed MSC atlas");
+                }
+                for (int i = 0; i < 18; i++)
+                {
+                    AtlasSprite head;
+                    True(set.TryGet("HeadC" + i, out head), "original slugpup head " + i);
+                    True(head.Atlas.ImagePath.EndsWith("#rainworldmsc",
+                        StringComparison.OrdinalIgnoreCase), "HeadC uses the installed MSC atlas");
                 }
                 AtlasSprite specialFace;
                 True(set.TryGet("FaceDead", out specialFace), "dead face element");
@@ -3554,6 +5042,319 @@ namespace RainWorldDesktopPet.Tests
                 "Saint head uses HeadB in every movement state");
             True(state.FaceElement.StartsWith("FaceB", StringComparison.Ordinal),
                 "Saint normal face uses the closed-eye FaceB family");
+        }
+
+        private static void RaisedWindowPlatformRetainsSupportedChunk()
+        {
+            MonitorInfo monitor = new MonitorInfo("RAISED-WINDOW-MONITOR",
+                new Rectangle(0, 0, 1600, 1000),
+                new Rectangle(0, 0, 1600, 960), true);
+            long id = 97401;
+            Rectangle initial = Rectangle.FromLTRB(300, 400, 760, 680);
+            DesktopCollisionWorld world = CreateSyntheticWorld(
+                new[] { monitor }, new[] { Window(id, initial) });
+            DesktopSurface top = world.Surfaces.First(surface =>
+                surface.Id == id && surface.Kind == DesktopSurfaceKind.WindowTop);
+            Equal(SimulationConstants.WindowPlatformThicknessDesktopPixels,
+                top.Bounds.Height, "window platform collision thickness");
+
+            double centerX = DesktopWorldTransform.ToSimulationLength(500.0);
+            BodyChunk chunk = new BodyChunk(0, new Vec2(centerX,
+                top.Top - SimulationConstants.HipsChunkRadius),
+                SimulationConstants.HipsChunkRadius,
+                SimulationConstants.HipsChunkMass);
+            chunk.ContactFloor = true;
+            chunk.SupportingSurfaceId = id;
+            chunk.SupportingSurfaceKind = DesktopSurfaceKind.WindowTop;
+            chunk.SupportingSurfaceTop = top.Top;
+            chunk.Velocity = new Vec2(0.0, -1.2);
+            Vec2 beforeWindowMove = chunk.Position;
+
+            Rectangle raised = new Rectangle(initial.X, initial.Y - 24,
+                initial.Width, initial.Height);
+            world.BeginLiveWindowTranslationBatch();
+            True(world.ApplyLiveWindowTranslation(new IntPtr(id), raised) ==
+                LiveWindowTranslationResult.Applied,
+                "raised HWND should use the translation-only collision path");
+            Near(0.0, Vec2.Distance(beforeWindowMove, chunk.Position), 0.000001,
+                "moving the collision box must not directly translate the chunk");
+
+            chunk.BeginTick();
+            chunk.Integrate(SimulationConstants.GravityPerTick,
+                SimulationConstants.AirFriction);
+            True(chunk.Velocity.Y < -0.01,
+                "precondition: original floor gate would reject this rising chunk");
+            world.Resolve(chunk);
+
+            DesktopSurface raisedTop = world.Surfaces.First(surface =>
+                surface.Id == id && surface.Kind == DesktopSurfaceKind.WindowTop);
+            True(chunk.ContactFloor && chunk.SupportingSurfaceId == id,
+                "the raised platform should retain physical support");
+            Near(raisedTop.Top - chunk.Radius, chunk.Position.Y, 0.000001,
+                "collision response places the chunk on the raised top surface");
+            Near(0.0, chunk.Velocity.Y, 0.000001,
+                "raised-platform contact removes the separating vertical velocity");
+        }
+
+        private static void LiveWindowEventTrackerStaysBounded()
+        {
+            WindowLocationChangeTracker tracker = new WindowLocationChangeTracker();
+            IntPtr[] drained = new IntPtr[WindowLocationChangeTracker.Capacity];
+            for (int i = 0; i < 10000; i++)
+            {
+                IntPtr handle = new IntPtr(1000 +
+                    (i % (WindowLocationChangeTracker.Capacity * 4)));
+                tracker.Record(handle);
+                tracker.Record(handle);
+            }
+
+            Equal(WindowLocationChangeTracker.Capacity, tracker.Drain(drained),
+                "an event storm must remain inside the fixed HWND buffer");
+            Equal(0, tracker.Drain(drained),
+                "draining should reuse the same array without retained entries");
+        }
+
+        private static void LiveWindowTranslationsAreIncremental()
+        {
+            MonitorInfo monitor = new MonitorInfo("LIVE-MONITOR",
+                new Rectangle(0, 0, 1600, 1000), new Rectangle(0, 0, 1600, 960), true);
+            long id = 97501;
+            Rectangle initial = Rectangle.FromLTRB(300, 320, 700, 600);
+            DesktopWindowSnapshot window = Window(id, initial);
+            DesktopCollisionWorld world = CreateSyntheticWorld(
+                new[] { monitor }, new[] { window });
+            DesktopCollisionSnapshot originalSnapshot = world.CurrentSnapshot;
+            DesktopSurface top = world.Surfaces.First(surface =>
+                surface.Id == id && surface.Kind == DesktopSurfaceKind.WindowTop);
+            Rectangle originalSurfaceBounds = top.Bounds;
+            Slugcat slugcat = new Slugcat(new Vec2(
+                DesktopWorldTransform.ToSimulationLength(initial.Left + 200),
+                DesktopWorldTransform.ToSimulationLength(initial.Top) -
+                    SimulationConstants.HipsChunkRadius));
+            slugcat.BodyChunks[0].SupportingSurfaceId = id;
+            slugcat.BodyChunks[1].SupportingSurfaceId = id;
+            Vec2 start = slugcat.Center;
+
+            Rectangle current = initial;
+            const int steps = 12;
+            for (int step = 1; step <= steps; step++)
+            {
+                Rectangle next = new Rectangle(current.X + 3, current.Y + 2,
+                    current.Width, current.Height);
+                world.BeginLiveWindowTranslationBatch();
+                True(world.ApplyLiveWindowTranslation(new IntPtr(id), next) ==
+                    LiveWindowTranslationResult.Applied,
+                    "translation-only WinEvent should take the lightweight path");
+                current = next;
+            }
+
+            True(ReferenceEquals(originalSnapshot, world.CurrentSnapshot),
+                "translation events must reuse the published snapshot and surface list");
+            Equal(originalSurfaceBounds.X + steps * 3, top.Bounds.X,
+                "window top follows every live X increment");
+            Equal(originalSurfaceBounds.Y + steps * 2, top.Bounds.Y,
+                "window top follows every live Y increment");
+            Near(0.0, Vec2.Distance(start, slugcat.Center), 0.000001,
+                "live collision-box movement must not translate the Slugcat");
+
+            window.Bounds = current;
+            world.RefreshFromSnapshots(new[] { window }, new[] { monitor });
+            Near(0.0, world.GetSurfaceMovement(id).Length, 0.000001,
+                "the periodic refresh sees no residual delta after live tracking");
+
+            DesktopSurface rebuiltTop = world.Surfaces.First(surface =>
+                surface.Id == id && surface.Kind == DesktopSurfaceKind.WindowTop);
+            Rectangle beforeResize = rebuiltTop.Bounds;
+            world.BeginLiveWindowTranslationBatch();
+            Rectangle resized = new Rectangle(current.X, current.Y,
+                current.Width + 20, current.Height);
+            True(world.ApplyLiveWindowTranslation(new IntPtr(id), resized) ==
+                LiveWindowTranslationResult.RequiresFullRefresh,
+                "resize and topology changes must fall back to full enumeration");
+            True(rebuiltTop.Bounds == beforeResize,
+                "the lightweight path must not approximate a resize as translation");
+        }
+
+        private static void SlugpupUsesOriginalAtlasFamilies()
+        {
+            SlugcatPose pose = new SlugcatPose
+            {
+                Chest = new Vec2(0.0, 0.0),
+                Hips = new Vec2(0.0, 17.0),
+                Head = new Vec2(0.0, -8.0),
+                Facing = 1,
+                Conscious = true,
+                LookDirection = Vec2.Right,
+                RenderAsPup = true
+            };
+            OriginalFaceState state = SpriteRenderer.ResolveOriginalFaceState(pose);
+            True(state.HeadElement.StartsWith("HeadC", StringComparison.Ordinal),
+                "PlayerGraphics.RenderAsPup selects HeadC");
+            True(state.FaceElement.StartsWith("PFaceA", StringComparison.Ordinal),
+                "PlayerGraphics.DefaultFaceSprite selects PFaceA while awake");
+            pose.Blink = true;
+            state = SpriteRenderer.ResolveOriginalFaceState(pose);
+            True(state.HeadElement.StartsWith("HeadC", StringComparison.Ordinal),
+                "blink does not replace the slugpup HeadC family");
+            True(state.FaceElement.StartsWith("PFaceB", StringComparison.Ordinal),
+                "PlayerGraphics.DefaultFaceSprite selects PFaceB while blinking");
+            pose.Blink = false;
+            pose.SelectedSlugcat = SlugcatId.White;
+            pose.CurrentSkin = SlugcatSkin.Saint;
+            state = SpriteRenderer.ResolveOriginalFaceState(pose);
+            True(state.FaceElement.StartsWith("PFaceB", StringComparison.Ordinal),
+                "PlayerGraphics.SaintFaceCondition keeps a Saint-skin slugpup's eyes closed");
+
+            pose.CurrentSkin = SlugcatSkin.Artificer;
+            state = SpriteRenderer.ResolveOriginalFaceState(pose);
+            True(state.FaceElement.StartsWith("PFaceA", StringComparison.Ordinal),
+                "PlayerGraphics keeps an awake Artificer slugpup on PFaceA, not FaceC or FaceD");
+            pose.Blink = true;
+            state = SpriteRenderer.ResolveOriginalFaceState(pose);
+            True(state.FaceElement.StartsWith("PFaceB", StringComparison.Ordinal),
+                "PlayerGraphics keeps a blinking Artificer slugpup on PFaceB");
+
+            pose.Conscious = false;
+            state = SpriteRenderer.ResolveOriginalFaceState(pose);
+            True(state.FaceElement == "FaceStunned",
+                "PlayerGraphics keeps the shared stunned face for a slugpup");
+        }
+
+        private static void DmsSlugpupAliasesUseGenericFrames()
+        {
+            SlugcatPose pose = new SlugcatPose
+            {
+                OriginalSlugcatId = "Saint",
+                RenderAsPup = true
+            };
+            True(string.Equals("Slugpup", SpriteRenderer.ResolveDmsSlugcatId(pose),
+                StringComparison.Ordinal), "a pup uses DMS's Slugpup replacement-map identity");
+            True(string.Equals("HeadA17", DmsSpriteGroups.ToGenericElement("HeadC17", "Slugpup"),
+                StringComparison.Ordinal), "DMS maps the original HeadC family to its generic HeadA sheet");
+            True(string.Equals("FaceA8", DmsSpriteGroups.ToGenericElement("PFaceA8", "Slugpup"),
+                StringComparison.Ordinal), "DMS maps the awake PFaceA family to its generic FaceA sheet");
+            True(string.Equals("FaceB6", DmsSpriteGroups.ToGenericElement("PFaceB6", "Slugpup"),
+                StringComparison.Ordinal), "DMS maps the closed-eye PFaceB family to its generic FaceB sheet");
+
+            pose.RenderAsPup = false;
+            True(string.Equals("Saint", SpriteRenderer.ResolveDmsSlugcatId(pose),
+                StringComparison.Ordinal), "adult rendering retains its selected DMS character identity");
+        }
+
+        private static void SlugpupGeometryMatchesPlayerGraphics()
+        {
+            Slugcat slugcat = new Slugcat(Vec2.Zero, SlugcatId.White);
+            double adultChestRadius = slugcat.BodyChunks[0].Radius;
+            double adultHipsRadius = slugcat.BodyChunks[1].Radius;
+            slugcat.SetPupAppearance(true);
+            Near(12.0, slugcat.BodyConnection.Distance, 0.000001,
+                "Player.setPupStatus uses a 12-unit BodyChunkConnection");
+            Near(adultChestRadius, slugcat.BodyChunks[0].Radius, 0.000001,
+                "Player.setPupStatus does not rescale the chest BodyChunk");
+            Near(adultHipsRadius, slugcat.BodyChunks[1].Radius, 0.000001,
+                "Player.setPupStatus does not rescale the hips BodyChunk");
+
+            ProceduralTail tail = new ProceduralTail(Vec2.Zero,
+                SlugcatGraphicsProfiles.White.Tail);
+            double adultRadius = tail.Segments[0].Radius;
+            double adultLength = tail.Segments[0].Length;
+            tail.SetPupGeometry(true, Vec2.Zero);
+            Near(adultRadius, tail.Segments[0].Radius, 0.000001,
+                "PlayerGraphics keeps the normal pup tail radius");
+            Near(adultLength * 0.5, tail.Segments[0].Length, 0.000001,
+                "PlayerGraphics halves the pup tail connection length");
+        }
+
+        private static void SlugpupDrawPoseMatchesPlayerGraphics()
+        {
+            DesktopCollisionWorld world = new DesktopCollisionWorld(new WindowEnumerator());
+            world.Refresh(IntPtr.Zero);
+            Slugcat slugcat = new Slugcat(new Vec2(320.0, 220.0), SlugcatId.White);
+            slugcat.SetPupAppearance(true);
+            slugcat.State.BodyMode = BodyModeIndex.Stand;
+            slugcat.State.AnimationFrame = 0;
+            slugcat.State.Facing = 1;
+            Vec2 rawChest = slugcat.BodyChunks[0].Position;
+            Vec2 rawHips = slugcat.BodyChunks[1].Position;
+            AttentionSystem attention = new AttentionSystem();
+            attention.SetTarget(AttentionKind.RandomPoint,
+                rawChest + new Vec2(0.0, -7.0));
+            SlugcatGraphics graphics = new SlugcatGraphics(slugcat);
+            graphics.Step(attention, world);
+            SlugcatPose pose = graphics.BuildPose(1.0, attention, 1, false);
+
+            // PlayerGraphics.Update: Lerp(chest, hips,
+            // 0.35 + (0.25 - 0.5 * 0.25)), then the RenderAsPup Stand offsets.
+            Vec2 expectedChest = Vec2.Lerp(rawChest, rawHips, 0.475) +
+                new Vec2(0.0, -1.5);
+            Vec2 expectedHips = rawHips + new Vec2(-0.375, -2.0);
+            Near(0.0, Vec2.Distance(expectedChest, pose.Chest), 0.000001,
+                "pup compact upper-body draw position");
+            Near(0.0, Vec2.Distance(expectedHips, pose.Hips), 0.000001,
+                "pup compact lower-body draw position");
+            Near(0.5, pose.VisualBodyScaleY, 0.000001,
+                "PlayerGraphics.InitiateSprites halves the RenderAsPup BodyA height");
+            True(pose.Chest.Y > rawChest.Y,
+                "pup draw chest moves down toward the hips instead of retaining adult height");
+        }
+
+        private static void SlugpupHipsIgnoreDesktopAttention()
+        {
+            DesktopCollisionWorld world = new DesktopCollisionWorld(new WindowEnumerator());
+            world.Refresh(IntPtr.Zero);
+            Slugcat slugcat = new Slugcat(new Vec2(320.0, 220.0), SlugcatId.White);
+            slugcat.SetPupAppearance(true);
+            slugcat.State.BodyMode = BodyModeIndex.Stand;
+            slugcat.State.AnimationFrame = 0;
+            slugcat.State.Facing = 1;
+            Vec2 rawChest = slugcat.BodyChunks[0].Position;
+            Vec2 rawHips = slugcat.BodyChunks[1].Position;
+            AttentionSystem attention = new AttentionSystem();
+            attention.SetTarget(AttentionKind.Mouse, rawChest + new Vec2(40.0, -7.0));
+            attention.Step();
+            SlugcatGraphics graphics = new SlugcatGraphics(slugcat);
+            graphics.Step(attention, world);
+            SlugcatPose pose = graphics.BuildPose(1.0, attention, 1, false);
+
+            // PlayerGraphics only offsets drawPositions for an actual in-room
+            // object relationship. Desktop mouse attention may move the head,
+            // but must not pull the body anchor that drives the Hips sprite.
+            Vec2 expectedChest = Vec2.Lerp(rawChest, rawHips, 0.475) +
+                new Vec2(0.0, -1.5);
+            Vec2 expectedHips = rawHips + new Vec2(-0.375, -2.0);
+            Near(0.0, Vec2.Distance(expectedChest, pose.Chest), 0.000001,
+                "attention leaves the compact pup chest anchor unchanged");
+            Near(0.0, Vec2.Distance(expectedHips, pose.Hips), 0.000001,
+                "attention leaves the compact pup hips anchor unchanged");
+        }
+
+        private static void SlugpupHeldItemsUseOriginalHandAnchor()
+        {
+            DesktopCollisionWorld world = new DesktopCollisionWorld(new WindowEnumerator());
+            world.Refresh(IntPtr.Zero);
+            Slugcat slugcat = new Slugcat(new Vec2(320.0, 220.0), SlugcatId.White);
+            slugcat.SetPupAppearance(true);
+            slugcat.State.BodyMode = BodyModeIndex.Stand;
+            slugcat.State.Facing = -1;
+            slugcat.State.Grounded = true;
+            SlugcatGraphics graphics = new SlugcatGraphics(slugcat);
+            DesktopFoodManager manager = new DesktopFoodManager(7029);
+            AttentionSystem attention = new AttentionSystem();
+            VirtualInput input;
+
+            True(manager.TryAddDangleFruit(slugcat.Center + new Vec2(8.0, 0.0)) &&
+                manager.TryProduceInput(slugcat, graphics, attention, out input),
+                "a pup can take a reachable item into its held grasp");
+            manager.PrepareHeldHandPose(slugcat, graphics);
+
+            // SlugcatHand.Update's MSC Slugpup grasp branch uses
+            // Player.ThrowDirection * 3 for either hand, not the adult -20/+20.
+            Near(-3.0, graphics.Arms[0].RelativeHuntPosition.X, 0.000001,
+                "pup held item uses the compact ThrowDirection x anchor");
+            Near(12.0, graphics.Arms[0].RelativeHuntPosition.Y, 0.000001,
+                "pup held item keeps the original y-up -12 hand height in screen space");
+            True(graphics.Arms[0].Mode == LimbMode.HuntRelativePosition,
+                "held item is applied before the hand's graphics update");
         }
 
         private static void AllVisualProfilesRemainStableAcrossStates()
@@ -5132,6 +6933,41 @@ namespace RainWorldDesktopPet.Tests
         private static void True(bool value, string message)
         {
             if (!value) throw new InvalidOperationException(message);
+        }
+
+        private sealed class RecordingSoundSink : ISoundEventSink
+        {
+            public string Status { get { return "test"; } }
+            public int PlayCount;
+            public int StartLoopCount;
+            public int StopLoopCount;
+            public SoundEvent LastSound;
+
+            public void Play(SoundEvent sound) { PlayCount++; LastSound = sound; }
+            public void StartLoop(SoundEvent sound, string loopKey)
+            {
+                StartLoopCount++;
+                LastSound = sound;
+            }
+            public void StopLoop(string sourceId, string loopKey) { StopLoopCount++; }
+            public void StopSource(string sourceId) { }
+        }
+
+        private sealed class TestPushToMeowSource : IPushToMeowSource
+        {
+            public bool PushToMeowAvailable { get { return true; } }
+            public bool Muted { get { return false; } }
+            public int ResolveCount;
+
+            public bool TryResolveMeow(SlugcatId slugcat, bool pup,
+                bool shortMeow, out PushToMeowSound sound)
+            {
+                ResolveCount++;
+                sound = new PushToMeowSound(
+                    shortMeow ? "SlugcatMeowPupShort" : "SlugcatMeowPup",
+                    1.0, 1.0);
+                return true;
+            }
         }
 
         private static void Equal(int expected, int actual, string message)

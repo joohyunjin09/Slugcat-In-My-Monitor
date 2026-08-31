@@ -61,6 +61,25 @@ namespace RainWorldDesktopPet.Workshop
         private static readonly Dictionary<string, Entry> Entries =
             new Dictionary<string, Entry>(StringComparer.OrdinalIgnoreCase);
 
+        internal static int LoadedAtlasCount
+        {
+            get { lock (Sync) return Entries.Count; }
+        }
+
+        internal static long DecodedPixelBytes
+        {
+            get
+            {
+                lock (Sync)
+                {
+                    long bytes = 0;
+                    foreach (Entry entry in Entries.Values)
+                        bytes += (long)entry.Atlas.Image.Width * entry.Atlas.Image.Height * 4L;
+                    return bytes;
+                }
+            }
+        }
+
         public static SharedDmsAtlasLease Acquire(string imagePath, string metadataPath)
         {
             string key = BuildKey(imagePath, metadataPath);
@@ -111,6 +130,14 @@ namespace RainWorldDesktopPet.Workshop
 
     public sealed class DmsSkinDefinition : IDisposable
     {
+        private sealed class AtlasSource
+        {
+            public string ImagePath;
+            public string MetadataPath;
+        }
+
+        private readonly object atlasSync = new object();
+        private readonly List<AtlasSource> atlasSources = new List<AtlasSource>();
         private readonly List<SharedDmsAtlasLease> atlasLeases =
             new List<SharedDmsAtlasLease>();
         private readonly Dictionary<string, AtlasSprite> elements =
@@ -123,8 +150,17 @@ namespace RainWorldDesktopPet.Workshop
             new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private readonly HashSet<string> asymmetricParts =
             new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        private readonly HashSet<string> elementNames =
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        private readonly HashSet<string> leftElementNames =
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        private readonly HashSet<string> rightElementNames =
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, bool> authoredColorCache =
             new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+        private bool atlasesLoaded;
+        private bool disposed;
+        internal Action<string> LoadWarning;
 
         public string ModId;
         public string ModName;
@@ -157,11 +193,45 @@ namespace RainWorldDesktopPet.Workshop
                 if (name.EndsWith(".png", StringComparison.OrdinalIgnoreCase)) continue;
                 AtlasSprite sprite = new AtlasSprite { Atlas = atlas, Element = item.Value };
                 if (name.StartsWith("Left", StringComparison.OrdinalIgnoreCase) && name.Length > 4)
+                {
                     leftElements[name.Substring(4)] = sprite;
+                    leftElementNames.Add(name.Substring(4));
+                }
                 else if (name.StartsWith("Right", StringComparison.OrdinalIgnoreCase) && name.Length > 5)
+                {
                     rightElements[name.Substring(5)] = sprite;
+                    rightElementNames.Add(name.Substring(5));
+                }
                 else
+                {
                     elements[name] = sprite;
+                    elementNames.Add(name);
+                }
+            }
+        }
+
+        internal void AddAtlasSource(string imagePath, string metadataPath,
+            IEnumerable<string> names)
+        {
+            if (string.IsNullOrWhiteSpace(imagePath) ||
+                string.IsNullOrWhiteSpace(metadataPath))
+                throw new ArgumentNullException("imagePath");
+            atlasSources.Add(new AtlasSource
+            {
+                ImagePath = imagePath,
+                MetadataPath = metadataPath
+            });
+            foreach (string rawName in names)
+            {
+                string name = rawName;
+                if (name.EndsWith(".png", StringComparison.OrdinalIgnoreCase))
+                    name = name.Substring(0, name.Length - 4);
+                if (name.StartsWith("Left", StringComparison.OrdinalIgnoreCase) && name.Length > 4)
+                    leftElementNames.Add(name.Substring(4));
+                else if (name.StartsWith("Right", StringComparison.OrdinalIgnoreCase) && name.Length > 5)
+                    rightElementNames.Add(name.Substring(5));
+                else
+                    elementNames.Add(name);
             }
         }
 
@@ -169,12 +239,44 @@ namespace RainWorldDesktopPet.Workshop
         {
             foreach (KeyValuePair<string, string[]> group in DmsSpriteGroups.Required)
             {
-                if (group.Value.All(name => elements.ContainsKey(name))) availableParts.Add(group.Key);
-                if (group.Value.All(name => leftElements.ContainsKey(name) && rightElements.ContainsKey(name)))
+                if (group.Value.All(name => elementNames.Contains(name)))
+                    availableParts.Add(group.Key);
+                if (group.Value.All(name => leftElementNames.Contains(name) &&
+                    rightElementNames.Contains(name)))
                 {
                     asymmetricParts.Add(group.Key);
                 }
             }
+        }
+
+        private void EnsureAtlasesLoaded()
+        {
+            lock (atlasSync)
+            {
+                if (atlasesLoaded || disposed) return;
+                atlasesLoaded = true;
+                for (int i = 0; i < atlasSources.Count; i++)
+                {
+                    AtlasSource source = atlasSources[i];
+                    try
+                    {
+                        AddAtlas(SharedDmsAtlasCache.Acquire(
+                            source.ImagePath, source.MetadataPath));
+                    }
+                    catch (Exception exception)
+                    {
+                        Action<string> warning = LoadWarning;
+                        if (warning != null)
+                            warning("Invalid atlas pair skipped: " + source.ImagePath + " (" +
+                                exception.Message + ")");
+                    }
+                }
+            }
+        }
+
+        internal void PrepareForRendering()
+        {
+            EnsureAtlasesLoaded();
         }
 
         public bool TryGetSprite(string originalElement, string slugcatId, DmsSpriteSide side,
@@ -184,6 +286,7 @@ namespace RainWorldDesktopPet.Workshop
             string generic = DmsSpriteGroups.ToGenericElement(originalElement, slugcatId);
             string part = DmsSpriteGroups.PartForElement(generic);
             if (part == null || !availableParts.Contains(part)) return false;
+            EnsureAtlasesLoaded();
             if (asymmetricParts.Contains(part) && side == DmsSpriteSide.Left &&
                 leftElements.TryGetValue(generic, out sprite)) return true;
             if (asymmetricParts.Contains(part) && side == DmsSpriteSide.Right &&
@@ -289,20 +392,31 @@ namespace RainWorldDesktopPet.Workshop
 
         private bool TryPreview(string name, out AtlasSprite sprite)
         {
+            EnsureAtlasesLoaded();
             return elements.TryGetValue(name, out sprite) || leftElements.TryGetValue(name, out sprite) ||
                    rightElements.TryGetValue(name, out sprite);
         }
 
         public void Dispose()
         {
-            for (int i = 0; i < atlasLeases.Count; i++) atlasLeases[i].Dispose();
-            atlasLeases.Clear();
-            elements.Clear();
-            leftElements.Clear();
-            rightElements.Clear();
-            availableParts.Clear();
-            asymmetricParts.Clear();
-            authoredColorCache.Clear();
+            lock (atlasSync)
+            {
+                if (disposed) return;
+                disposed = true;
+                for (int i = 0; i < atlasLeases.Count; i++) atlasLeases[i].Dispose();
+                atlasLeases.Clear();
+                atlasSources.Clear();
+                elements.Clear();
+                leftElements.Clear();
+                rightElements.Clear();
+                elementNames.Clear();
+                leftElementNames.Clear();
+                rightElementNames.Clear();
+                availableParts.Clear();
+                asymmetricParts.Clear();
+                authoredColorCache.Clear();
+                LoadWarning = null;
+            }
         }
     }
 
@@ -346,6 +460,19 @@ namespace RainWorldDesktopPet.Workshop
         public static string ToGenericElement(string element, string slugcatId)
         {
             if (string.IsNullOrEmpty(element)) return element;
+            // Dress My Slugcat supplies the normal HeadA/FaceA/FaceB sheets,
+            // then SpriteDefinitions.Init aliases those sheets to the concrete
+            // PlayerGraphics Slugpup names. A skin must therefore never need
+            // duplicate HeadC or PFace sprite files.
+            if (string.Equals(slugcatId, "Slugpup", StringComparison.OrdinalIgnoreCase))
+            {
+                if (element.StartsWith("HeadC", StringComparison.OrdinalIgnoreCase))
+                    return "HeadA" + element.Substring(5);
+                if (element.StartsWith("PFaceA", StringComparison.OrdinalIgnoreCase))
+                    return "FaceA" + element.Substring(6);
+                if (element.StartsWith("PFaceB", StringComparison.OrdinalIgnoreCase))
+                    return "FaceB" + element.Substring(6);
+            }
             if (string.Equals(slugcatId, "Saint", StringComparison.OrdinalIgnoreCase) &&
                 element.StartsWith("HeadB", StringComparison.OrdinalIgnoreCase))
                 return "HeadA" + element.Substring(5);
@@ -482,6 +609,7 @@ namespace RainWorldDesktopPet.Workshop
             skin.DirectoryPath = Path.GetDirectoryName(metadataPath);
             skin.IsModActive = mod.IsActive;
             skin.SourceFingerprint = mod.SourceFingerprint;
+            skin.LoadWarning = warning => log.Warning("DMS", warning);
             ParseDefaults(json, skin);
 
             string[] pngFiles = Directory.GetFiles(skin.DirectoryPath, "*", SearchOption.TopDirectoryOnly)
@@ -497,7 +625,9 @@ namespace RainWorldDesktopPet.Workshop
                 }
                 try
                 {
-                    skin.AddAtlas(SharedDmsAtlasCache.Acquire(png, text));
+                    IDictionary<string, AtlasElement> elements =
+                        RainWorldAtlasLoader.ReadElements(png, text);
+                    skin.AddAtlasSource(png, text, elements.Keys);
                 }
                 catch (Exception exception)
                 {

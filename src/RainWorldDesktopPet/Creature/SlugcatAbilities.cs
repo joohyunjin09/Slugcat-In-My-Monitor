@@ -1339,7 +1339,6 @@ namespace RainWorldDesktopPet.Creature
                 rollCounter = 0;
                 Owner.State.Animation = AnimationIndex.BellySlide;
                 Owner.State.Standing = false;
-                Owner.EmitSound("Slugcat_Belly_Slide_Init", Owner.Center, 1.0, 1.0, 1);
             }
 
             if (rollDirection == 0) return;
@@ -1457,10 +1456,6 @@ namespace RainWorldDesktopPet.Creature
                 if (Math.Abs(chest.Velocity.X) > 8.0) chest.Velocity *= 0.5;
                 if (Math.Abs(hips.Velocity.X) > 8.0) hips.Velocity *= 0.5;
                 Owner.State.SlowMovementStun = success ? 20 : 40;
-                Owner.EmitSound(success
-                    ? "Slugcat_Belly_Slide_Finish_Success"
-                    : "Slugcat_Belly_Slide_Finish_Fail",
-                    Owner.Center, 1.0, 1.0, 1);
                 rollDirection = 0;
                 rollCounter = 0;
                 exitBellySlideCounter = 0;

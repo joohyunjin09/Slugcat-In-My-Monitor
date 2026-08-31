@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Generic;
 using System.Drawing;
+using System.Reflection;
 using System.Windows.Forms;
 using RainWorldDesktopPet.Core;
 using RainWorldDesktopPet.Creature;
@@ -15,9 +17,13 @@ namespace RainWorldDesktopPet.UI
         private readonly Button removeButton;
         private readonly ComboBox characterSelector;
         private readonly ComboBox sizeSelector;
+        private readonly CheckBox pupAppearanceCheck;
         private readonly ComboBox languageSelector;
         private readonly CheckBox debugCheck;
         private readonly CheckBox pauseCheck;
+        private readonly CheckBox audioMuteCheck;
+        private readonly TrackBar audioVolumeTrack;
+        private readonly Label audioVolumeValueLabel;
         private readonly Button retryButton;
         private readonly Label statusLabel;
         private bool updating;
@@ -91,12 +97,13 @@ namespace RainWorldDesktopPet.UI
                 Dock = DockStyle.Fill,
                 Padding = new Padding(8),
                 ColumnCount = 2,
-                RowCount = 3
+                RowCount = 4
             };
             appearanceLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 150));
             appearanceLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-            appearanceLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
-            appearanceLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
+            appearanceLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 33));
+            appearanceLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 33));
+            appearanceLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 34));
             appearanceLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 38));
             appearanceLayout.Controls.Add(FieldLabel(T("캐릭터와 능력", "Character and Ability")), 0, 0);
             characterSelector = new ComboBox { Dock = DockStyle.Fill,
@@ -116,6 +123,15 @@ namespace RainWorldDesktopPet.UI
                 T("크게", "Large")));
             sizeSelector.SelectedIndexChanged += SlugcatSizeChanged;
             appearanceLayout.Controls.Add(sizeSelector, 1, 1);
+            appearanceLayout.Controls.Add(FieldLabel(T("외형", "Appearance")), 0, 2);
+            pupAppearanceCheck = new CheckBox
+            {
+                Text = T("슬러그펍", "Slugpup"),
+                AutoSize = true,
+                Anchor = AnchorStyles.Left
+            };
+            pupAppearanceCheck.CheckedChanged += SlugpupAppearanceChanged;
+            appearanceLayout.Controls.Add(pupAppearanceCheck, 1, 2);
             FlowLayoutPanel appearanceActions = new FlowLayoutPanel
             {
                 Dock = DockStyle.Fill,
@@ -130,7 +146,7 @@ namespace RainWorldDesktopPet.UI
             appearanceActions.Controls.Add(editorButton);
             appearanceActions.Controls.Add(ActionButton(T("Workshop 새로 고침", "Refresh Workshop"), RefreshWorkshop));
             appearanceLayout.SetColumnSpan(appearanceActions, 2);
-            appearanceLayout.Controls.Add(appearanceActions, 0, 2);
+            appearanceLayout.Controls.Add(appearanceActions, 0, 3);
             appearanceGroup.Controls.Add(appearanceLayout);
             root.Controls.Add(appearanceGroup, 0, 1);
 
@@ -152,9 +168,60 @@ namespace RainWorldDesktopPet.UI
             {
                 if (!updating) app.SettingsPaused = pauseCheck.Checked;
             };
+            audioMuteCheck = new CheckBox
+            {
+                Text = T("사운드 음소거", "Mute Audio"),
+                AutoSize = true,
+                Margin = new Padding(3, 9, 18, 3)
+            };
+            audioMuteCheck.CheckedChanged += delegate
+            {
+                if (!updating) app.SettingsAudioMuted = audioMuteCheck.Checked;
+            };
+            Label audioVolumeLabel = new Label
+            {
+                Text = T("음량 (최대 200%)", "Volume (up to 200%)"),
+                AutoSize = true,
+                Margin = new Padding(3, 10, 0, 3)
+            };
+            audioVolumeTrack = new TrackBar
+            {
+                Minimum = 0,
+                Maximum = 200,
+                Value = 100,
+                TickFrequency = 25,
+                SmallChange = 5,
+                LargeChange = 10,
+                Width = 190,
+                AutoSize = true,
+                Margin = new Padding(3, 1, 0, 0)
+            };
+            audioVolumeValueLabel = new Label
+            {
+                Text = "100%",
+                AutoSize = true,
+                MinimumSize = new Size(42, 0),
+                Margin = new Padding(3, 10, 12, 3)
+            };
+            audioVolumeTrack.ValueChanged += delegate
+            {
+                audioVolumeValueLabel.Text = audioVolumeTrack.Value + "%";
+                if (!updating)
+                    app.SettingsAudioVolumePercent = audioVolumeTrack.Value;
+            };
+            audioVolumeTrack.MouseUp += delegate
+            { app.SettingsPersistAudioVolume(); };
+            audioVolumeTrack.KeyUp += delegate
+            { app.SettingsPersistAudioVolume(); };
+            audioVolumeTrack.Leave += delegate
+            { app.SettingsPersistAudioVolume(); };
             retryButton = ActionButton(T("렌더링 재시도", "Retry Rendering"), delegate { app.SettingsRetryRendering(); RefreshFromApp(); });
             behaviorLayout.Controls.Add(debugCheck);
             behaviorLayout.Controls.Add(pauseCheck);
+            behaviorLayout.Controls.Add(audioMuteCheck);
+            behaviorLayout.Controls.Add(audioVolumeLabel);
+            behaviorLayout.Controls.Add(audioVolumeTrack);
+            behaviorLayout.Controls.Add(audioVolumeValueLabel);
             behaviorLayout.Controls.Add(retryButton);
             behaviorLayout.Controls.Add(new Label
             {
@@ -221,6 +288,20 @@ namespace RainWorldDesktopPet.UI
                 retryButton.Enabled = app.SettingsCanRetryRendering;
                 debugCheck.Checked = app.SettingsDebugEnabled;
                 pauseCheck.Checked = app.SettingsPaused;
+                audioMuteCheck.Checked = app.SettingsAudioMuted;
+                int audioVolume = Math.Max(audioVolumeTrack.Minimum,
+                    Math.Min(audioVolumeTrack.Maximum,
+                        app.SettingsAudioVolumePercent));
+                if (audioVolumeTrack.Value != audioVolume)
+                    audioVolumeTrack.Value = audioVolume;
+                audioVolumeValueLabel.Text = audioVolume + "%";
+                bool canUseSlugpup = app.SettingsCanUseSlugpupAppearance();
+                pupAppearanceCheck.Enabled = canUseSlugpup;
+                pupAppearanceCheck.Text = canUseSlugpup
+                    ? T("슬러그펍", "Slugpup")
+                    : T("슬러그펍 (More Slugcats 확장팩 필요)",
+                        "Slugpup (More Slugcats Expansion required)");
+                pupAppearanceCheck.Checked = canUseSlugpup && app.SettingsIsSlugpupAppearance();
                 for (int i = 0; i < languageSelector.Items.Count; i++)
                 {
                     LanguageChoice language = languageSelector.Items[i] as LanguageChoice;
@@ -249,10 +330,9 @@ namespace RainWorldDesktopPet.UI
                         break;
                     }
                 }
-                statusLabel.Text = T("실행 중인 슬러그캣: " + names.Length +
-                        "마리 · 트레이 아이콘을 왼쪽 클릭하면 이 창을 다시 열 수 있습니다.",
-                    names.Length + " active Slugcat" + (names.Length == 1 ? string.Empty : "s") +
-                        ". Left-click the tray icon to reopen this window.");
+                statusLabel.Text = T("실행 중인 슬러그캣: " + names.Length + "마리",
+                    names.Length + " active Slugcat" +
+                        (names.Length == 1 ? string.Empty : "s"));
             }
             finally { updating = false; }
         }
@@ -270,6 +350,7 @@ namespace RainWorldDesktopPet.UI
             CharacterChoice choice = characterSelector.SelectedItem as CharacterChoice;
             if (choice == null) return;
             app.SettingsSetSlugcat(choice.Id);
+            app.SettingsSynchronizeSlugpupAppearance();
             RefreshFromApp();
         }
 
@@ -279,6 +360,14 @@ namespace RainWorldDesktopPet.UI
             SizeChoice choice = sizeSelector.SelectedItem as SizeChoice;
             if (choice == null) return;
             app.SettingsSetSlugcatSize(choice.Id);
+            app.SettingsSynchronizeSlugpupAppearance();
+            RefreshFromApp();
+        }
+
+        private void SlugpupAppearanceChanged(object sender, EventArgs e)
+        {
+            if (updating) return;
+            app.SettingsSetSlugpupAppearance(pupAppearanceCheck.Checked);
             RefreshFromApp();
         }
 
@@ -359,6 +448,143 @@ namespace RainWorldDesktopPet.UI
             public readonly string Name;
             public override string ToString() { return Name; }
         }
+    }
 
+    // Keep the new appearance option settings-only without duplicating a tray
+    // action. LayeredOverlayWindow intentionally exposes only user-facing
+    // settings primitives, so this bridge resolves its currently selected
+    // GameLoop inside the same assembly and synchronizes graphics-only pup
+    // geometry when profiles are rebuilt.
+    internal static class SlugpupSettingsBridge
+    {
+        private static readonly FieldInfo SelectedLoopField =
+            typeof(LayeredOverlayWindow).GetField("gameLoop",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+        private static readonly List<WeakReference> trackedLoops =
+            new List<WeakReference>();
+        private static int lastIdleSyncTick;
+
+        static SlugpupSettingsBridge()
+        {
+            Application.Idle += SynchronizeTrackedLoops;
+        }
+
+        internal static bool SettingsIsSlugpupAppearance(
+            this LayeredOverlayWindow app)
+        {
+            GameLoop loop = SelectedLoop(app);
+            if (loop == null) return false;
+            Track(loop);
+            return EnsureSlugpupAvailability(loop) && loop.Slugcat.PupAppearance;
+        }
+
+        internal static bool SettingsCanUseSlugpupAppearance(
+            this LayeredOverlayWindow app)
+        {
+            GameLoop loop = SelectedLoop(app);
+            if (loop == null) return false;
+            Track(loop);
+            return EnsureSlugpupAvailability(loop);
+        }
+
+        internal static void SettingsSetSlugpupAppearance(
+            this LayeredOverlayWindow app, bool enabled)
+        {
+            GameLoop loop = SelectedLoop(app);
+            if (loop == null) return;
+            Track(loop);
+            loop.Slugcat.SetPupAppearance(EnsureSlugpupAvailability(loop) && enabled);
+            SynchronizeGraphics(loop);
+
+            // Re-enter the existing size boundary once so hit testing and the
+            // published mouse snapshot immediately see the new collision radii.
+            app.SettingsSetSlugcatSize(app.SettingsSlugcatSize);
+            SynchronizeGraphics(loop);
+        }
+
+        internal static void SettingsSynchronizeSlugpupAppearance(
+            this LayeredOverlayWindow app)
+        {
+            GameLoop loop = SelectedLoop(app);
+            if (loop == null) return;
+            Track(loop);
+            EnsureSlugpupAvailability(loop);
+            SynchronizeGraphics(loop);
+        }
+
+        private static GameLoop SelectedLoop(LayeredOverlayWindow app)
+        {
+            if (app == null || SelectedLoopField == null) return null;
+            return SelectedLoopField.GetValue(app) as GameLoop;
+        }
+
+        private static void Track(GameLoop loop)
+        {
+            if (loop == null) return;
+            for (int i = trackedLoops.Count - 1; i >= 0; i--)
+            {
+                GameLoop existing = trackedLoops[i].Target as GameLoop;
+                if (existing == null)
+                {
+                    trackedLoops.RemoveAt(i);
+                    continue;
+                }
+                if (ReferenceEquals(existing, loop)) return;
+            }
+            trackedLoops.Add(new WeakReference(loop));
+        }
+
+        private static void SynchronizeTrackedLoops(object sender, EventArgs e)
+        {
+            int now = Environment.TickCount;
+            if (unchecked(now - lastIdleSyncTick) >= 0 &&
+                unchecked(now - lastIdleSyncTick) < 250) return;
+            lastIdleSyncTick = now;
+
+            for (int i = trackedLoops.Count - 1; i >= 0; i--)
+            {
+                GameLoop loop = trackedLoops[i].Target as GameLoop;
+                if (loop == null)
+                {
+                    trackedLoops.RemoveAt(i);
+                    continue;
+                }
+                EnsureSlugpupAvailability(loop);
+                if (!loop.Slugcat.PupAppearance) continue;
+                try { SynchronizeGraphics(loop); }
+                catch (ObjectDisposedException) { trackedLoops.RemoveAt(i); }
+            }
+        }
+
+        private static bool EnsureSlugpupAvailability(GameLoop loop)
+        {
+            bool available = loop != null && loop.Installation != null &&
+                loop.Installation.HasMoreSlugcatsExpansion;
+            if (!available && loop != null && loop.Slugcat.PupAppearance)
+            {
+                // A configuration may survive after the installed game changes.
+                // Restore the adult geometry before exposing the disabled control.
+                loop.Slugcat.SetPupAppearance(false);
+                SynchronizeGraphics(loop);
+            }
+            return available;
+        }
+
+        private static void SynchronizeGraphics(GameLoop loop)
+        {
+            if (loop == null) return;
+            const double scale = 1.0;
+            if (loop.Slugcat.Appearance != null &&
+                Math.Abs(loop.Slugcat.Appearance.PupScale - scale) > 0.000001)
+                loop.Slugcat.Appearance.SetPupScale(scale);
+
+            if (loop.Graphics.Tail != null)
+                loop.Graphics.Tail.SetPupGeometry(loop.Slugcat.PupAppearance,
+                    loop.Slugcat.BodyChunks[1].Position);
+
+            for (int i = 0; i < loop.Graphics.Arms.Length; i++)
+                if (Math.Abs(loop.Graphics.Arms[i].GeometryScale - scale) > 0.000001)
+                    loop.Graphics.Arms[i].SetGeometryScale(scale);
+        }
     }
 }

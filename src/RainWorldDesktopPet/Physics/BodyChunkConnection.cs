@@ -12,6 +12,9 @@ namespace RainWorldDesktopPet.Physics
 
     public sealed class BodyChunkConnection
     {
+        private double distance;
+        private double maximumDistance = double.PositiveInfinity;
+
         public BodyChunkConnection(
             BodyChunk first,
             BodyChunk second,
@@ -30,10 +33,33 @@ namespace RainWorldDesktopPet.Physics
 
         public readonly BodyChunk First;
         public readonly BodyChunk Second;
-        public double Distance;
+        public double Distance
+        {
+            get { return distance; }
+            set
+            {
+                if (value <= 0.0 || double.IsNaN(value) || double.IsInfinity(value))
+                    throw new ArgumentOutOfRangeException("value");
+                distance = Math.Min(value, maximumDistance);
+            }
+        }
+        public double MaximumDistance { get { return maximumDistance; } }
         public BodyChunkConnectionType Type;
         public double Elasticity;
         public double WeightSymmetry;
+
+        public void SetMaximumDistance(double value)
+        {
+            if (value <= 0.0 || double.IsNaN(value) || double.IsInfinity(value))
+                throw new ArgumentOutOfRangeException("value");
+            maximumDistance = value;
+            if (distance > maximumDistance) distance = maximumDistance;
+        }
+
+        public void ClearMaximumDistance()
+        {
+            maximumDistance = double.PositiveInfinity;
+        }
 
         public void Solve()
         {

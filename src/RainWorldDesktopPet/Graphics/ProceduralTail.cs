@@ -7,8 +7,15 @@ namespace RainWorldDesktopPet.Graphics
 {
     public sealed class ProceduralTail
     {
+        // PlayerGraphics creates pup TailSegments with the normal segment
+        // radius but half the normal connection length. Do not treat the
+        // 17 -> 12 body connection ratio as a uniform tail scale.
+        private const double SlugpupTailLengthScale = 0.5;
+
         private readonly TailSegment[] segments;
         private Vec2 lastHips;
+        private double geometryScaleMarker = 1.0;
+        private double tailLengthScale = 1.0;
 
         public ProceduralTail(Vec2 hips)
             : this(hips, SlugcatGraphicsProfiles.White.Tail)
@@ -32,6 +39,55 @@ namespace RainWorldDesktopPet.Graphics
         }
 
         public TailSegment[] Segments { get { return segments; } }
+
+        // Compatibility marker for the settings bridge. The original pup
+        // geometry is not uniformly scaled by this value; it only tells us
+        // whether the bridge is requesting adult or pup proportions.
+        public double GeometryScale { get { return geometryScaleMarker; } }
+        public double TailLengthScale { get { return tailLengthScale; } }
+
+        public void SetGeometryScale(double value, Vec2 hips)
+        {
+            if (value <= 0.0 || double.IsNaN(value) || double.IsInfinity(value))
+                throw new ArgumentOutOfRangeException("value");
+
+            SetPupGeometry(value < 0.999999, hips);
+            geometryScaleMarker = value;
+            lastHips = hips;
+        }
+
+        public void SetPupGeometry(bool enabled, Vec2 hips)
+        {
+            double targetLengthScale = enabled ? SlugpupTailLengthScale : 1.0;
+            if (Math.Abs(targetLengthScale - tailLengthScale) < 0.000001)
+            {
+                lastHips = hips;
+                return;
+            }
+
+            double ratio = targetLengthScale / tailLengthScale;
+            Vec2 currentConnection = hips;
+            Vec2 lastConnection = hips;
+            for (int i = 0; i < segments.Length; i++)
+            {
+                TailSegment segment = segments[i];
+
+                Vec2 currentDelta = segment.Position - currentConnection;
+                segment.Position = currentConnection + currentDelta * ratio;
+
+                Vec2 lastDelta = segment.LastPosition - lastConnection;
+                segment.LastPosition = lastConnection + lastDelta * ratio;
+
+                segment.Velocity *= ratio;
+                segment.SetLengthScale(targetLengthScale);
+
+                currentConnection = segment.Position;
+                lastConnection = segment.LastPosition;
+            }
+
+            tailLengthScale = targetLengthScale;
+            lastHips = hips;
+        }
 
         public void Step(
             Vec2 chest,

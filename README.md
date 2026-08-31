@@ -5,61 +5,65 @@
 </p>
 
 <p align="center">
-  <img src="docs/media/icon.png" alt="SlugcatInMyMonitor icon" width="96">
+  <img src="docs/media/readme/example-preview.gif" alt="Several Slugcats roaming across the Windows desktop" width="100%">
 </p>
 
-**A desktop pet that brings Rain World's Slugcats to your Windows desktop.**
-Slugcats treat monitor and window edges as floors and walls, autonomously choosing
-to walk, jump, fall, climb, and rest. You can pick them up and throw them with the
-mouse, and run up to eight Slugcats at once.
+**Bring Rain World's Slugcats onto your Windows desktop.**
 
-![Several Slugcats roaming a desktop](docs/media/readme/example-preview.gif)
+SlugcatInMyMonitor is an independent desktop pet for 64-bit Windows. Slugcats use
+monitor boundaries and real application windows as terrain, then decide for themselves
+when to walk, jump, climb, rest, watch the cursor, or visit another ledge.
 
 > [!IMPORTANT]
 > **A purchased, locally installed PC copy of Rain World is required.**
-> This app does not ship the original Slugcat artwork or skins. It reads the
-> original atlases and installed mod information from your local Rain World
-> installation. The app will not start without a valid `RainWorld.exe` and
-> `RainWorld_Data` directory, and missing or incompatible game files may cause
-> characters to render incorrectly.
+> The app reads the original Slugcat artwork and supported sounds from your own
+> installation. Rain World, community skins, game executables, and game DLLs are not
+> included in this repository or its releases.
 
-Rain World, Steam, and Unity do not need to be running. The app does not load the
-game executable or its DLLs; it only reads the assets it needs from your local
-installation. Rain World and community skin assets are not included in this
-repository or its releases.
+Rain World, Steam, Unity, and BepInEx do not need to be running with the pet. The app
+uses the required files from the local installation in read-only form.
 
-## Features
+## Highlights
 
-- **Desktop terrain:** autonomous movement, jumping, wall climbing, and resting on windows and monitors
-- **Multiple Slugcats:** create, select, and remove characters with individual movement stats and abilities
-- **Direct interaction:** pick up and throw Slugcats with the mouse
-- **Feeding:** drop a Blue Fruit or Eggbug Egg from the tray and observe appetite-driven eating or refusal
-- **Original appearance:** graphics built from the original Rain World atlases
-- **DMS skins:** per-part skin selection and color editing (experimental)
-- **GPU rendering:** DirectComposition multi-surface composition with smoke and explosion effects
-- **Smooth motion:** refresh-rate-aware rendering interpolation over a fixed 40 Hz simulation
+- **Desktop terrain:** monitor work areas, screen edges, and visible window tops and sides
+  become floors, ledges, and walls.
+- **Autonomous behavior:** each pet has its own personality, attention, rest cycle, route
+  choices, and character-specific movement.
+- **Direct commands:** right-click a Slugcat to open a radial command
+  wheel with Stop, Move, and Follow Me.
+- **Up to eight Slugcats:** add, select, resize, change, or remove pets independently.
+- **Mouse interaction:** pick up and throw Slugcats, move food, and let pets react to the
+  cursor without blocking ordinary desktop clicks.
+- **Food and appetite:** place Blue Fruit or Eggbug Eggs and observe eating, refusal,
+  fullness, and digestion.
+- **Original appearance:** use the Slugcat artwork from the locally installed Rain World copy.
+- **Optional mod integration:** use Dress My Slugcat skins and Push To Meow voices when
+  those mods are installed and enabled.
 
-Runtime audio is currently disabled for performance and stability.
+## Commands and controls
 
-## Supported Slugcats
+Right-click a Slugcat to open the command wheel. The selected Slugcat pauses while the
+wheel is waiting for a choice. Move the pointer over a segment and left-click its icon.
 
-These characters use individual movement stats and the currently implemented
-special abilities, rather than simple color swaps. Interactions that require Rain
-World's rooms, creatures, or item systems are reduced or omitted on the desktop.
+| Icon | Command | Behavior |
+| --- | --- | --- |
+| Pause bars | **Stop** | Stops locomotion at the current position. Blinking, looking around, facial motion, idle posture, and available meows continue. |
+| Play triangle | **Move** | Returns to the normal autonomous AI. |
+| Arrow toward pointer | **Follow Me** | Tries to reach the mouse using walking and variable-height jumps, while occasionally pausing, crouching, glancing, or taking a short detour. |
 
-| Slugcat | CLI name | Currently implemented traits |
-|---|---|---|
-| Survivor | `white` | Standard movement and baseline stats |
-| Monk | `yellow` | Lighter body and gentler movement profile |
-| Hunter | `red` | Faster movement and stronger physical stats |
-| Gourmand | `gourmand` | Weight, stamina, rolling, and belly sliding |
-| Artificer | `artificer` | Explosive jumps, shockwaves, and self-destruct effects |
-| SpearMaster | `spearmaster` | Needle-spear creation and throwing |
-| Rivulet | `rivulet` | Fast running, jumping, and climbing |
-| Saint | `saint` | Tongue and rope traversal |
+Other controls:
 
-See the [Slugcat ability parity notes (Korean)](docs/SlugcatAbilityParity.md) for
-the exact implementation scope and differences from the original game.
+| Input | Action |
+| --- | --- |
+| Left-drag a Slugcat | Pick it up; release with mouse momentum to place or throw it. |
+| Right-click a Slugcat | Open its command wheel. |
+| Left-click the tray icon | Open Settings. |
+| Right-click the tray icon | Open quick actions, character selection, feeding, and exit controls. |
+| Choose food, then left-click the desktop | Place the selected food. |
+| Left-drag placed food | Move or toss the food. |
+
+No global keyboard shortcut is registered. Empty overlay pixels remain click-through, so
+normal desktop and application interaction continues behind the pets.
 
 ## Requirements
 
@@ -68,42 +72,39 @@ the exact implementation scope and differences from the original game.
 - **64-bit Windows 10 or Windows 11**
 - **Microsoft .NET Framework 4.8 Runtime**
 - **A purchased PC copy of Rain World installed locally**
-  - The installation directory must contain `RainWorld.exe` and `RainWorld_Data`.
-  - The game files must be intact so the app can read the original Slugcat atlases.
-- **A Direct3D 11-capable GPU and driver**
-  - DirectComposition and the required DirectX components are included with
-    Windows 10 and 11, so no separate installation is normally needed.
+  - The selected directory must contain `RainWorld.exe` and `RainWorld_Data`.
+  - The game files must be intact so the original graphics and supported sounds can be read.
+- **A Direct3D 11-capable GPU and current graphics driver**
 
-Visual Studio, the .NET SDK, Unity, and BepInEx are not required to run a release.
-The native renderer uses the static C++ runtime, so a separate Visual C++
-Redistributable is not required either.
+Visual Studio, the .NET SDK, Unity, BepInEx, and the Visual C++ Redistributable are not
+required to run a release build.
 
-### Additional requirements for external DMS skins
+### Optional integrations
 
-- **Dress My Slugcat (DMS)** installed and enabled in Rain World's Remix menu
-- A skin mod in DMS format
-- That DMS skin mod enabled in Rain World's Remix menu
-- The **Steam client** when installing skins from Steam Workshop
-
-Steam is only needed for automatic Workshop discovery. If Rain World and the mods
-were installed manually and you provide their paths, Steam does not need to stay
-open while this app runs. Because mod activation is read from Rain World's config,
-enable DMS and the skin mod, then exit Rain World normally at least once. The
-Downpour DLC is not required by this app, but it is required if your chosen skin
-depends on Downpour assets.
+- **More Slugcats Expansion:** required for the Slugpup appearance toggle and for content
+  that depends on expansion assets.
+- **Dress My Slugcat (DMS):** required only for external DMS skins. Enable DMS and the
+  desired skin in Rain World's Remix menu, then exit the game normally once.
+- **Push To Meow:** required only for automatic meow audio and its matching closed-eye,
+  upward-look, or SpearMaster tail animation. Without the mod, those meow-specific events
+  do not run; ordinary face and idle animations still do.
+- **Steam:** needed only when the app must discover Workshop-installed mods. It does not
+  need to stay open after the files are available locally.
 
 ## Install and run
 
-1. **Download from [GitHub Releases](https://github.com/leesiuuuu/Slugcat-In-My-Monitor/releases):** get the latest `win-x64.zip`.
-2. **Extract the archive:** extract every file into the same folder.
-3. **Launch the app:** run `SlugcatInMyMonitor.exe`.
-4. **Select the Rain World directory:** if it is not detected automatically, choose the folder containing `RainWorld.exe`.
+1. Download the latest Windows archive from
+   [GitHub Releases](https://github.com/joohyunjin09/Slugcat-In-My-Monitor/releases).
+2. Extract **every file** from the archive into one folder.
+3. Run `SlugcatInMyMonitor.exe`.
+4. If Rain World is not detected automatically, select the folder containing
+   `RainWorld.exe`.
 
-Do not delete or move `SlugcatInMyMonitor.DirectComposition.dll` away from the
-executable; rendering cannot start without it.
+Keep every extracted file beside the executable. Moving or deleting individual files may
+prevent the app from starting or rendering. The verified Rain World path is saved to
+`%LOCALAPPDATA%\SlugcatInMyMonitor\rain-world-path.txt`.
 
-You may also select the initial character or Rain World installation from the
-command line.
+Optional command-line arguments:
 
 ```powershell
 # Start as Gourmand
@@ -112,119 +113,138 @@ command line.
 # Available: white, yellow, red, gourmand, artificer,
 #            spearmaster, rivulet, saint
 
-# Provide the Rain World installation path
+# Select the Rain World installation explicitly
 .\SlugcatInMyMonitor.exe `
   --rain-world "C:\Program Files (x86)\Steam\steamapps\common\Rain World"
+
+# Start with diagnostics visible
+.\SlugcatInMyMonitor.exe --debug
 ```
 
-The verified Rain World path is saved to
-`%LOCALAPPDATA%\SlugcatInMyMonitor\rain-world-path.txt`.
+## Settings
 
-## Settings and controls
+![SlugcatInMyMonitor Settings window](docs/media/readme/settingPanel-rework.png)
 
-![SlugcatInMyMonitor settings panel](docs/media/readme/settingPanel-rework.png)
+Left-click the tray icon to open Settings. The window provides one place to:
 
-Left-click the Slugcat system-tray icon to open the settings panel. From there you
-can:
+- add, select, and remove up to eight Slugcats;
+- change the selected character and its implemented ability set;
+- choose Small, Normal, or Large size;
+- enable Slugpup appearance when More Slugcats Expansion is available;
+- open the experimental skin editor or refresh Workshop data;
+- pause every Slugcat or enable the debug overlay;
+- mute audio and set master volume from 0% to 200%;
+- retry rendering after a graphics failure;
+- switch between Korean and English UI (restart required after changing language).
 
-- add, select, or remove a Slugcat;
-- change the character and ability;
-- choose the UI language (한국어/English; applied after restart);
-- open the skin editor;
-- toggle debug visuals or pause all Slugcats;
-- refresh Workshop mods;
-- retry rendering or quit the app.
+Audio starts muted on a new installation and remembers the last mute and volume settings.
 
-The basic controls are:
+## Skin editor (Experimental)
 
-- **Left mouse button on a Slugcat:** pick it up
-- **Move while holding, then release:** throw it
-- **While holding a Slugcat:** block other drag input such as desktop selection
-- **Click or pick up a Slugcat:** select it for configuration
-- **Left-click the tray icon:** open the settings panel
-- **Right-click the tray icon → Feed:** drop a Blue Fruit or Eggbug Egg near the selected Slugcat
-- **Leave every monitor:** return to a safe floor after about one second
-
-No global shortcuts are registered, avoiding conflicts with system shortcuts. The
-food and Slugcat overlays remain click-through during normal desktop use; only
-directly grabbing a Slugcat consumes left-drag input. The tray icon's context menu
-is also a fallback when the settings window cannot open.
-
-See the [food update report (Korean)](docs/FoodUpdateReport.ko.md) for the current
-implementation scope and instructions for adding new food types.
-
-## Skin editor (experimental)
+![Experimental Slugcat Skin Editor](docs/media/readme/skinPanel-rework.png)
 
 > [!WARNING]
-> The skin editor is experimental. Its UI, preset format, supported features, and
-> output may change in later releases. External skins must use the **Dress My
-> Slugcat (DMS) format**. SlugBase characters, regions, gameplay code, and mod DLLs
-> are not executed.
+> The skin editor is experimental. Its UI, preset format, compatibility, and output may
+> change. It reads DMS skin files, but does not execute SlugBase characters, regions,
+> gameplay code, or mod DLLs.
 
-![Experimental Slugcat skin panel](docs/media/readme/skinPanel-rework.png)
+The editor can mix and recolor individual parts from Vanilla and installed DMS skins:
+head, face, body, arms, hips, legs, tail, Artificer face scar, Rivulet gills,
+SpearMaster tail speckles, Saint ascension graphics, and The Mark. Character-only
+structures appear only when the selected Slugcat supports them. An incomplete DMS part
+falls back to the current Vanilla Slugcat instead of leaving the character broken.
 
-The skin editor lets you select and recolor the head, face, body, arms, hips, legs,
-tail, and The Mark independently. Parts from different DMS skins can be combined,
-and configurations can be saved and loaded as presets.
+Use **Copy/Paste** to transfer a setup, **Save/Load Preset** to keep it, **Reset** to
+return to defaults, and **Reload Sprites** after changing installed files.
 
-If a DMS skin does not appear, check all of the following:
+If a DMS skin does not appear:
 
-1. **Game installation:** confirm that the app found the correct Rain World installation.
-2. **Mod installation:** install Dress My Slugcat and the DMS skin mod in Rain World.
-3. **Mod activation:** enable both DMS and the skin in Remix, then exit the game normally.
-4. **Refresh:** use **Refresh Workshop mods** in this app or restart it.
+1. Confirm that the app found the correct Rain World installation.
+2. Install Dress My Slugcat and the desired DMS skin.
+3. Enable both mods in Remix and exit Rain World normally.
+4. Select **Refresh Workshop** in Settings or restart the app.
 
-The app scans `mods`, `mergedmods`, and discovered Steam Workshop folders for
-`metadata.json` files and PNG/TXT atlas pairs. Damaged parts, parts missing required
-frames, disabled skin mods, and non-DMS mods are excluded from the selection list.
+Only enabled DMS skins with complete, compatible sprite files appear in the editor.
+
+## Supported Slugcats
+
+These are behavior profiles, not simple color swaps. Systems that require Rain World's
+rooms, creatures, campaigns, or full item simulation are adapted or omitted for the
+desktop environment.
+
+| Slugcat | CLI name | Implemented desktop traits |
+| --- | --- | --- |
+| Survivor | `white` | Standard movement and abilities |
+| Monk | `yellow` | Gentler movement characteristics |
+| Hunter | `red` | Stronger, faster physical profile |
+| Gourmand | `gourmand` | Heavy body type |
+| Artificer | `artificer` | Explosive jumps, smoke, shockwaves, and self-destruct effects |
+| SpearMaster | `spearmaster` | Needle-spear creation, aiming, and throwing |
+| Rivulet | `rivulet` | Fast running and higher, more agile jumps |
+| Saint | `saint` | Tongue firing, attachment, rope motion, and traversal |
+
+## Audio and Push To Meow
+
+The app plays supported movement, impact, and implemented ability sounds from the local
+Rain World installation.
+
+When Push To Meow is installed and enabled, a successful meow triggers both its sound and
+the matching face/tail animation. If the mod is absent, disabled, muted, or cannot supply
+a compatible voice, no meow-specific animation is triggered.
+
+No Rain World or mod audio is copied into the repository or release archive.
 
 ## Troubleshooting
 
-- **Rain World installation not found:** select the top-level folder containing `RainWorld.exe`, or provide it with `--rain-world`.
-- **Broken default appearance or procedural fallback graphics:** verify the Rain World game files through Steam or your store, then restart the app.
-- **DMS skin is missing:** verify the DMS installation, Remix activation, and PNG/TXT atlas pair, then refresh Workshop mods.
-- **Frozen screen or missing rendering:** choose **Retry rendering** from the tray menu and update your graphics driver.
-- **Finding errors:** inspect `%LOCALAPPDATA%\SlugcatInMyMonitor\errors.log` and `%LOCALAPPDATA%\SlugcatInMyMonitor\workshop.log`.
+- **Rain World installation not found:** select the top-level directory containing
+  `RainWorld.exe`, or pass it with `--rain-world`.
+- **Broken appearance or procedural fallback:** verify Rain World's installed files, then
+  restart the app.
+- **Slugpup option unavailable:** install/enable More Slugcats Expansion and make sure the
+  correct Rain World installation was selected.
+- **DMS skin missing:** verify DMS and skin activation and confirm that the skin files are
+  compatible, then refresh Workshop data.
+- **No sound:** clear **Mute Audio**, raise the volume, and check the selected Rain World
+  installation. The first run is muted by default.
+- **No meows:** Push To Meow must be installed, enabled, and contain a compatible voice.
+- **Rendering paused or missing:** use **Retry Rendering** and update the GPU driver.
+- **Logs:** inspect `%LOCALAPPDATA%\SlugcatInMyMonitor\errors.log` and
+  `%LOCALAPPDATA%\SlugcatInMyMonitor\workshop.log`.
 
 ## Development
 
-A development build requires:
-
-- PowerShell 5.1 or later
-- Visual Studio 2022 C++ desktop build tools (v143)
-- Windows 10/11 SDK
-
-The build script downloads the `.NET Framework 4.8` reference assemblies when
-needed. Build a Release configuration and run the full test suite with:
+A development build requires PowerShell 5.1 or later, Visual Studio 2022 C++ desktop
+build tools (v143), and a Windows 10/11 SDK.
 
 ```powershell
 .\build.ps1 -Configuration Release
 ```
 
-The DirectComposition bridge uses the Windows SDK's Direct3D 11, DXGI, and
-DirectComposition libraries. Submit normal changes from `feature/*` or `fix/*` to
-`develop`; create release pull requests from `develop` to `main`. See the
-[contribution guide](CONTRIBUTING.md) for the complete workflow.
+This builds the application, runs the complete test suite, and writes output to
+`artifacts\Release`.
 
-Implementation details are documented in:
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the workflow. Further implementation details:
 
 - [Architecture](docs/Architecture.md)
-- [Original behavior map (Korean)](docs/RainWorldBehaviorMap.md)
-- [Slugcat ability parity (Korean)](docs/SlugcatAbilityParity.md)
-- [Slugcat graphics profiles (Korean)](docs/SlugcatGraphicsProfiles.md)
+- [Behavior compatibility and source boundary](docs/BehaviorCompatibility.md)
 - [Workshop and DMS compatibility](docs/WorkshopCompatibility.md)
-- [Local asset findings (Korean)](docs/analysis/AssetFindings.md)
-- [DLL findings (Korean)](docs/analysis/DllFindings.md)
-- [Original-fidelity overhaul notes (Korean)](docs/analysis/RainWorldFidelityOverhaul.md)
+- [Food update report (Korean)](docs/FoodUpdateReport.ko.md)
 
 ## Assets, license, and trademarks
 
-This repository does not distribute images or game assets from Rain World, Dress
-My Slugcat, or community skins. Users must legitimately own Rain World and any
-skins they use, and must follow the terms for those assets. See
-[THIRD_PARTY_TEST_ASSETS.md](THIRD_PARTY_TEST_ASSETS.md) for details.
+This repository does not distribute Rain World, Dress My Slugcat, Push To Meow, or
+community skin/audio assets. Users must legitimately own Rain World and follow the terms
+for every third-party asset they use. See
+[THIRD_PARTY_TEST_ASSETS.md](THIRD_PARTY_TEST_ASSETS.md) for the test-asset boundary.
 
 This is an unofficial fan project and is not affiliated with or endorsed by
 Videocult or Akupara Games. Rain World and related names and assets belong to their
-respective owners. Project code is distributed under the [MIT License](LICENSE);
-that license does not apply to third-party assets.
+respective owners.
+
+The [MIT License](LICENSE) applies only to code and other material independently
+authored by this project's contributors and for which they hold the necessary
+licensing rights. It does not apply to Rain World source or object code,
+characters, artwork, audio, game assets, names, trademarks, or any other
+third-party material. Nothing in this repository grants a license to use those
+materials. Third-party components remain subject to their respective licenses and
+terms.
