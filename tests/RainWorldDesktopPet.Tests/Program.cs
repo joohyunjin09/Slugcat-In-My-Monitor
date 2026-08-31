@@ -191,6 +191,8 @@ namespace RainWorldDesktopPet.Tests
                 AudioAdmissionKeepsCharacterMovementDownpourAbilitiesAndMeows);
             Run("Push To Meow animations blink, look up, and wiggle Spearmaster's tail",
                 PushToMeowAnimationsMatchDll);
+            Run("Push To Meow changes a stopped Slugpup to its closed-eye face",
+                PushToMeowAnimatesStoppedSlugpupFace);
             Run("Slugcat sound calls stay behind the audio sink boundary",
                 SlugcatSoundCallsUseAudioSink);
             Run("Sliding stays silent and high-speed impacts remain audible",
@@ -3377,6 +3379,54 @@ namespace RainWorldDesktopPet.Tests
                             ids[idIndex] + " upward meow look releases on time");
                 }
             }
+        }
+
+        private static void PushToMeowAnimatesStoppedSlugpupFace()
+        {
+            DesktopCollisionWorld world = new DesktopCollisionWorld(new WindowEnumerator());
+            world.RefreshFromSnapshots(new DesktopWindowSnapshot[0]);
+            MouseTracker mouse = new MouseTracker();
+            Slugcat slugcat = new Slugcat(new Vec2(240.0, 240.0), SlugcatId.White);
+            slugcat.SetPupAppearance(true);
+            slugcat.State.Grounded = true;
+            slugcat.State.Standing = true;
+            slugcat.State.BodyMode = BodyModeIndex.Stand;
+            DesktopPetAI ai = new DesktopPetAI(88241);
+            ai.SetCommand(DesktopPetCommand.Stop);
+            ai.Attention.SetTarget(AttentionKind.RandomPoint,
+                slugcat.Center + new Vec2(50.0, 0.0));
+            SlugcatGraphics graphics = new SlugcatGraphics(slugcat);
+
+            VirtualInput stoppedInput = ai.Step(slugcat, world, mouse);
+            True(stoppedInput.X == 0 && stoppedInput.Y == 0 &&
+                !stoppedInput.Jump && !stoppedInput.Throw,
+                "Stop command keeps locomotion neutral before the meow");
+            graphics.Step(ai.Attention, world);
+            OriginalFaceState awake = SpriteRenderer.ResolveOriginalFaceState(
+                graphics.BuildPose(1.0, ai.Attention));
+            True(awake.FaceElement.StartsWith("PFaceA", StringComparison.Ordinal),
+                "stopped Slugpup starts on its awake face family");
+
+            TestPushToMeowSource source = new TestPushToMeowSource();
+            PushToMeowController controller = new PushToMeowController(source, 9117);
+            controller.Step(slugcat, graphics, 0.5, controller.NextMeowTick);
+            True(source.ResolveCount == 1,
+                "automatic stopped-Slugpup meow resolves one voice");
+
+            graphics.Step(ai.Attention, world);
+            True(!graphics.BuildPose(1.0, ai.Attention).Blink,
+                "DLL 33 ms delay keeps the first fixed tick open");
+            graphics.Step(ai.Attention, world);
+            SlugcatPose meowingPose = graphics.BuildPose(1.0, ai.Attention);
+            OriginalFaceState meowing =
+                SpriteRenderer.ResolveOriginalFaceState(meowingPose);
+            True(meowingPose.Blink &&
+                meowing.FaceElement.StartsWith("PFaceB", StringComparison.Ordinal),
+                "stopped Slugpup switches to its closed-eye PFaceB family");
+            True(meowingPose.LookDirection.Y < -0.9,
+                "stopped Slugpup keeps Push To Meow's upward look");
+            True(ai.Command == DesktopPetCommand.Stop,
+                "facial animation does not release the Stop command");
         }
 
         private static void AudioAdmissionKeepsCharacterMovementDownpourAbilitiesAndMeows()
@@ -6901,6 +6951,23 @@ namespace RainWorldDesktopPet.Tests
             }
             public void StopLoop(string sourceId, string loopKey) { StopLoopCount++; }
             public void StopSource(string sourceId) { }
+        }
+
+        private sealed class TestPushToMeowSource : IPushToMeowSource
+        {
+            public bool PushToMeowAvailable { get { return true; } }
+            public bool Muted { get { return false; } }
+            public int ResolveCount;
+
+            public bool TryResolveMeow(SlugcatId slugcat, bool pup,
+                bool shortMeow, out PushToMeowSound sound)
+            {
+                ResolveCount++;
+                sound = new PushToMeowSound(
+                    shortMeow ? "SlugcatMeowPupShort" : "SlugcatMeowPup",
+                    1.0, 1.0);
+                return true;
+            }
         }
 
         private static void Equal(int expected, int actual, string message)

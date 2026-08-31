@@ -47,9 +47,11 @@ namespace RainWorldDesktopPet.Audio
                 return;
             }
 
+            // Push To Meow calls DoMeowAnim before PlayMeowSound. Schedule the
+            // same delayed face/tail state before dispatching the audio event.
+            graphics.TriggerMeowAnimation(shortMeow);
             slugcat.EmitSound(sound.SoundId, slugcat.Center,
                 sound.Volume, sound.Pitch, 10);
-            graphics.TriggerMeowAnimation(shortMeow);
             nextMeowTick = simulationTick + SecondsToTicks(
                 CalculateIntervalSeconds(fullnessRatio, random.NextDouble()));
         }
