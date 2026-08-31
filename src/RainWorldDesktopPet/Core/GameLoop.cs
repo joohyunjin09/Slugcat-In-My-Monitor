@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
+using RainWorldDesktopPet.Audio;
 using RainWorldDesktopPet.AI;
 using RainWorldDesktopPet.Creature;
 using RainWorldDesktopPet.Desktop;
@@ -37,8 +38,12 @@ namespace RainWorldDesktopPet.Core
         private readonly WorkshopLog workshopLog;
         private WorkshopCatalog workshopCatalog;
         private DmsSkinCatalog dmsSkins;
+        private SlugcatSize size = SlugcatSize.Large;
         private readonly Dictionary<string, string> dmsPartSelections =
             new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        private readonly ISoundEventSink audioSink;
+        private readonly string audioSourceId;
+        private readonly PushToMeowController meowController;
 
         public GameLoop(IntPtr overlayHandle, RainWorldInstallation installation,
             SlugcatId selectedSlugcat)
@@ -54,8 +59,18 @@ namespace RainWorldDesktopPet.Core
 
         internal GameLoop(IntPtr overlayHandle, RainWorldInstallation installation,
             SlugcatId selectedSlugcat, int spawnIndex, DesktopCollisionWorld sharedWorld)
+            : this(overlayHandle, installation, selectedSlugcat, spawnIndex,
+                sharedWorld, null)
+        {
+        }
+
+        internal GameLoop(IntPtr overlayHandle, RainWorldInstallation installation,
+            SlugcatId selectedSlugcat, int spawnIndex, DesktopCollisionWorld sharedWorld,
+            ISoundEventSink sharedAudioSink)
         {
             Installation = installation;
+            audioSink = sharedAudioSink;
+            audioSourceId = "slugcat:" + Guid.NewGuid().ToString("N");
             managesWorldRefresh = sharedWorld == null;
             World = sharedWorld ?? new DesktopCollisionWorld(new WindowEnumerator());
             if (managesWorldRefresh) World.Refresh(overlayHandle);
@@ -77,6 +92,7 @@ namespace RainWorldDesktopPet.Core
                 monitor.WorkArea.Bottom - DesktopWorldTransform.ToDesktopLength(
                     SimulationConstants.HipsChunkRadius + 2.0)));
             Slugcat = new Slugcat(spawn, selectedSlugcat);
+            Slugcat.SetAudioSink(audioSink, audioSourceId);
             lastVisibleCenter = Slugcat.Center;
             hasVisibleCenter = true;
             // SlugNPCAI owns an AbstractCreature personality per NPC.  A
@@ -88,6 +104,9 @@ namespace RainWorldDesktopPet.Core
                 (spawnIndex + 1) * 7919);
             AI = new DesktopPetAI(aiSeed, spawnIndex);
             Foods = new DesktopFoodManager(unchecked(aiSeed ^ 0x45A91));
+            meowController = new PushToMeowController(
+                sharedAudioSink as IPushToMeowSource,
+                unchecked(aiSeed ^ 0x6D656F77));
             AI.Attention.SetTarget(AttentionKind.RandomPoint,
                 spawn + new Vec2(Slugcat.State.Facing * 60.0, -20.0));
             RainWorldAssetLoader assetLoader = new RainWorldAssetLoader(installation);
@@ -130,9 +149,35 @@ namespace RainWorldDesktopPet.Core
         public double RenderFramesPerSecond { get { return renderFramesPerSecond; } }
         public double MonitorRefreshRate { get { return monitorRefreshRate; } }
         public MouseAttentionState MouseAttention { get { return mouseAttention; } }
+        public DesktopPetCommand Command { get { return AI.Command; } }
+        internal bool CommandSelectionPending { get; private set; }
         public SlugcatAppearance Appearance { get { return Slugcat.Appearance; } }
         public SlugcatSkin Skin { get { return Graphics.VisualProfile.Skin; } }
         public int OffscreenRecoveryCount { get; private set; }
+        public SlugcatSize Size { get { return size; } }
+        public double VisualSizeMultiplier { get { return SlugcatSizeSettings.Multiplier(size); } }
+        public string AudioStatus
+        {
+            get { return audioSink == null ? "audio disabled" : audioSink.Status; }
+        }
+
+        public void SetCommand(DesktopPetCommand command)
+        {
+            AI.SetCommand(command);
+        }
+
+        internal void SetCommandSelectionPending(bool pending)
+        {
+            CommandSelectionPending = pending;
+        }
+
+        internal static VirtualInput ApplyCommandSelectionGate(
+            VirtualInput input, bool selectionPending)
+        {
+            // Keep AI, attention, voice, graphics, and physics on their normal
+            // fixed-step path. Only locomotion intent waits for the user choice.
+            return selectionPending ? VirtualInput.Neutral : input;
+        }
 
         public bool TryGetAtlasSprite(string name, bool original, out AtlasSprite sprite)
         {
@@ -174,6 +219,7 @@ namespace RainWorldDesktopPet.Core
         }
 
         public Color GetPartColor(string part) { return Graphics.GetPartColor(part); }
+        public bool HasCustomPartColor(string part) { return Graphics.HasCustomPartColor(part); }
         public void SetPartColor(string part, Color color) { Graphics.SetPartColor(part, color); }
         public void ClearPartColors() { Graphics.ClearPartColors(); }
         public WorkshopCatalog WorkshopCatalog { get { return workshopCatalog; } }
@@ -191,6 +237,19 @@ namespace RainWorldDesktopPet.Core
             if (skin != null && skin.TryGetSprite(element, CurrentSlugcatId(),
                 DmsSpriteSide.None, out sprite)) return true;
             return atlas != null && atlas.TryGet(element, out sprite);
+        }
+
+        public Color GetDmsPartPreviewTint(string part)
+        {
+            Color fallback = GetPartColor(part);
+            DmsSkinDefinition skin = Renderer.GetDmsPart(part);
+            string element = DmsSpriteGroups.PreviewElement(part);
+            AtlasSprite sprite;
+            return skin == null || string.IsNullOrEmpty(element) ||
+                !skin.TryGetSprite(element, CurrentSlugcatId(), DmsSpriteSide.None, out sprite)
+                ? fallback
+                : skin.ResolveTint(sprite, element, CurrentSlugcatId(), fallback,
+                    Graphics.HasCustomPartColor(part));
         }
         public DmsSkinDefinition ActiveDmsSkin { get { return Renderer.ActiveDmsSkin; } }
 
@@ -224,7 +283,15 @@ namespace RainWorldDesktopPet.Core
             double elapsed = lastTime <= 0.0 ? SimulationConstants.LogicStepSeconds : now - lastTime;
             lastTime = now;
             mouse.Sample(elapsed);
-            Foods.MoveDraggedFood(mouse.Position);
+            Vec2 worldPointer;
+            Vec2 visualPointer;
+            ResolvePointerSpaces(mouse.Position, Slugcat.Center,
+                VisualSizeMultiplier, out worldPointer, out visualPointer);
+            Vec2 visualPointerVelocity = mouse.Velocity / VisualSizeMultiplier;
+            // Food is a desktop/world object while it is being positioned.
+            // Never feed it the character-local pointer that is scaled around
+            // Slugcat.Center for Small/Normal visual sizes.
+            Foods.MoveDraggedFood(worldPointer);
             if (Paused)
             {
                 mouse.ConsumeClick();
@@ -234,7 +301,7 @@ namespace RainWorldDesktopPet.Core
 
             if (managesWorldRefresh)
             {
-                if (World.TryApplyPendingRefresh()) ApplyMovingSurfaceDelta();
+                World.TryApplyPendingRefresh();
                 surfaceRefreshAccumulator += elapsed;
                 if (surfaceRefreshAccumulator >= SimulationConstants.WindowRefreshSeconds)
                 {
@@ -252,25 +319,30 @@ namespace RainWorldDesktopPet.Core
                     Slugcat.State.StunCounter > 0)
                 {
                     mouse.ConsumeClick();
-                    mouseAttention.Suppress(now, mouse.Position, Graphics.Head.Position);
+                    mouseAttention.Suppress(now, visualPointer, Graphics.Head.Position);
                 }
                 else
                 {
-                    mouseAttention.Update(now, mouse.Position, mouse.ConsumeClick(), Graphics.Head.Position);
+                    mouseAttention.Update(now, visualPointer, mouse.ConsumeClick(), Graphics.Head.Position);
                 }
                 VirtualInput input = Slugcat.IsGrabbed
                     ? VirtualInput.Neutral
                     : AI.Step(Slugcat, World, mouse, mouseAttention);
                 VirtualInput foodInput;
-                if (!Slugcat.IsGrabbed && Foods.TryProduceInput(Slugcat, Graphics,
+                if (!Slugcat.IsGrabbed && AI.Command == DesktopPetCommand.Move &&
+                    Foods.TryProduceInput(Slugcat, Graphics,
                     AI.Attention, out foodInput)) input = foodInput;
-                Slugcat.Step(input, World, mouse.Position, mouse.Velocity);
+                input = ApplyCommandSelectionGate(input, CommandSelectionPending);
+                Slugcat.Step(input, World, visualPointer, visualPointerVelocity);
+                meowController.Step(Slugcat, Graphics, Foods.FullnessRatio,
+                    simulationTick);
                 RecoverFromDesktopEscape();
                 if (!Slugcat.State.Conscious || Slugcat.State.Dead ||
                     Slugcat.State.StunCounter > 0)
-                    mouseAttention.Suppress(now, mouse.Position, Graphics.Head.Position);
+                    mouseAttention.Suppress(now, visualPointer, Graphics.Head.Position);
                 if (DebugEnabled)
                     parityDiagnostics.ObserveSurfaceState(Slugcat, World, input, simulationTick);
+                Foods.PrepareHeldHandPose(Slugcat, Graphics);
                 Graphics.Step(AI.Attention, AI.OriginalAttentionTarget,
                     AI.MouseAttentionActive && Slugcat.State.Conscious &&
                         !Slugcat.State.Dead && Slugcat.State.StunCounter < 1,
@@ -283,14 +355,6 @@ namespace RainWorldDesktopPet.Core
             // catch-up Update, preventing a stalled desktop from spiralling.
             if (steps == 3) fixedTimeStep.Reset();
             simulationStepsLastFrame = steps;
-        }
-
-        public void ApplyMovingSurfaceDelta()
-        {
-            if (Paused) return;
-            Vec2 surfaceDelta = Slugcat.ApplyMovingSurfaceDelta(World);
-            Graphics.ApplyMovingSurfaceDelta(surfaceDelta);
-            Foods.ApplyMovingSurfaceDelta(World);
         }
 
         public bool FeedDangleFruit()
@@ -312,6 +376,9 @@ namespace RainWorldDesktopPet.Core
         {
             SlugcatPose pose = Graphics.BuildPose(Interpolation, AI.Attention,
                 simulationTick, DebugEnabled);
+            pose.CharacterRenderScale = SimulationConstants.CharacterRenderScale *
+                VisualSizeMultiplier;
+            pose.UpdateGraphicsBounds();
             pose.LogicTicksPerSecond = SimulationConstants.LogicTicksPerSecond;
             pose.LogicStepSeconds = fixedTimeStep.StepSeconds;
             pose.AccumulatorSeconds = fixedTimeStep.AccumulatorSeconds;
@@ -374,16 +441,24 @@ namespace RainWorldDesktopPet.Core
 
         public bool HitTest(Vec2 screenPoint)
         {
-            Vec2 simulationPoint = DesktopWorldTransform.ToSimulation(screenPoint);
-            return Foods.HitTest(simulationPoint) ||
+            Vec2 worldPoint;
+            Vec2 simulationPoint;
+            ResolvePointerSpaces(DesktopWorldTransform.ToSimulation(screenPoint),
+                Slugcat.Center, VisualSizeMultiplier, out worldPoint,
+                out simulationPoint);
+            return Foods.HitTest(worldPoint) ||
                 Slugcat.HitTest(simulationPoint) ||
                 Vec2.Distance(simulationPoint, Graphics.Head.Position) < 17.0;
         }
 
         public bool BeginGrab(Vec2 screenPoint)
         {
-            Vec2 simulationPoint = DesktopWorldTransform.ToSimulation(screenPoint);
-            if (Foods.TryBeginDrag(simulationPoint)) return true;
+            Vec2 worldPoint;
+            Vec2 simulationPoint;
+            ResolvePointerSpaces(DesktopWorldTransform.ToSimulation(screenPoint),
+                Slugcat.Center, VisualSizeMultiplier, out worldPoint,
+                out simulationPoint);
+            if (Foods.TryBeginDrag(worldPoint)) return true;
             if (Slugcat.Grab(simulationPoint)) return true;
             if (Vec2.Distance(simulationPoint, Graphics.Head.Position) < 17.0)
             {
@@ -394,9 +469,58 @@ namespace RainWorldDesktopPet.Core
 
         public void EndGrab()
         {
-            if (Foods.EndDrag(Vec2.ClampMagnitude(mouse.Velocity /
-                SimulationConstants.LogicTicksPerSecond, 25.0))) return;
-            Slugcat.Release(mouse.Velocity);
+            // Food drag velocity is already in unscaled desktop-world simulation
+            // units. Character dragging alone needs the inverse visual-size scale.
+            if (Foods.IsDragging)
+            {
+                Foods.EndDrag(Vec2.ClampMagnitude(mouse.Velocity /
+                    SimulationConstants.LogicTicksPerSecond, 25.0));
+                return;
+            }
+            Slugcat.Release(mouse.Velocity / VisualSizeMultiplier);
+        }
+
+        public void SetSize(SlugcatSize value)
+        {
+            // Reject invalid values at the setting boundary so every renderer,
+            // hit-test, and pointer conversion keeps a finite positive scale.
+            SlugcatSizeSettings.Multiplier(value);
+            size = value;
+            Slugcat.SetSizeScale(VisualSizeMultiplier);
+        }
+
+        public Vec2 ToRenderedScreen(Vec2 simulationPoint)
+        {
+            return DesktopWorldTransform.ToDesktop(Slugcat.Center +
+                (simulationPoint - Slugcat.Center) * VisualSizeMultiplier);
+        }
+
+        public double ToRenderedScreenLength(double simulationLength)
+        {
+            return DesktopWorldTransform.ToDesktopLength(simulationLength *
+                VisualSizeMultiplier);
+        }
+
+        private Vec2 PointerToSimulation(Vec2 normalSimulationPoint)
+        {
+            Vec2 worldPointer;
+            Vec2 characterPointer;
+            ResolvePointerSpaces(normalSimulationPoint, Slugcat.Center,
+                VisualSizeMultiplier, out worldPointer, out characterPointer);
+            return characterPointer;
+        }
+
+        internal static void ResolvePointerSpaces(Vec2 normalSimulationPoint,
+            Vec2 characterCenter, double visualSizeMultiplier,
+            out Vec2 worldPointer, out Vec2 characterPointer)
+        {
+            if (visualSizeMultiplier <= 0.0 ||
+                double.IsNaN(visualSizeMultiplier) ||
+                double.IsInfinity(visualSizeMultiplier))
+                throw new ArgumentOutOfRangeException("visualSizeMultiplier");
+            worldPointer = normalSimulationPoint;
+            characterPointer = characterCenter +
+                (normalSimulationPoint - characterCenter) / visualSizeMultiplier;
         }
 
         private void RecoverFromDesktopEscape()
@@ -530,6 +654,9 @@ namespace RainWorldDesktopPet.Core
                     skin.Name + " does not provide a complete " + part + " sprite group.");
                 return false;
             }
+            // Decode at the explicit selection boundary so the following render
+            // frame never pays an atlas-load stall.
+            skin.PrepareForRendering();
             dmsPartSelections[part] = skin.Id;
             Renderer.SetDmsPart(part, skin);
             reason = null;
@@ -566,6 +693,7 @@ namespace RainWorldDesktopPet.Core
                     "The source mod is installed but disabled in Rain World Remix: ") + skin.ModName;
                 return false;
             }
+            skin.PrepareForRendering();
             ClearDmsParts();
             foreach (string part in skin.AvailableParts)
             {
@@ -620,6 +748,7 @@ namespace RainWorldDesktopPet.Core
         {
             if (disposed) return;
             disposed = true;
+            if (audioSink != null) audioSink.StopSource(audioSourceId);
             if (dmsSkins != null) dmsSkins.Dispose();
             if (workshopCatalog != null) workshopCatalog.Dispose();
             Renderer.Dispose();

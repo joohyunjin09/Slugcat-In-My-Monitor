@@ -16,6 +16,8 @@ namespace RainWorldDesktopPet.RainWorld
             AssemblyCSharpPath = Path.Combine(ManagedPath, "Assembly-CSharp.dll");
             ResourcesAssetsPath = Path.Combine(DataPath, "resources.assets");
             ResourcesAssetsStreamPath = ResourcesAssetsPath + ".resS";
+            MoreSlugcatsModInfoPath = Path.Combine(StreamingAssetsPath, "mods",
+                "moreslugcats", "modinfo.json");
         }
 
         public readonly string RootPath;
@@ -25,6 +27,14 @@ namespace RainWorldDesktopPet.RainWorld
         public readonly string AssemblyCSharpPath;
         public readonly string ResourcesAssetsPath;
         public readonly string ResourcesAssetsStreamPath;
+        public readonly string MoreSlugcatsModInfoPath;
+
+        // Downpour ships its More Slugcats expansion as this built-in mod. This
+        // marker is available before the atlas provider or any Workshop code runs.
+        public bool HasMoreSlugcatsExpansion
+        {
+            get { return File.Exists(MoreSlugcatsModInfoPath); }
+        }
 
         public string ReadGameVersion()
         {

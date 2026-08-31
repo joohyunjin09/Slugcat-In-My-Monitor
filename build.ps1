@@ -9,6 +9,9 @@ $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $toolRoot = Join-Path $repoRoot '.tools\net48-reference'
 $referenceAssembly = Join-Path $toolRoot 'build\.NETFramework\v4.8\mscorlib.dll'
+$audioCodecRoot = Join-Path $repoRoot '.tools\audio-codecs'
+$audioCodecAssembly = Join-Path $audioCodecRoot 'Fmod5Sharp\lib\netstandard2.0\Fmod5Sharp.dll'
+$vorbisDecoderAssembly = Join-Path $audioCodecRoot 'legacy\NVorbis\lib\net35\NVorbis.dll'
 $msbuild = 'C:\Windows\Microsoft.NET\Framework64\v4.0.30319\MSBuild.exe'
 $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
 
@@ -30,6 +33,33 @@ if (-not (Test-Path -LiteralPath $referenceAssembly)) {
     }
     Expand-Archive -LiteralPath $packagePath -DestinationPath $toolRoot
     Remove-Item -LiteralPath $packagePath -Force
+}
+
+if (-not (Test-Path -LiteralPath $audioCodecAssembly) -or
+    -not (Test-Path -LiteralPath $vorbisDecoderAssembly)) {
+    $downloadRoot = Join-Path $repoRoot '.tools'
+    $nuget = Join-Path $downloadRoot 'nuget.exe'
+    New-Item -ItemType Directory -Force -Path $downloadRoot | Out-Null
+    if (-not (Test-Path -LiteralPath $nuget)) {
+        Write-Host 'Downloading NuGet for managed FSB5 Vorbis support (build-only)...'
+        Invoke-WebRequest -UseBasicParsing `
+            -Uri 'https://dist.nuget.org/win-x86-commandline/v6.11.1/nuget.exe' `
+            -OutFile $nuget
+    }
+    Write-Host 'Restoring managed audio codec dependencies...'
+    if (-not (Test-Path -LiteralPath $audioCodecAssembly)) {
+        & $nuget install Fmod5Sharp -Version 2.0.2 `
+            -OutputDirectory $audioCodecRoot -ExcludeVersion `
+            -DependencyVersion Lowest -Framework net48 -NonInteractive
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    }
+    if (-not (Test-Path -LiteralPath $vorbisDecoderAssembly)) {
+        & $nuget install NVorbis -Version 0.8.6 `
+            -OutputDirectory (Join-Path $audioCodecRoot 'legacy') `
+            -ExcludeVersion -DependencyVersion Lowest `
+            -Framework net48 -NonInteractive
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    }
 }
 
 if (-not $SkipNative) {

@@ -1,4 +1,5 @@
 using System;
+using RainWorldDesktopPet.Audio;
 using RainWorldDesktopPet.Core;
 using RainWorldDesktopPet.Desktop;
 using RainWorldDesktopPet.Physics;
@@ -15,10 +16,16 @@ namespace RainWorldDesktopPet.Creature
         private long impactStunDeadlineTick = -1;
         private readonly List<AbilityEffect> effects = new List<AbilityEffect>();
         private readonly List<DesktopSpear> spears = new List<DesktopSpear>();
+        private readonly Dictionary<string, string> spearAirLoops =
+            new Dictionary<string, string>(StringComparer.Ordinal);
         private readonly IList<AbilityEffect> effectView;
         private readonly IList<DesktopSpear> spearView;
         private readonly Random spearImpactRandom = new Random(0x5BEA7);
         private ISlugcatAbilityController abilityController;
+        private double sizeMovementScale = 1.0;
+        private bool pupAppearance;
+        private ISoundEventSink audioSink;
+        private string audioSourceId = string.Empty;
 
         public Slugcat(Vec2 spawnPosition)
             : this(spawnPosition, SlugcatId.White)
@@ -47,6 +54,7 @@ namespace RainWorldDesktopPet.Creature
             : this(spawnPosition, SlugcatId.White)
         {
             Appearance = SlugcatAppearance.For(variant);
+            Appearance.SetPupScale(BodyProportionScale);
             SetSelectedProfile(SlugcatProfiles.Get(variant));
         }
 
@@ -66,6 +74,23 @@ namespace RainWorldDesktopPet.Creature
         public long LastTerrainImpactTick { get; private set; }
         public long TerrainImpactSequence { get; private set; }
         public long ImpactStunDeadlineTick { get { return impactStunDeadlineTick; } }
+        public double SizeMovementScale { get { return sizeMovementScale; } }
+        public bool PupAppearance { get { return pupAppearance; } }
+        public double BodyProportionScale
+        {
+            // Player.setPupStatus keeps the original 9/8 BodyChunk radii.
+            // The pup-specific connection and tail rules are applied separately.
+            get { return 1.0; }
+        }
+        public double EffectiveBodyConnectionDistance
+        {
+            get
+            {
+                return pupAppearance
+                    ? SlugpupAppearanceSettings.BodyConnectionDistance
+                    : SimulationConstants.BodyConnectionDistance;
+            }
+        }
 
         public Vec2 Center { get { return (BodyChunks[0].Position + BodyChunks[1].Position) * 0.5; } }
 
@@ -120,6 +145,7 @@ namespace RainWorldDesktopPet.Creature
 
             if (grabbedChunk >= 0)
             {
+                ApplyOriginalExternalGrabPose();
                 for (int i = 0; i < BodyChunks.Length; i++)
                 {
                     if (i == grabbedChunk)
@@ -129,7 +155,8 @@ namespace RainWorldDesktopPet.Creature
                     }
                     else
                     {
-                        BodyChunks[i].Integrate(SimulationConstants.GravityPerTick, SimulationConstants.AirFriction);
+                        BodyChunks[i].Integrate(SimulationConstants.GravityPerTick,
+                            SimulationConstants.AirFriction, sizeMovementScale);
                     }
                 }
             }
@@ -140,7 +167,7 @@ namespace RainWorldDesktopPet.Creature
                     // Player keeps base.gravity=.9 in WallClimb; that mode adds
                     // its own contact/slide forces after BodyChunk.Update.
                     BodyChunks[i].Integrate(SimulationConstants.GravityPerTick,
-                        SimulationConstants.AirFriction);
+                        SimulationConstants.AirFriction, sizeMovementScale);
                 }
             }
 
@@ -360,6 +387,7 @@ namespace RainWorldDesktopPet.Creature
         public bool Grab(Vec2 point)
         {
             grabbedChunk = PickChunk(point, 14.0);
+            if (grabbedChunk >= 0) ApplyOriginalExternalGrabPose();
             return grabbedChunk >= 0;
         }
 
@@ -371,6 +399,29 @@ namespace RainWorldDesktopPet.Creature
             }
 
             grabbedChunk = -1;
+            if (!State.Dead && State.StunCounter < 1)
+            {
+                // Do not restore the pre-grab Crawl pose. Player recovers from
+                // an externally controlled/stunned body through Default/None,
+                // then derives Stand or Crawl from new terrain contacts.
+                State.Animation = AnimationIndex.None;
+                State.BodyMode = BodyModeIndex.Default;
+                State.Standing = false;
+                State.Grounded = false;
+            }
+        }
+
+        private void ApplyOriginalExternalGrabPose()
+        {
+            if (State.Dead) return;
+            // Retail Player.Update maps lost-control frames to None/Stunned and
+            // Player.Stun drops standing. Mouse dragging is the desktop
+            // equivalent of that external physical control, without adding a
+            // stun timer or suppressing the pet after release.
+            State.Animation = AnimationIndex.None;
+            State.BodyMode = BodyModeIndex.Stunned;
+            State.Standing = false;
+            State.Grounded = false;
         }
 
         public void Reposition(Vec2 hipsPosition)
@@ -378,7 +429,7 @@ namespace RainWorldDesktopPet.Creature
             grabbedChunk = -1;
             BodyChunks[1].Position = hipsPosition;
             BodyChunks[0].Position = hipsPosition -
-                new Vec2(0.0, SimulationConstants.BodyConnectionDistance);
+                new Vec2(0.0, EffectiveBodyConnectionDistance);
             for (int i = 0; i < BodyChunks.Length; i++)
             {
                 BodyChunk chunk = BodyChunks[i];
@@ -388,6 +439,7 @@ namespace RainWorldDesktopPet.Creature
                 chunk.ContactLeft = false;
                 chunk.ContactRight = false;
                 chunk.SupportingSurfaceId = 0;
+                chunk.SupportingSurfaceTop = 0.0;
                 chunk.WallSurfaceId = 0;
                 chunk.PreviousContactFloor = false;
                 chunk.PreviousContactLeft = false;
@@ -405,12 +457,80 @@ namespace RainWorldDesktopPet.Creature
             if (abilityController != null) abilityController.Reset();
             Movement.Reset();
             effects.Clear();
+            StopAllSpearAirLoops();
             spears.Clear();
         }
 
         public bool HitTest(Vec2 point)
         {
             return PickChunk(point, 18.0) >= 0;
+        }
+
+        public void SetSizeScale(double value)
+        {
+            if (value <= 0.0 || double.IsNaN(value) || double.IsInfinity(value))
+                throw new ArgumentOutOfRangeException("value");
+
+            sizeMovementScale = value;
+            ApplyCollisionRadii(false);
+        }
+
+        public void SetPupAppearance(bool enabled)
+        {
+            if (pupAppearance == enabled)
+            {
+                if (Appearance != null) Appearance.SetPupScale(BodyProportionScale);
+                ApplyCollisionRadii(true);
+                return;
+            }
+
+            pupAppearance = enabled;
+            if (Appearance != null) Appearance.SetPupScale(BodyProportionScale);
+            ApplyCollisionRadii(true);
+
+            double targetDistance = EffectiveBodyConnectionDistance;
+            if (enabled) BodyConnection.SetMaximumDistance(targetDistance);
+            else BodyConnection.ClearMaximumDistance();
+            BodyConnection.Distance = targetDistance;
+
+            BodyChunk chest = BodyChunks[0];
+            BodyChunk hips = BodyChunks[1];
+            Vec2 axis = chest.Position - hips.Position;
+            if (axis.LengthSquared < 0.000001) axis = Vec2.Up;
+            chest.Position = hips.Position + axis.Normalized * targetDistance;
+
+            // Geometry switches are settings changes, not animation frames. Keep
+            // both interpolation snapshots on the same new pose so changing to a
+            // pup cannot produce a one-frame adult->pup body lag or vertical bob.
+            for (int i = 0; i < BodyChunks.Length; i++)
+                BodyChunks[i].LastPosition = BodyChunks[i].Position;
+        }
+
+        private void ApplyCollisionRadii(bool preserveGroundContact)
+        {
+            double scale = sizeMovementScale;
+            double mainRadius = SimulationConstants.MainChunkRadius * scale;
+            double hipsRadius = SimulationConstants.HipsChunkRadius * scale;
+            BodyChunk hips = BodyChunks[1];
+            double oldHipsRadius = hips.Radius;
+            bool grounded = preserveGroundContact &&
+                (State.Grounded || hips.ContactFloor || hips.PreviousContactFloor);
+
+            if (grounded && Math.Abs(oldHipsRadius - hipsRadius) > 0.000001)
+            {
+                // Windows simulation Y points down. Move the chunk centre by the
+                // lost/gained radius so its collision bottom stays on the exact
+                // same floor while the explicit desktop size changes.
+                Vec2 floorCompensation = new Vec2(0.0, oldHipsRadius - hipsRadius);
+                for (int i = 0; i < BodyChunks.Length; i++)
+                {
+                    BodyChunks[i].Position += floorCompensation;
+                    BodyChunks[i].LastPosition += floorCompensation;
+                }
+            }
+
+            BodyChunks[0].SetRadius(mainRadius);
+            BodyChunks[1].SetRadius(hipsRadius);
         }
 
         public void SetSelectedSlugcat(SlugcatId id)
@@ -431,12 +551,14 @@ namespace RainWorldDesktopPet.Creature
                     Appearance = SlugcatAppearance.For(SlugcatVariant.Survivor);
                     break;
             }
+            Appearance.SetPupScale(BodyProportionScale);
             SetSelectedProfile(profile);
         }
 
         public void SetVariant(SlugcatVariant variant)
         {
             Appearance = SlugcatAppearance.For(variant);
+            Appearance.SetPupScale(BodyProportionScale);
             SetSelectedProfile(SlugcatProfiles.Get(variant));
         }
 
@@ -454,15 +576,39 @@ namespace RainWorldDesktopPet.Creature
         public void EmitSound(string id, Vec2 position, double volume, double pitch,
             int cooldownTicks)
         {
+            EmitSound(id, position, BodyChunks[0].Velocity, volume, pitch,
+                cooldownTicks);
+        }
+
+        public void EmitSound(string id, Vec2 position, Vec2 velocity,
+            double volume, double pitch, int cooldownTicks)
+        {
+            if (audioSink == null || string.IsNullOrEmpty(id)) return;
+            audioSink.Play(new SoundEvent(audioSourceId, id, position, velocity,
+                volume, pitch, Math.Max(0, cooldownTicks), physicsTick));
         }
 
         public void StartSoundLoop(string id, string loopKey, Vec2 position,
             double volume, double pitch)
         {
+            if (audioSink == null || string.IsNullOrEmpty(id) ||
+                string.IsNullOrEmpty(loopKey)) return;
+            audioSink.StartLoop(new SoundEvent(audioSourceId, id, position,
+                BodyChunks[0].Velocity, volume, pitch, 0, physicsTick), loopKey);
         }
 
         public void StopSoundLoop(string id, string loopKey, Vec2 position)
         {
+            if (audioSink == null || string.IsNullOrEmpty(loopKey)) return;
+            audioSink.StopLoop(audioSourceId, loopKey);
+        }
+
+        public void SetAudioSink(ISoundEventSink sink, string sourceId)
+        {
+            if (audioSink != null && !ReferenceEquals(audioSink, sink))
+                audioSink.StopSource(audioSourceId);
+            audioSink = sink;
+            audioSourceId = sourceId ?? string.Empty;
         }
 
         public void AddEffect(AbilityEffect effect)
@@ -484,21 +630,63 @@ namespace RainWorldDesktopPet.Creature
             }
             for (int i = spears.Count - 1; i >= 0; i--)
             {
-                if (spears[i].Step(world))
+                DesktopSpear spear = spears[i];
+                if (spear.Step(world))
                 {
-                    for (int spark = 0; spark < spears[i].ImpactSparkCount; spark++)
+                    if (!string.IsNullOrEmpty(spear.LastImpactSound))
+                        EmitSound(spear.LastImpactSound, spear.Chunk.Position,
+                            spear.Chunk.Velocity, 1.0, 1.0, 1);
+                    for (int spark = 0; spark < spear.ImpactSparkCount; spark++)
                     {
                         Vec2 angle = RandomUnit(spearImpactRandom);
-                        Vec2 at = spears[i].Chunk.Position +
-                            spears[i].ThrowDirection * (spears[i].Chunk.Radius - 1.0);
+                        Vec2 at = spear.Chunk.Position +
+                            spear.ThrowDirection * (spear.Chunk.Radius - 1.0);
                         Vec2 velocity = angle * (spearImpactRandom.NextDouble() * 10.0) -
-                            spears[i].ThrowDirection * 10.0;
+                            spear.ThrowDirection * 10.0;
                         AddEffect(AbilityEffect.CreateSpark(at, velocity, 2, 4,
                             spearImpactRandom));
                     }
                 }
-                if (spears[i].IsExpired) spears.RemoveAt(i);
+                UpdateSpearAirLoop(spear);
+                if (spear.IsExpired)
+                {
+                    StopSpearAirLoop(spear);
+                    spears.RemoveAt(i);
+                }
             }
+        }
+
+        private void UpdateSpearAirLoop(DesktopSpear spear)
+        {
+            string previous;
+            spearAirLoops.TryGetValue(spear.AudioLoopKey, out previous);
+            string current = spear.AirLoopSound;
+            if (string.Equals(previous, current, StringComparison.Ordinal)) return;
+            if (!string.IsNullOrEmpty(previous))
+                StopSoundLoop(previous, spear.AudioLoopKey, spear.Chunk.Position);
+            if (string.IsNullOrEmpty(current))
+                spearAirLoops.Remove(spear.AudioLoopKey);
+            else
+            {
+                spearAirLoops[spear.AudioLoopKey] = current;
+                StartSoundLoop(current, spear.AudioLoopKey, spear.Chunk.Position,
+                    0.7, 1.0);
+            }
+        }
+
+        private void StopSpearAirLoop(DesktopSpear spear)
+        {
+            string previous;
+            if (!spearAirLoops.TryGetValue(spear.AudioLoopKey, out previous)) return;
+            spearAirLoops.Remove(spear.AudioLoopKey);
+            StopSoundLoop(previous, spear.AudioLoopKey, spear.Chunk.Position);
+        }
+
+        private void StopAllSpearAirLoops()
+        {
+            foreach (KeyValuePair<string, string> pair in spearAirLoops)
+                StopSoundLoop(pair.Value, pair.Key, Center);
+            spearAirLoops.Clear();
         }
 
         private static Vec2 RandomUnit(Random random)

@@ -7,7 +7,15 @@ namespace RainWorldDesktopPet.Graphics
 {
     public sealed class ProceduralTail
     {
+        // PlayerGraphics creates pup TailSegments with the normal segment
+        // radius but half the normal connection length. Do not treat the
+        // 17 -> 12 body connection ratio as a uniform tail scale.
+        private const double SlugpupTailLengthScale = 0.5;
+
         private readonly TailSegment[] segments;
+        private Vec2 lastHips;
+        private double geometryScaleMarker = 1.0;
+        private double tailLengthScale = 1.0;
 
         public ProceduralTail(Vec2 hips)
             : this(hips, SlugcatGraphicsProfiles.White.Tail)
@@ -20,6 +28,7 @@ namespace RainWorldDesktopPet.Graphics
             int count = profile.Radii.Length;
             segments = new TailSegment[count];
             Vec2 position = hips;
+            lastHips = hips;
             for (int i = 0; i < count; i++)
             {
                 double radius = profile.Radii[i];
@@ -31,14 +40,88 @@ namespace RainWorldDesktopPet.Graphics
 
         public TailSegment[] Segments { get { return segments; } }
 
+        // Compatibility marker for the settings bridge. The original pup
+        // geometry is not uniformly scaled by this value; it only tells us
+        // whether the bridge is requesting adult or pup proportions.
+        public double GeometryScale { get { return geometryScaleMarker; } }
+        public double TailLengthScale { get { return tailLengthScale; } }
+
+        public void SetGeometryScale(double value, Vec2 hips)
+        {
+            if (value <= 0.0 || double.IsNaN(value) || double.IsInfinity(value))
+                throw new ArgumentOutOfRangeException("value");
+
+            SetPupGeometry(value < 0.999999, hips);
+            geometryScaleMarker = value;
+            lastHips = hips;
+        }
+
+        public void SetPupGeometry(bool enabled, Vec2 hips)
+        {
+            double targetLengthScale = enabled ? SlugpupTailLengthScale : 1.0;
+            if (Math.Abs(targetLengthScale - tailLengthScale) < 0.000001)
+            {
+                lastHips = hips;
+                return;
+            }
+
+            double ratio = targetLengthScale / tailLengthScale;
+            Vec2 currentConnection = hips;
+            Vec2 lastConnection = hips;
+            for (int i = 0; i < segments.Length; i++)
+            {
+                TailSegment segment = segments[i];
+
+                Vec2 currentDelta = segment.Position - currentConnection;
+                segment.Position = currentConnection + currentDelta * ratio;
+
+                Vec2 lastDelta = segment.LastPosition - lastConnection;
+                segment.LastPosition = lastConnection + lastDelta * ratio;
+
+                segment.Velocity *= ratio;
+                segment.SetLengthScale(targetLengthScale);
+
+                currentConnection = segment.Position;
+                lastConnection = segment.LastPosition;
+            }
+
+            tailLengthScale = targetLengthScale;
+            lastHips = hips;
+        }
+
         public void Step(
             Vec2 chest,
             Vec2 hips,
+            Vec2 physicalHips,
             Vec2 hipsVelocity,
             int facing,
             BodyModeIndex bodyMode,
-            DesktopCollisionWorld world)
+            DesktopCollisionWorld world,
+            double movementScale)
         {
+            if (movementScale <= 0.0 || double.IsNaN(movementScale) ||
+                double.IsInfinity(movementScale))
+                throw new ArgumentOutOfRangeException("movementScale");
+
+            // TailSegment runs in canonical Rain World distances. Horizontal
+            // BodyChunk travel is size-compensated before graphics update, so
+            // reconstruct the missing canonical frame displacement inside the
+            // tail simulation. Leave the root in the authored hips frame and
+            // blend the correction toward the tip: the root also drives the
+            // hips sprite angle, so translating it would create a waist kink.
+            // Rendering applies movementScale spatially again.
+            double extraCanonicalX = (physicalHips.X - lastHips.X) *
+                (1.0 / movementScale - 1.0);
+            if (Math.Abs(extraCanonicalX) > 0.000001)
+            {
+                for (int i = 0; i < segments.Length; i++)
+                {
+                    double distalWeight = segments.Length == 1 ? 0.0 :
+                        (double)i / (segments.Length - 1);
+                    segments[i].Position.X -= extraCanonicalX * distalWeight;
+                }
+            }
+            lastHips = physicalHips;
             // PlayerGraphics.Update starts this factor at one, lowers it while
             // running, and sets it to zero while airborne. It controls both
             // damping and how strongly gravity pulls the tail down.
@@ -57,7 +140,8 @@ namespace RainWorldDesktopPet.Graphics
             if (fastStanding)
             {
                 forceOrigin = hips + new Vec2(
-                    facing * 16.0 * MathUtil.Clamp(Math.Abs(hipsVelocity.X) - 0.2, 0.0, 1.0),
+                    facing * 16.0 *
+                        MathUtil.Clamp(Math.Abs(hipsVelocity.X) - 0.2, 0.0, 1.0),
                     4.0);
             }
 
@@ -139,6 +223,7 @@ namespace RainWorldDesktopPet.Graphics
 
         public void Translate(Vec2 delta)
         {
+            lastHips += delta;
             for (int i = 0; i < segments.Length; i++)
             {
                 segments[i].Position += delta;

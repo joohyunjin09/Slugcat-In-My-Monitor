@@ -26,6 +26,7 @@ namespace RainWorldDesktopPet.Graphics
         private readonly double defaultHuntSpeed;
         private readonly double defaultQuickness;
         private readonly int limbNumber;
+        private double geometryScaleMarker = 1.0;
         private bool wasCrawling;
 
         public Limb(LimbKind kind, int side, Vec2 initialPosition, double length)
@@ -66,6 +67,19 @@ namespace RainWorldDesktopPet.Graphics
         public bool IsPlanted { get { return ReachedSnapPosition && Mode == LimbMode.HuntAbsolutePosition; } }
         public int LimbNumber { get { return limbNumber; } }
         public bool MovementEngagedThisTick { get; private set; }
+
+        // Kept only for the settings bridge introduced with the slugpup toggle.
+        // Vanilla SlugcatHand geometry is not uniformly multiplied by the
+        // 17 -> 12 body-connection ratio, so this records the requested state
+        // without changing arm length, hunt speed, grip ranges, or targets.
+        public double GeometryScale { get { return geometryScaleMarker; } }
+
+        public void SetGeometryScale(double value)
+        {
+            if (value <= 0.0 || double.IsNaN(value) || double.IsInfinity(value))
+                throw new ArgumentOutOfRangeException("value");
+            geometryScaleMarker = value;
+        }
 
         // SlugcatHand.Update ordering: update using the previous tick's target,
         // constrain to the upper BodyChunk, then select the target for next tick.
@@ -202,7 +216,11 @@ namespace RainWorldDesktopPet.Graphics
             double airborneCounter)
         {
             SlugcatState state = player.State;
-            Vec2 connection = player.BodyChunks[0].Position;
+            // WallClimb receives the stabilized PlayerGraphics chest from
+            // SlugcatGraphics. Other body modes retain the physical upper
+            // chunk exactly as before.
+            Vec2 connection = state.BodyMode == BodyModeIndex.WallClimb
+                ? ConnectionPosition : player.BodyChunks[0].Position;
             Vec2 velocity = player.BodyChunks[0].Velocity;
             bool unused = true;
 

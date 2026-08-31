@@ -7,6 +7,7 @@ using System.Drawing;
 using System.Runtime.InteropServices;
 using System.Threading;
 using System.Windows.Forms;
+using RainWorldDesktopPet.Audio;
 using RainWorldDesktopPet.Core;
 using RainWorldDesktopPet.Desktop;
 using RainWorldDesktopPet.Graphics;
@@ -14,6 +15,7 @@ using RainWorldDesktopPet.Physics;
 using RainWorldDesktopPet.RainWorld;
 using RainWorldDesktopPet.Creature;
 using RainWorldDesktopPet.Workshop;
+using RainWorldDesktopPet.AI;
 using Timer = System.Windows.Forms.Timer;
 
 namespace RainWorldDesktopPet.UI
@@ -51,6 +53,7 @@ namespace RainWorldDesktopPet.UI
         private readonly ToolStripMenuItem debugItem;
         private readonly ToolStripMenuItem retryRenderItem;
         private readonly ToolStripMenuItem pauseItem;
+        private readonly ToolStripMenuItem muteItem;
         private readonly ToolStripMenuItem activeSlugcatsMenu;
         private readonly ToolStripMenuItem spawnItem;
         private readonly ToolStripMenuItem removeItem;
@@ -73,21 +76,32 @@ namespace RainWorldDesktopPet.UI
             new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
         private readonly DesktopCollisionWorld collisionWorld =
             new DesktopCollisionWorld(new WindowEnumerator());
+        private readonly RainWorldAudioEngine audioEngine;
         private readonly Stopwatch surfaceRefreshClock = Stopwatch.StartNew();
         private readonly Stopwatch refreshRateCacheClock = Stopwatch.StartNew();
         private readonly ConcurrentQueue<HookMouseInput> hookMouseInputs =
             new ConcurrentQueue<HookMouseInput>();
+        private readonly RadialCommandMenu commandMenu = new RadialCommandMenu();
+        private readonly WindowLocationChangeTracker windowLocationChanges =
+            new WindowLocationChangeTracker();
+        private readonly IntPtr[] liveWindowHandleBuffer =
+            new IntPtr[WindowLocationChangeTracker.Capacity];
         private DirectCompositionHost compositionHost;
         private readonly string startDmsSkinId;
         private GameLoop gameLoop;
         private GameLoop grabbedGameLoop;
         private readonly NativeMethods.WinEventProc foregroundEventCallback;
+        private readonly NativeMethods.WinEventProc locationEventCallback;
         private LowLevelMouseInputHook mouseHook;
         private volatile MouseHookHitSnapshot mouseHitSnapshot =
             MouseHookHitSnapshot.Empty;
+        private volatile RadialCommandHitSnapshot commandMenuHitSnapshot =
+            RadialCommandHitSnapshot.Empty;
         private IntPtr mouseInputWindowHandle;
         private int hookOwnsLeftButton;
+        private int hookOwnsRightButton;
         private IntPtr foregroundEventHook;
+        private IntPtr locationEventHook;
         private IntPtr suspendResumeNotification;
         private SettingsWindow settingsWindow;
         private SkinEditorWindow skinEditor;
@@ -102,18 +116,30 @@ namespace RainWorldDesktopPet.UI
         private long lastPowerResumeTimestamp = long.MinValue;
         private double displayRefreshRate;
 
+        private enum HookMouseInputAction
+        {
+            BeginGrab,
+            EndGrab,
+            OpenCommandMenu,
+            SelectCommand,
+            CloseCommandMenu
+        }
+
         private sealed class HookMouseInput
         {
-            internal HookMouseInput(bool pressed, GameLoop target, Vec2 point)
+            internal HookMouseInput(HookMouseInputAction action, GameLoop target,
+                Vec2 point, DesktopPetCommand command)
             {
-                Pressed = pressed;
+                Action = action;
                 Target = target;
                 Point = point;
+                Command = command;
             }
 
-            internal readonly bool Pressed;
+            internal readonly HookMouseInputAction Action;
             internal readonly GameLoop Target;
             internal readonly Vec2 Point;
+            internal readonly DesktopPetCommand Command;
         }
 
         public LayeredOverlayWindow(RainWorldInstallation installation, bool startDebug,
@@ -129,11 +155,15 @@ namespace RainWorldDesktopPet.UI
             this.startSlugcat = startSlugcat;
             this.startDmsSkinId = startDmsSkinId;
             foregroundEventCallback = ForegroundEventCallback;
+            locationEventCallback = LocationEventCallback;
             FormBorderStyle = FormBorderStyle.None;
             ShowInTaskbar = false;
             TopMost = true;
             StartPosition = FormStartPosition.Manual;
             virtualDesktopBounds = MonitorManager.GetVirtualBounds();
+            audioEngine = new RainWorldAudioEngine(installation, virtualDesktopBounds);
+            audioEngine.SetMasterVolume(AudioVolumeSettings.Current);
+            audioEngine.SetMuted(AudioMuteSettings.Current);
             Bounds = virtualDesktopBounds;
             Text = "SlugcatInMyMonitor";
             applicationIcon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
@@ -164,6 +194,15 @@ namespace RainWorldDesktopPet.UI
             {
                 for (int i = 0; i < gameLoops.Count; i++)
                     gameLoops[i].Paused = pauseItem.Checked;
+                RefreshSettingsWindow();
+            };
+            muteItem = new ToolStripMenuItem(T("사운드 음소거", "Mute Audio"));
+            muteItem.CheckOnClick = true;
+            muteItem.Checked = audioEngine.Muted;
+            muteItem.CheckedChanged += delegate
+            {
+                audioEngine.SetMuted(muteItem.Checked);
+                AudioMuteSettings.Set(muteItem.Checked);
                 RefreshSettingsWindow();
             };
             retryRenderItem = new ToolStripMenuItem(T("렌더링 재시도", "Retry Rendering"));
@@ -217,6 +256,7 @@ namespace RainWorldDesktopPet.UI
             menu.Items.Add(foodMenu);
             menu.Items.Add(slugcatMenu);
             menu.Items.Add(skinEditorItem);
+            menu.Items.Add(muteItem);
             menu.Items.Add(debugItem);
             menu.Items.Add(pauseItem);
             menu.Items.Add(refreshWorkshopItem);
@@ -277,6 +317,7 @@ namespace RainWorldDesktopPet.UI
             ConfigureVirtualDesktop();
             InstallMouseHook();
             InstallForegroundEventHook();
+            InstallLocationEventHook();
             EnsureOverlayTopMost();
             compositionHost = new DirectCompositionHost(Handle, virtualDesktopBounds);
             RegisterForSuspendResumeNotifications();
@@ -296,14 +337,19 @@ namespace RainWorldDesktopPet.UI
             renderingEnabled = false;
             renderTimer.Stop();
             UnregisterForSuspendResumeNotifications();
+            UninstallLocationEventHook();
             UninstallForegroundEventHook();
             UninstallMouseHook();
             ReleaseGrabInput();
             if (settingsWindow != null && !settingsWindow.IsDisposed) settingsWindow.Close();
             if (skinEditor != null && !skinEditor.IsDisposed) skinEditor.Close();
+            CloseCommandSelection(true);
             for (int i = 0; i < gameLoops.Count; i++) gameLoops[i].Dispose();
             gameLoops.Clear();
             gameLoop = null;
+            commandMenu.Dispose();
+            AudioMuteSettings.Set(audioEngine.Muted);
+            audioEngine.Dispose();
             if (compositionHost != null) compositionHost.Dispose();
             trayIcon.Visible = false;
             trayIcon.Dispose();
@@ -332,6 +378,7 @@ namespace RainWorldDesktopPet.UI
                     gameLoops[i].Advance(Handle);
                     poseBuffer[i] = gameLoops[i].BuildPose();
                 }
+                UpdateCommandMenu();
                 bool mouseBoundsChanged = false;
                 for (int i = 0; i < gameLoops.Count; i++)
                     if (mouseHitSnapshotTicks[i] != gameLoops[i].SimulationTick)
@@ -397,7 +444,8 @@ namespace RainWorldDesktopPet.UI
                                 loop.Renderer.Render(surface.Graphics,
                                     poseBuffer[loopIndex], renderSpace, debug,
                                     loop.World, loop.Slugcat, loop.AI,
-                                    loop.AssetStatus, loop.SelectedSlugcat);
+                                    debug ? loop.AssetStatus + "\n" + loop.AudioStatus :
+                                        loop.AssetStatus, loop.SelectedSlugcat);
                             else
                                 loop.Renderer.RenderGpu(gpuCanvas,
                                     poseBuffer[loopIndex], renderSpace,
@@ -409,14 +457,12 @@ namespace RainWorldDesktopPet.UI
                             if (batchUsesDebug)
                                 loop.Renderer.RenderFoods(surface.Graphics,
                                     loop.Foods, renderSpace,
-                                    poseBuffer[loopIndex].CharacterRenderScale,
-                                    poseBuffer[loopIndex].TimeStacker,
+                                    poseBuffer[loopIndex],
                                     layer == OverlayRenderLayer.HeldFood);
                             else
                                 loop.Renderer.RenderFoodsGpu(gpuCanvas,
                                     loop.Foods, renderSpace,
-                                    poseBuffer[loopIndex].CharacterRenderScale,
-                                    poseBuffer[loopIndex].TimeStacker,
+                                    poseBuffer[loopIndex],
                                     layer == OverlayRenderLayer.HeldFood);
                         }
                     }
@@ -455,7 +501,29 @@ namespace RainWorldDesktopPet.UI
                             smokeEffectCount, effectBounds);
                     }
                 }
-                compositionHost.Commit(batches.Count);
+                int activeSurfaceCount = batches.Count;
+                if (commandMenu.IsVisible)
+                {
+                    Rectangle commandBounds = Rectangle.Intersect(
+                        commandMenu.GetRenderBounds(), virtualDesktopBounds);
+                    if (commandBounds.Width > 0 && commandBounds.Height > 0)
+                    {
+                        DirectCompositionHost.CompositionSurface commandSurface =
+                            compositionHost.PrepareSurface(activeSurfaceCount,
+                                commandBounds);
+                        System.Drawing.Graphics commandGraphics =
+                            commandSurface.Graphics;
+                        commandGraphics.CompositingMode =
+                            System.Drawing.Drawing2D.CompositingMode.SourceCopy;
+                        commandGraphics.Clear(Color.Transparent);
+                        commandGraphics.CompositingMode =
+                            System.Drawing.Drawing2D.CompositingMode.SourceOver;
+                        commandMenu.Render(commandGraphics, commandSurface.Bounds);
+                        compositionHost.Present(activeSurfaceCount);
+                        activeSurfaceCount++;
+                    }
+                }
+                compositionHost.Commit(activeSurfaceCount);
                 for (int i = 0; i < gameLoops.Count; i++)
                     gameLoops[i].RecordRenderFrame(displayRefreshRate);
                 if (renderErrorCount != 0)
@@ -519,16 +587,36 @@ namespace RainWorldDesktopPet.UI
 
         private void RefreshCollisionWorld()
         {
-            if (collisionWorld.TryApplyPendingRefresh())
-            {
-                for (int i = 0; i < gameLoops.Count; i++)
-                    gameLoops[i].ApplyMovingSurfaceDelta();
-            }
+            collisionWorld.TryApplyPendingRefresh();
+
+            ApplyPendingLiveWindowTranslations();
             if (surfaceRefreshClock.Elapsed.TotalSeconds <
                 SimulationConstants.WindowRefreshSeconds) return;
 
             collisionWorld.RequestRefresh(Handle);
             surfaceRefreshClock.Restart();
+        }
+
+        private void ApplyPendingLiveWindowTranslations()
+        {
+            // WinEvent is edge-triggered and allocation-free. Drain it once
+            // per rendered frame so 120/144/240 Hz displays can publish the
+            // newest collision-box location without polling when no HWND moved.
+            int count = windowLocationChanges.Drain(liveWindowHandleBuffer);
+            if (count == 0) return;
+
+            collisionWorld.BeginLiveWindowTranslationBatch();
+            bool needsFullRefresh = false;
+            for (int i = 0; i < count; i++)
+            {
+                LiveWindowTranslationResult result =
+                    collisionWorld.ApplyLiveWindowTranslation(
+                        liveWindowHandleBuffer[i]);
+                liveWindowHandleBuffer[i] = IntPtr.Zero;
+                if (result == LiveWindowTranslationResult.RequiresFullRefresh)
+                    needsFullRefresh = true;
+            }
+            if (needsFullRefresh) collisionWorld.RequestRefresh(Handle);
         }
 
         private void UpdateRenderCadence(SlugcatPose[] poses, int poseCount)
@@ -596,6 +684,7 @@ namespace RainWorldDesktopPet.UI
                 renderTimer.Enabled;
             lastPowerResumeTimestamp = long.MinValue;
             renderTimer.Stop();
+            windowLocationChanges.Clear();
             ReleaseGrabInput();
         }
 
@@ -700,7 +789,10 @@ namespace RainWorldDesktopPet.UI
             for (int i = 0; i < loop.Slugcat.Spears.Count; i++)
             {
                 DesktopSpear spear = loop.Slugcat.Spears[i];
-                Vec2 center = spear.Chunk.RenderPosition(pose.TimeStacker) * scale;
+                Vec2 spearPosition = spear.Chunk.RenderPosition(pose.TimeStacker);
+                Vec2 center = spear.Mode == DesktopSpearMode.Held
+                    ? pose.ToRenderedWorld(spearPosition)
+                    : pose.ToRenderedStaticWorld(spearPosition);
                 RectangleF spearBounds = new RectangleF((float)(center.X - 28.0),
                     (float)(center.Y - 28.0), 56.0f, 56.0f);
                 content = RectangleF.Union(content, spearBounds);
@@ -708,8 +800,8 @@ namespace RainWorldDesktopPet.UI
                 Vec2[] points = spear.Umbilical;
                 for (int point = 0; point < points.Length; point++)
                 {
-                    Vec2 rendered = Vec2.Lerp(spear.LastUmbilical[point],
-                        points[point], pose.TimeStacker) * scale;
+                    Vec2 rendered = pose.ToRenderedStaticWorld(Vec2.Lerp(
+                        spear.LastUmbilical[point], points[point], pose.TimeStacker));
                     content = RectangleF.Union(content, new RectangleF(
                         (float)(rendered.X - 2.0), (float)(rendered.Y - 2.0),
                         4.0f, 4.0f));
@@ -718,9 +810,23 @@ namespace RainWorldDesktopPet.UI
             for (int i = 0; i < loop.Foods.Foods.Count; i++)
             {
                 DesktopFood food = loop.Foods.Foods[i];
-                if (!food.IsActive) continue;
-                Vec2 center = food.Chunk.RenderPosition(pose.TimeStacker) * scale;
-                double reach = food.VisualReach * scale;
+                if (!food.IsActive || SpriteRenderer.IsFoodAttachedToSlugcat(food))
+                    continue;
+                Vec2 center = SpriteRenderer.ResolveFoodRenderPosition(pose,
+                    food.Chunk.RenderPosition(pose.TimeStacker), false);
+                double reach = food.VisualReach *
+                    SpriteRenderer.ResolveFoodRenderScale(pose, false);
+                content = RectangleF.Union(content, new RectangleF(
+                    (float)(center.X - reach), (float)(center.Y - reach),
+                    (float)(reach * 2.0), (float)(reach * 2.0)));
+            }
+            DesktopFood heldFood = loop.Foods.HeldFoodForRender;
+            if (heldFood != null)
+            {
+                Vec2 center = SpriteRenderer.ResolveFoodRenderPosition(pose,
+                    heldFood.Chunk.RenderPosition(pose.TimeStacker), true);
+                double reach = heldFood.VisualReach *
+                    SpriteRenderer.ResolveFoodRenderScale(pose, true);
                 content = RectangleF.Union(content, new RectangleF(
                     (float)(center.X - reach), (float)(center.Y - reach),
                     (float)(reach * 2.0), (float)(reach * 2.0)));
@@ -741,8 +847,8 @@ namespace RainWorldDesktopPet.UI
                 int ropePointCount = Math.Min(currentRope.Length, previousRope.Length);
                 for (int point = 0; point < ropePointCount; point++)
                 {
-                    Vec2 currentPoint = currentRope[point] * scale;
-                    Vec2 previousPoint = previousRope[point] * scale;
+                    Vec2 currentPoint = pose.ToRenderedStaticWorld(currentRope[point]);
+                    Vec2 previousPoint = pose.ToRenderedStaticWorld(previousRope[point]);
                     content = RectangleF.Union(content, new RectangleF(
                         (float)(currentPoint.X - 8.0), (float)(currentPoint.Y - 8.0),
                         16.0f, 16.0f));
@@ -867,6 +973,37 @@ namespace RainWorldDesktopPet.UI
             if (hook != IntPtr.Zero) NativeMethods.UnhookWinEvent(hook);
         }
 
+        private void InstallLocationEventHook()
+        {
+            if (locationEventHook != IntPtr.Zero) return;
+            locationEventHook = NativeMethods.SetWinEventHook(
+                NativeMethods.EVENT_OBJECT_LOCATIONCHANGE,
+                NativeMethods.EVENT_OBJECT_LOCATIONCHANGE,
+                IntPtr.Zero, locationEventCallback, 0, 0,
+                NativeMethods.WINEVENT_OUTOFCONTEXT |
+                NativeMethods.WINEVENT_SKIPOWNPROCESS);
+            if (locationEventHook == IntPtr.Zero)
+                Program.LogException(new Win32Exception(Marshal.GetLastWin32Error(),
+                    "Unable to monitor live window movement."));
+        }
+
+        private void UninstallLocationEventHook()
+        {
+            IntPtr hook = locationEventHook;
+            locationEventHook = IntPtr.Zero;
+            if (hook != IntPtr.Zero) NativeMethods.UnhookWinEvent(hook);
+            windowLocationChanges.Clear();
+        }
+
+        private void LocationEventCallback(IntPtr hook, uint eventType, IntPtr handle,
+            int objectId, int childId, uint eventThread, uint eventTime)
+        {
+            if (eventType != NativeMethods.EVENT_OBJECT_LOCATIONCHANGE ||
+                objectId != NativeMethods.OBJID_WINDOW ||
+                childId != NativeMethods.CHILDID_SELF) return;
+            windowLocationChanges.Record(handle);
+        }
+
         private void ForegroundEventCallback(IntPtr hook, uint eventType, IntPtr handle,
             int objectId, int childId, uint eventThread, uint eventTime)
         {
@@ -890,20 +1027,75 @@ namespace RainWorldDesktopPet.UI
         {
             if (mouseMessage == NativeMethods.WM_LBUTTONUP)
             {
-                if (Interlocked.Exchange(ref hookOwnsLeftButton, 0) == 0)
+                int owner = Interlocked.Exchange(ref hookOwnsLeftButton, 0);
+                if (owner == 0)
                     return false;
-                QueueHookMouseInput(new HookMouseInput(false, null,
-                    new Vec2(nativePoint.X, nativePoint.Y)));
+                if (owner == 1)
+                    QueueHookMouseInput(new HookMouseInput(
+                        HookMouseInputAction.EndGrab, null,
+                        new Vec2(nativePoint.X, nativePoint.Y),
+                        DesktopPetCommand.Move));
                 return true;
             }
 
+            if (mouseMessage == NativeMethods.WM_RBUTTONUP)
+                return Interlocked.Exchange(ref hookOwnsRightButton, 0) != 0;
+
             MouseHookHitSnapshot snapshot = mouseHitSnapshot;
             Vec2 point = new Vec2(nativePoint.X, nativePoint.Y);
+
+            if (mouseMessage == NativeMethods.WM_RBUTTONDOWN ||
+                mouseMessage == NativeMethods.WM_RBUTTONDBLCLK)
+            {
+                GameLoop rightHit = snapshot.HitTest(point) as GameLoop;
+                if (rightHit == null)
+                {
+                    if (commandMenuHitSnapshot.Target != null)
+                        QueueHookMouseInput(new HookMouseInput(
+                            HookMouseInputAction.CloseCommandMenu, null, point,
+                            DesktopPetCommand.Move));
+                    return false;
+                }
+                if (Interlocked.CompareExchange(ref hookOwnsRightButton, 1, 0) != 0)
+                    return true;
+                QueueHookMouseInput(new HookMouseInput(
+                    HookMouseInputAction.OpenCommandMenu, rightHit, point,
+                    DesktopPetCommand.Move));
+                return true;
+            }
+
+            RadialCommandHitSnapshot commandSnapshot = commandMenuHitSnapshot;
+            if (commandSnapshot.Target != null)
+            {
+                DesktopPetCommand command;
+                if (commandSnapshot.TryHit(point, out command))
+                {
+                    if (Interlocked.CompareExchange(ref hookOwnsLeftButton, 2, 0) != 0)
+                        return true;
+                    QueueHookMouseInput(new HookMouseInput(
+                        HookMouseInputAction.SelectCommand,
+                        commandSnapshot.Target, point, command));
+                    return true;
+                }
+
+                QueueHookMouseInput(new HookMouseInput(
+                    HookMouseInputAction.CloseCommandMenu, null, point,
+                    DesktopPetCommand.Move));
+                if (commandSnapshot.Contains(point))
+                {
+                    Interlocked.CompareExchange(ref hookOwnsLeftButton, 2, 0);
+                    return true;
+                }
+                return false;
+            }
+
             GameLoop hit = snapshot.HitTest(point) as GameLoop;
             if (hit == null) return false;
             if (Interlocked.CompareExchange(ref hookOwnsLeftButton, 1, 0) != 0)
                 return true;
-            QueueHookMouseInput(new HookMouseInput(true, hit, point));
+            QueueHookMouseInput(new HookMouseInput(
+                HookMouseInputAction.BeginGrab, hit, point,
+                DesktopPetCommand.Move));
             return true;
         }
 
@@ -922,10 +1114,40 @@ namespace RainWorldDesktopPet.UI
             HookMouseInput input;
             while (hookMouseInputs.TryDequeue(out input))
             {
-                if (!input.Pressed)
+                if (input.Action == HookMouseInputAction.EndGrab)
                 {
                     ReleaseGrabInput();
                     leftButtonDown = false;
+                    continue;
+                }
+
+                if (input.Action == HookMouseInputAction.CloseCommandMenu)
+                {
+                    CloseCommandSelection(false);
+                    continue;
+                }
+
+                if (input.Action == HookMouseInputAction.OpenCommandMenu)
+                {
+                    if (!gameLoops.Contains(input.Target)) continue;
+                    ReleaseGrabInput();
+                    SelectSlugcat(input.Target);
+                    Vec2 center = input.Target.ToRenderedScreen(
+                        input.Target.Slugcat.Center);
+                    MonitorInfo monitor = MonitorManager.FindNearest(new Point(
+                        (int)Math.Round(center.X), (int)Math.Round(center.Y)));
+                    CloseCommandSelection(true);
+                    input.Target.SetCommandSelectionPending(true);
+                    commandMenu.Open(input.Target, center, monitor.WorkArea);
+                    commandMenuHitSnapshot = RadialCommandHitSnapshot.Empty;
+                    continue;
+                }
+
+                if (input.Action == HookMouseInputAction.SelectCommand)
+                {
+                    if (gameLoops.Contains(input.Target))
+                        input.Target.SetCommand(input.Command);
+                    CloseCommandSelection(false);
                     continue;
                 }
 
@@ -1041,6 +1263,16 @@ namespace RainWorldDesktopPet.UI
             }
         }
 
+        internal static Vec2 ResolveWorldFoodHitCenter(Vec2 simulationPosition)
+        {
+            return DesktopWorldTransform.ToDesktop(simulationPosition);
+        }
+
+        internal static double ResolveWorldFoodHitRadius(double simulationRadius)
+        {
+            return DesktopWorldTransform.ToDesktopLength(simulationRadius);
+        }
+
         private void PublishMouseHitSnapshot()
         {
             int maximumCircleCount = 0;
@@ -1068,20 +1300,20 @@ namespace RainWorldDesktopPet.UI
                     DesktopFood food = loop.Foods.Foods[foodIndex];
                     if (!food.IsActive || !food.IsDraggable) continue;
                     circles[circleCount++] = new MouseHookHitCircle(
-                        DesktopWorldTransform.ToDesktop(food.Chunk.Position),
-                        DesktopWorldTransform.ToDesktopLength(food.VisualReach + 5.0));
+                        ResolveWorldFoodHitCenter(food.Chunk.Position),
+                        ResolveWorldFoodHitRadius(food.VisualReach + 5.0));
                 }
                 for (int chunkIndex = 0;
                     chunkIndex < loop.Slugcat.BodyChunks.Length; chunkIndex++)
                 {
                     BodyChunk chunk = loop.Slugcat.BodyChunks[chunkIndex];
                     circles[circleCount++] = new MouseHookHitCircle(
-                        DesktopWorldTransform.ToDesktop(chunk.Position),
-                        DesktopWorldTransform.ToDesktopLength(chunk.Radius + 14.0));
+                        loop.ToRenderedScreen(chunk.Position),
+                        loop.ToRenderedScreenLength(chunk.Radius + 14.0));
                 }
                 circles[circleCount++] = new MouseHookHitCircle(
-                    DesktopWorldTransform.ToDesktop(loop.Graphics.Head.Position),
-                    DesktopWorldTransform.ToDesktopLength(17.0));
+                    loop.ToRenderedScreen(loop.Graphics.Head.Position),
+                    loop.ToRenderedScreenLength(17.0));
                 // HitTest scans targets from the end. Publish Slugcat 1 at
                 // the end so pointer priority matches its frontmost render order.
                 int targetIndex = gameLoops.Count - 1 - i;
@@ -1096,7 +1328,7 @@ namespace RainWorldDesktopPet.UI
         {
             if (gameLoops.Count >= MaximumSlugcats) return;
             GameLoop added = new GameLoop(Handle, installation, id,
-                gameLoops.Count, collisionWorld);
+                gameLoops.Count, collisionWorld, audioEngine);
             added.DebugEnabled = debugItem.Checked;
             added.Paused = pauseItem.Checked;
             gameLoops.Add(added);
@@ -1222,6 +1454,8 @@ namespace RainWorldDesktopPet.UI
             {
                 ReleaseGrabInput();
             }
+            if (ReferenceEquals(commandMenu.Target, removed))
+                CloseCommandSelection(true);
             gameLoops.RemoveAt(index);
             removed.Dispose();
             PublishMouseHitSnapshot();
@@ -1387,8 +1621,59 @@ namespace RainWorldDesktopPet.UI
             get { return pauseItem.Checked; }
             set { pauseItem.Checked = value; }
         }
+        internal bool SettingsAudioMuted
+        {
+            get { return muteItem.Checked; }
+            set { muteItem.Checked = value; }
+        }
+        internal int SettingsAudioVolumePercent
+        {
+            get { return (int)Math.Round(audioEngine.MasterVolume * 100.0); }
+            set
+            {
+                double volume = AudioVolumeSettings.Clamp(value / 100.0);
+                audioEngine.SetMasterVolume(volume);
+            }
+        }
+
+        private void UpdateCommandMenu()
+        {
+            GameLoop target = commandMenu.Target;
+            if (target == null)
+            {
+                commandMenuHitSnapshot = RadialCommandHitSnapshot.Empty;
+                return;
+            }
+            if (!gameLoops.Contains(target))
+            {
+                CloseCommandSelection(true);
+                commandMenuHitSnapshot = RadialCommandHitSnapshot.Empty;
+                return;
+            }
+
+            Vec2 center = target.ToRenderedScreen(target.Slugcat.Center);
+            MonitorInfo monitor = MonitorManager.FindNearest(new Point(
+                (int)Math.Round(center.X), (int)Math.Round(center.Y)));
+            Point pointer = Cursor.Position;
+            commandMenu.Update(center, monitor.WorkArea,
+                new Vec2(pointer.X, pointer.Y));
+            commandMenuHitSnapshot = commandMenu.CreateHitSnapshot();
+        }
+
+        private void CloseCommandSelection(bool immediately)
+        {
+            GameLoop target = commandMenu.Target;
+            if (target != null) target.SetCommandSelectionPending(false);
+            if (immediately) commandMenu.CloseImmediately();
+            else commandMenu.Close();
+        }
+        internal void SettingsPersistAudioVolume()
+        { AudioVolumeSettings.Set(audioEngine.MasterVolume); }
+        internal string SettingsAudioStatus { get { return audioEngine.Status; } }
         internal SlugcatId SettingsSlugcatId
         { get { return gameLoop == null ? startSlugcat : gameLoop.SelectedSlugcat.Id; } }
+        internal SlugcatSize SettingsSlugcatSize
+        { get { return gameLoop == null ? SlugcatSize.Large : gameLoop.Size; } }
         internal void SettingsSelectSlugcat(int index)
         {
             if (index >= 0 && index < gameLoops.Count) SelectSlugcat(gameLoops[index]);
@@ -1404,6 +1689,13 @@ namespace RainWorldDesktopPet.UI
             RefreshSlugcatSelectionMenu();
             RefreshActiveSlugcatsMenu();
             if (skinEditor != null && !skinEditor.IsDisposed) skinEditor.RefreshFromGame();
+        }
+
+        internal void SettingsSetSlugcatSize(SlugcatSize size)
+        {
+            if (gameLoop == null) return;
+            gameLoop.SetSize(size);
+            PublishMouseHitSnapshot();
         }
 
         internal void SettingsSetLanguage(UiLanguage language)

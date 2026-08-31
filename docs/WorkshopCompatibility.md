@@ -8,6 +8,12 @@ application reads assets only from the user's own Rain World and Steam Workshop 
 
 Workshop item `3257541402` (`pushtomeow`, mod version 1.2.4) was installed at test time:
 
+The active `PushToMeowMod.dll` SHA-256 was
+`B37B2571C9D7AA8DA220BD7D1814CE7781CB90CC266949664FFCCB763AE155A3`. Its Windows file-version
+resource reports 1.4.2.0, while both the BepInEx plugin identity and `modinfo.json` report 1.2.4;
+runtime behavior in this document follows the plugin code and installed data rather than the
+resource-version label.
+
 ```text
 3257541402/
   modinfo.json
@@ -40,44 +46,45 @@ flow is:
   bubbles, and starts the visual response.
 - `MeowUtils.LoadCustomMeows` scans `pushtomeow/custom_meows.json` in merged/active mod roots,
   orders definitions by priority, and lets later definitions replace earlier character mappings.
-- `MeowUtils.DoMeowAnim` schedules its visual changes on 33 ms timers. Ordinary slugcats look
-  sharply upward and blink for 9 ticks (short) or 11 ticks (long), then release the look after
-  approximately 160/260 ms. Spearmaster instead applies alternating impulses to its tail
-  segments, with the second impulse 80-140 ms later.
+- `MeowUtils.DoMeowAnim` schedules its visual changes on 33 ms timers. Every Slugcat calls
+  `Player.Blink(9/11)`. Non-Spearmasters also call `PlayerGraphics.LookAtPoint` toward a very high
+  point for approximately 160/260 ms. Spearmaster skips only that look override and separately
+  applies alternating impulses to its tail, with the second impulse 80-140 ms later.
 - `SlugNPCMeowAI` contains food-ratio, danger-grasp, and stun-driven NPC calls. It is not a simple
   fixed periodic timer for adult players.
 
 The inspected implementation does not add a general jump, arm gesture, or body-bob for a meow.
-Accordingly, the desktop translation uses the observed upward look/blink and Spearmaster tail
-wiggle, and holds the pose until the decoded clip completes when a clip is longer than the
-original visual timer.
+The desktop translation therefore activates the face on the nearest 40 Hz point after the 33 ms
+timer (25 ms), preserves the independent 160/260 ms look and 9/11-tick blink lifetimes, and does
+not stretch the pose to the decoded clip duration. `PlayerGraphics.DefaultFaceSprite` supplies
+the character-specific result: ordinary adults close to `FaceB`, Artificer changes from its
+directional `FaceC/FaceD` to `FaceB`, Saint is already in its `FaceB` condition, and rendered pups
+use `PFaceB`. Spearmaster keeps its current look target while blinking and wiggling its tail.
 
 ## 3. Slugcat voice mapping
 
 The mappings below came from the installed registration/configuration data plus the DLL's
 Rivulet/fallback branches:
 
-| Rain World name | Registered family | Short/long variations | Measured WAV ranges |
-| --- | --- | ---: | --- |
-| White, Yellow, Red | Normal | 8 / 8 | 0.16-0.18 s / 0.26-0.28 s |
-| Gourmand | Fat | 8 / 8 | 0.14-0.16 s / 0.25-0.29 s |
-| Artificer | Coarse | 8 / 8 | 0.17-0.22 s / 0.27-0.28 s |
-| Rivulet | Rivulet A (DLL option can select B) | 8 / 8 | 0.11-0.18 s / 0.18-0.25 s |
-| Spear | Spear | 4 / 4 | 0.21-0.25 s / 0.33-0.39 s |
-| Saint | Whispery | 8 / 8 | 0.11-0.12 s / 0.20-0.23 s |
-| Watcher | Watcher | 7 / 8 | 2.50-3.02 s / 2.14-3.40 s |
-| Inv | Sofanthiel | 1 / 1 | 0.20 s / 0.41 s |
+| Rain World name | Adult family | Pup selection | Short/long variations |
+| --- | --- | --- | ---: |
+| White, Yellow, Red | Normal | dedicated Pup family at 1.0 pitch | 8 / 8 |
+| Gourmand | Fat, 1.15 volume multiplier | Fat at 1.3 pitch | 8 / 8 |
+| Artificer | Coarse, 1.2 volume multiplier | Coarse at 1.3 pitch | 8 / 8 |
+| Rivulet | Rivulet A, 0.8 volume multiplier | Rivulet A at 1.3 pitch | 8 / 8 |
+| Spear | Spear, 0.55 volume multiplier | Spear at 1.3 pitch | 4 / 4 |
+| Saint | Whispery | Whispery at 1.3 pitch | 8 / 8 |
 
-Unknown characters use the mod's Normal fallback. Pup registrations and the Katzen easter-egg
-asset are discovered, but the desktop pet currently has neither a pup variant nor the DLL's
-player-name input needed to select Katzen.
+Unknown characters use the mod's Normal fallback. Watcher, Inv, alternate Rivulet B, and the
+Katzen easter egg exist in the installed files but are not reachable by the eight currently
+supported desktop characters, so their WAVs are not retained.
 
-`PushToMeowLibrary` resolves these relationships from data, validates each referenced file,
-decodes RIFF duration, and preserves registered pitch/volume plus per-character volume. The
-session cache is keyed by full path, size, and last-write time. `NaturalMeowController` selects
-short/long variants and changes candidate timing by activity, prolonged idle/rest, sleep/wake,
-mouse proximity, recent interaction, and special actions. It enforces a 22-second minimum
-cooldown and prevents overlap or catch-up bursts after a stall.
+`PushToMeowLibrary` resolves these relationships from data, validates each referenced PCM16 WAV,
+and preserves registered pitch/volume plus per-character volume. `PushToMeowController` chooses
+short/long variants 50/50 and uses a fullness-shaped 24-85 second interval, while suppressing
+sleeping, stunned, dragged, or muted pets. Meows use the sixteen-voice priority reserve within the
+128-cursor single-device mix and the same FIFO as other lifecycle commands, so a busy movement mix neither
+steals an active voice nor drops the visible meow event.
 
 ## 4. Dress My Slugcat layout inspected
 
@@ -189,12 +196,14 @@ The local game-fidelity re-audit is recorded in
 - Bad JSON, PNG/TXT pairs, missing WAVs, and mid-update files are logged and isolated rather than
   terminating the application. Debug detail is separated from normal release logging, and the
   log rotates at 2 MB under `%LOCALAPPDATA%/SlugcatInMyMonitor/workshop.log`.
-- WAV/RIFF assets registered by the inspected mod are supported and are read on a background
-  worker. Unknown or unsupported audio formats, including OGG without an additional codec, are
-  skipped instead of guessed.
+- The runtime audio engine reads the installed base game's `sounds.txt` and admitted UnityFS
+  PCM16/FSB5 Vorbis clips entirely in memory.
+  If `pushtomeow` is installed, it additionally parses that mod's `[ADD]` SoundIDs and
+  `custom_meows.json`. The audio worker validates and prepares only loose PCM16 WAV families
+  reachable by the supported Slugcats and Slugpups; unrelated, Watcher, Inv, and alternate
+  Rivulet B files remain unloaded. OGG and unsupported WAV encodings are skipped instead of guessed.
 - The desktop program cannot call Rain World's `Room.PlaySound`, oracle/creature reactions,
   lungs, bubbles, or the game's input hook because it does not host a Rain World room/player.
-  Windows MCI reproduces registered volume and pitch; `SoundPlayer` is a safe fallback.
 - DMS core and confirmed special groups are supported. Other Rain World mods can call DMS's
   public `SpriteDefinitions.AddSprite` API from their own Unity/BepInEx DLL to invent arbitrary
   sprite indices, shaders, and container ordering. Loading and executing those foreign DLLs in

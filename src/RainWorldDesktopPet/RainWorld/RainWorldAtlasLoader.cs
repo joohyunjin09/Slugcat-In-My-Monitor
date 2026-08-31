@@ -225,6 +225,22 @@ namespace RainWorldDesktopPet.RainWorld
 
     public static class RainWorldAtlasLoader
     {
+        internal static IDictionary<string, AtlasElement> ReadElements(
+            string imagePath, string metadataPath)
+        {
+            if (!File.Exists(imagePath))
+                throw new FileNotFoundException("Atlas image was not found.", imagePath);
+            if (!File.Exists(metadataPath))
+                throw new FileNotFoundException("Atlas metadata was not found.", metadataPath);
+
+            Size imageSize;
+            // Image.FromFile reads and validates the image header without making the
+            // detached 32-bpp copy used for rendering. This keeps DMS discovery cheap
+            // while preserving the same frame-bound validation as a loaded atlas.
+            using (Image source = Image.FromFile(imagePath)) imageSize = source.Size;
+            return ParseElements(imagePath, File.ReadAllText(metadataPath), imageSize);
+        }
+
         public static RainWorldAtlas Load(string imagePath, string metadataPath)
         {
             if (!File.Exists(imagePath)) throw new FileNotFoundException("Atlas image was not found.", imagePath);
@@ -256,48 +272,8 @@ namespace RainWorldDesktopPet.RainWorld
 
             try
             {
-                JavaScriptSerializer serializer = new JavaScriptSerializer();
-                serializer.MaxJsonLength = int.MaxValue;
-                Dictionary<string, object> root = serializer.DeserializeObject(metadataJson) as Dictionary<string, object>;
-                if (root == null || !root.ContainsKey("frames"))
-                {
-                    throw new InvalidDataException("Atlas metadata does not contain a frames object: " + imageSource);
-                }
-
-                Dictionary<string, object> frameMap = root["frames"] as Dictionary<string, object>;
-                if (frameMap == null)
-                {
-                    throw new InvalidDataException("Unsupported atlas frames representation: " + imageSource);
-                }
-
-                Dictionary<string, AtlasElement> elements = new Dictionary<string, AtlasElement>(StringComparer.OrdinalIgnoreCase);
-                foreach (KeyValuePair<string, object> item in frameMap)
-                {
-                    Dictionary<string, object> record = item.Value as Dictionary<string, object>;
-                    if (record == null) continue;
-                    AtlasElement element = new AtlasElement();
-                    element.Name = item.Key;
-                    element.Frame = ReadRectangle(record, "frame");
-                    element.SpriteSource = record.ContainsKey("spriteSourceSize")
-                        ? ReadRectangle(record, "spriteSourceSize")
-                        : new Rectangle(0, 0, element.Frame.Width, element.Frame.Height);
-                    element.SourceSize = record.ContainsKey("sourceSize")
-                        ? ReadSize(record, "sourceSize")
-                        : element.Frame.Size;
-                    object rotated;
-                    element.Rotated = record.TryGetValue("rotated", out rotated) &&
-                        Convert.ToBoolean(rotated, CultureInfo.InvariantCulture);
-                    if (element.Rotated)
-                        throw new InvalidDataException("Rotated atlas elements are not supported: " + item.Key);
-                    ValidateElement(element, image.Size);
-
-                    elements[item.Key] = element;
-                    if (item.Key.EndsWith(".png", StringComparison.OrdinalIgnoreCase))
-                        elements[item.Key.Substring(0, item.Key.Length - 4)] = element;
-                }
-
-                if (elements.Count == 0)
-                    throw new InvalidDataException("Atlas metadata contains no usable frames: " + imageSource);
+                Dictionary<string, AtlasElement> elements = ParseElements(
+                    imageSource, metadataJson, image.Size);
                 return new RainWorldAtlas(imageSource ?? "memory", image, elements);
             }
             catch
@@ -305,6 +281,57 @@ namespace RainWorldDesktopPet.RainWorld
                 image.Dispose();
                 throw;
             }
+        }
+
+        private static Dictionary<string, AtlasElement> ParseElements(
+            string imageSource, string metadataJson, Size imageSize)
+        {
+            JavaScriptSerializer serializer = new JavaScriptSerializer();
+            serializer.MaxJsonLength = int.MaxValue;
+            Dictionary<string, object> root = serializer.DeserializeObject(metadataJson) as
+                Dictionary<string, object>;
+            if (root == null || !root.ContainsKey("frames"))
+                throw new InvalidDataException(
+                    "Atlas metadata does not contain a frames object: " + imageSource);
+
+            Dictionary<string, object> frameMap = root["frames"] as
+                Dictionary<string, object>;
+            if (frameMap == null)
+                throw new InvalidDataException(
+                    "Unsupported atlas frames representation: " + imageSource);
+
+            Dictionary<string, AtlasElement> elements =
+                new Dictionary<string, AtlasElement>(StringComparer.OrdinalIgnoreCase);
+            foreach (KeyValuePair<string, object> item in frameMap)
+            {
+                Dictionary<string, object> record = item.Value as Dictionary<string, object>;
+                if (record == null) continue;
+                AtlasElement element = new AtlasElement();
+                element.Name = item.Key;
+                element.Frame = ReadRectangle(record, "frame");
+                element.SpriteSource = record.ContainsKey("spriteSourceSize")
+                    ? ReadRectangle(record, "spriteSourceSize")
+                    : new Rectangle(0, 0, element.Frame.Width, element.Frame.Height);
+                element.SourceSize = record.ContainsKey("sourceSize")
+                    ? ReadSize(record, "sourceSize")
+                    : element.Frame.Size;
+                object rotated;
+                element.Rotated = record.TryGetValue("rotated", out rotated) &&
+                    Convert.ToBoolean(rotated, CultureInfo.InvariantCulture);
+                if (element.Rotated)
+                    throw new InvalidDataException(
+                        "Rotated atlas elements are not supported: " + item.Key);
+                ValidateElement(element, imageSize);
+
+                elements[item.Key] = element;
+                if (item.Key.EndsWith(".png", StringComparison.OrdinalIgnoreCase))
+                    elements[item.Key.Substring(0, item.Key.Length - 4)] = element;
+            }
+
+            if (elements.Count == 0)
+                throw new InvalidDataException(
+                    "Atlas metadata contains no usable frames: " + imageSource);
+            return elements;
         }
 
         private static void ValidateElement(AtlasElement element, Size atlasSize)

@@ -301,7 +301,8 @@ namespace RainWorldDesktopPet.Creature
                     state.AnimationFrame++;
                     int lastFrame = crawl ? 10 : 6;
                     if (state.AnimationFrame > lastFrame) state.AnimationFrame = 0;
-                    if (state.AnimationFrame == 0)
+                    if (state.AnimationFrame == 0 &&
+                        state.Animation != AnimationIndex.CrawlTurn)
                     {
                         string step = ((int)Math.Floor(state.RunCycle) & 1) == 0
                             ? owner.SelectedSlugcat.Audio.FootstepA

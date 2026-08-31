@@ -243,13 +243,23 @@ namespace RainWorldDesktopPet.RainWorld
 
         public IList<UnityAudioClipInfo> ReadAudioClips()
         {
+            return ReadAudioClips(null);
+        }
+
+        public IList<UnityAudioClipInfo> ReadAudioClips(
+            Func<string, bool> includeName)
+        {
             lock (sync)
             {
                 ThrowIfDisposed();
                 List<UnityAudioClipInfo> result = new List<UnityAudioClipInfo>();
                 for (int i = 0; i < objects.Count; i++)
                     if (objects[i].ClassId == AudioClipClassId)
-                        result.Add(ReadAudioClip(objects[i]));
+                    {
+                        UnityAudioClipInfo clip = ReadAudioClip(objects[i]);
+                        if (includeName == null || includeName(clip.Name))
+                            result.Add(clip);
+                    }
                 return result;
             }
         }

@@ -333,6 +333,16 @@ namespace RainWorldDesktopPet.Core
         }
         public DesktopFood Target { get { return target; } }
         public DesktopFood DraggedFood { get { return draggedFood; } }
+        internal DesktopFood HeldFoodForRender
+        {
+            get
+            {
+                return target != null && target.IsActive &&
+                    (target.State == DesktopFoodState.Held ||
+                        target.State == DesktopFoodState.Biting)
+                    ? target : null;
+            }
+        }
         public bool IsDragging { get { return draggedFood != null; } }
         public FoodInteractionState InteractionState { get; private set; }
         public int FoodPointsEaten { get; private set; }
@@ -939,6 +949,28 @@ namespace RainWorldDesktopPet.Core
                 foodHand = 1;
         }
 
+        // PlayerGraphics updates SlugcatHand while the grasp is active.  The
+        // desktop food manager owns the equivalent grasp state, so publish it
+        // before SlugcatGraphics.Step rather than waiting until the food's
+        // post-graphics placement pass.  This keeps the arm and item on the
+        // same 40 Hz tick.
+        public void PrepareHeldHandPose(Slugcat slugcat, SlugcatGraphics graphics)
+        {
+            if (slugcat == null || graphics == null || target == null ||
+                !target.IsActive ||
+                (target.State != DesktopFoodState.Held &&
+                    target.State != DesktopFoodState.Biting)) return;
+
+            EnsureFoodHand(slugcat);
+            if (IsSpearmaster(slugcat))
+                graphics.SetHeldFoodPose(foodHand);
+            else
+                graphics.SetEdibleHandPose(foodHand,
+                    target.State == DesktopFoodState.Held
+                        ? InitialEatCounter
+                        : interactionCountdown);
+        }
+
         private void ApplyFoodAnimation(Slugcat slugcat, SlugcatGraphics graphics,
             DesktopFood animatedFood, bool biteOccurred)
         {
@@ -957,10 +989,7 @@ namespace RainWorldDesktopPet.Core
             Limb hand = graphics.Arms[handIndex];
             if (carrying)
             {
-                if (IsSpearmaster(slugcat))
-                    graphics.SetHeldFoodPose(handIndex);
-                else
-                    graphics.SetEdibleHandPose(handIndex, interactionCountdown);
+                PrepareHeldHandPose(slugcat, graphics);
                 if (biteOccurred)
                 {
                     graphics.ApplyEdibleBiteAfterGraphicsStep(handIndex);

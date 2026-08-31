@@ -1,3 +1,4 @@
+using System;
 using RainWorldDesktopPet.Core;
 using RainWorldDesktopPet.Desktop;
 
@@ -22,13 +23,14 @@ namespace RainWorldDesktopPet.Physics
         public Vec2 Position;
         public Vec2 LastPosition;
         public Vec2 Velocity;
-        public readonly double Radius;
+        public double Radius { get; private set; }
         public double Mass { get; private set; }
         public bool ContactFloor;
         public bool ContactLeft;
         public bool ContactRight;
         public long SupportingSurfaceId;
         public DesktopSurfaceKind SupportingSurfaceKind;
+        public double SupportingSurfaceTop;
         public long WallSurfaceId;
         public DesktopSurfaceKind WallSurfaceKind;
         public double FloorImpactSpeed;
@@ -48,6 +50,13 @@ namespace RainWorldDesktopPet.Physics
             Mass = mass;
         }
 
+        public void SetRadius(double radius)
+        {
+            if (radius <= 0.0 || double.IsNaN(radius) || double.IsInfinity(radius))
+                throw new ArgumentOutOfRangeException("radius");
+            Radius = radius;
+        }
+
         public void BeginTick()
         {
             LastPosition = Position;
@@ -63,6 +72,7 @@ namespace RainWorldDesktopPet.Physics
             ContactRight = false;
             SupportingSurfaceId = 0;
             SupportingSurfaceKind = DesktopSurfaceKind.ScreenEdge;
+            SupportingSurfaceTop = 0.0;
             WallSurfaceId = 0;
             WallSurfaceKind = DesktopSurfaceKind.ScreenEdge;
             FloorImpactSpeed = 0.0;
@@ -72,9 +82,20 @@ namespace RainWorldDesktopPet.Physics
 
         public void Integrate(double gravity, double airFriction)
         {
+            Integrate(gravity, airFriction, 1.0);
+        }
+
+        public void Integrate(double gravity, double airFriction,
+            double movementScale)
+        {
+            if (movementScale <= 0.0 || double.IsNaN(movementScale) ||
+                double.IsInfinity(movementScale))
+                throw new ArgumentOutOfRangeException("movementScale");
             Velocity.Y += gravity;
             Velocity *= airFriction;
-            Position += Velocity;
+            // Scale locomotion distance while retaining the original vertical
+            // gravity, stance, jump, and collision cadence.
+            Position += new Vec2(Velocity.X * movementScale, Velocity.Y);
         }
 
         public Vec2 RenderPosition(double interpolation)

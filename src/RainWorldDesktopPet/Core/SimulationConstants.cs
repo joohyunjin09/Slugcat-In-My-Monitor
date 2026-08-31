@@ -39,6 +39,11 @@ namespace RainWorldDesktopPet.Core
         public const double MouseAttentionRadius = 90.0;
         public const double MouseAttentionTimeoutSeconds = 1.5;
         public const double WindowRefreshSeconds = 0.25;
+        // Window tops are dynamic desktop terrain. Give their collision slab
+        // enough depth to catch a supported BodyChunk when the HWND rises
+        // between two 40 Hz physics ticks without turning the whole window
+        // movement into a direct Slugcat translation.
+        public const int WindowPlatformThicknessDesktopPixels = 32;
         // Standing on a window closer than this to the work-area ceiling would
         // place the body and head outside the visible desktop.
         public const double VisibleWindowTopClearance = 32.0;

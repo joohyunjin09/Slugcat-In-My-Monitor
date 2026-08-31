@@ -344,13 +344,14 @@ namespace RainWorldDesktopPet.UI
 
         private string BuildAppearanceData()
         {
-            StringBuilder value = new StringBuilder("SIMM_SKIN_V4|");
+            StringBuilder value = new StringBuilder("SIMM_SKIN_V5|");
             value.Append(gameLoop.SelectedSlugcat.Id);
             for (int i = 0; i < PartNames.Length; i++)
             {
                 string part = PartNames[i];
                 value.Append('|').Append(part).Append('=').Append(partSelections[part]);
                 value.Append(',').Append(gameLoop.GetPartColor(part).ToArgb().ToString("X8"));
+                value.Append(',').Append(gameLoop.HasCustomPartColor(part) ? '1' : '0');
             }
             return value.ToString();
         }
@@ -360,7 +361,8 @@ namespace RainWorldDesktopPet.UI
             string[] fields = (value ?? string.Empty).Trim().Split('|');
             SlugcatId character;
             int firstPart;
-            if (fields.Length >= 2 && (fields[0] == "SIMM_SKIN_V4" ||
+            bool hasExplicitColorFlags = fields.Length >= 2 && fields[0] == "SIMM_SKIN_V5";
+            if (fields.Length >= 2 && (hasExplicitColorFlags || fields[0] == "SIMM_SKIN_V4" ||
                 fields[0] == "SIMM_SKIN_V3"))
             {
                 if (!SlugcatProfiles.TryParse(fields[1], out character))
@@ -387,14 +389,15 @@ namespace RainWorldDesktopPet.UI
                 new Dictionary<string, DmsSkinDefinition>(StringComparer.OrdinalIgnoreCase);
             Dictionary<string, Color> colors =
                 new Dictionary<string, Color>(StringComparer.OrdinalIgnoreCase);
+            HashSet<string> customizedColors = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             for (int i = firstPart; i < fields.Length; i++)
             {
-                int equals = fields[i].IndexOf('=');
-                int comma = fields[i].LastIndexOf(',');
-                if (equals <= 0 || comma <= equals) continue;
-                string part = NormalizePresetPart(fields[i].Substring(0, equals));
+                string serializedPart;
+                string id;
+                int colorStart;
+                if (!TrySplitPresetPart(fields[i], out serializedPart, out id, out colorStart)) continue;
+                string part = NormalizePresetPart(serializedPart);
                 if (!partSelectors.ContainsKey(part)) continue;
-                string id = fields[i].Substring(equals + 1, comma - equals - 1);
                 DmsSkinDefinition set = FindSet(id);
                 if (!string.Equals(id, "default", StringComparison.OrdinalIgnoreCase))
                 {
@@ -407,11 +410,21 @@ namespace RainWorldDesktopPet.UI
                 }
                 sets[part] = set;
                 uint argb;
-                if (!uint.TryParse(fields[i].Substring(comma + 1),
+                int colorEnd = fields[i].IndexOf(',', colorStart + 1);
+                string colorText = colorEnd < 0
+                    ? fields[i].Substring(colorStart + 1)
+                    : fields[i].Substring(colorStart + 1, colorEnd - colorStart - 1);
+                if (!uint.TryParse(colorText,
                     System.Globalization.NumberStyles.HexNumber, null, out argb))
                     throw new InvalidOperationException(T(PartDisplayName(part) + " 색상 정보가 올바르지 않습니다.",
                         "Invalid color for " + part + "."));
                 colors[part] = Color.FromArgb(unchecked((int)argb));
+                // V2-V4 stored every displayed colour but not whether it was
+                // explicitly chosen. Preserve their rendered result. V5 stores
+                // that distinction, letting an authored DMS PNG remain un-tinted.
+                if (!hasExplicitColorFlags || colorEnd >= 0 &&
+                    fields[i].Substring(colorEnd + 1).Trim() == "1")
+                    customizedColors.Add(part);
             }
 
             // Loading a preset replaces the complete appearance state. V3 did
@@ -427,11 +440,30 @@ namespace RainWorldDesktopPet.UI
                 DmsSkinDefinition set;
                 if (sets.TryGetValue(part, out set)) ApplySpriteChoice(part, set);
                 Color color;
-                if (colors.TryGetValue(part, out color)) gameLoop.SetPartColor(part, color);
+                if (customizedColors.Contains(part) && colors.TryGetValue(part, out color))
+                    gameLoop.SetPartColor(part, color);
             }
             PopulateSpriteSelectors();
             RefreshFromGame();
             Changed(successMessage);
+        }
+
+        // V5 adds a second comma after the ARGB value. The skin ID always
+        // ends at the first comma following '='; using the last comma turns
+        // e.g. "homeobox.raincoatriv,FF91CCF0,0" into a nonexistent ID.
+        internal static bool TrySplitPresetPart(string field, out string part, out string id,
+            out int colorStart)
+        {
+            part = null;
+            id = null;
+            colorStart = -1;
+            if (string.IsNullOrEmpty(field)) return false;
+            int equals = field.IndexOf('=');
+            colorStart = field.IndexOf(',', equals + 1);
+            if (equals <= 0 || colorStart <= equals) return false;
+            part = field.Substring(0, equals);
+            id = field.Substring(equals + 1, colorStart - equals - 1);
+            return true;
         }
 
         private static string PresetDirectory
@@ -534,7 +566,7 @@ namespace RainWorldDesktopPet.UI
             Rectangle source = sprite.Element.Frame;
             RectangleF destination = sprite.Element.GetLocalRectangle(
                 preview.AnchorX, preview.AnchorY);
-            Color tint = gameLoop.GetPartColor(preview.Part);
+            Color tint = gameLoop.GetDmsPartPreviewTint(preview.Part);
             GraphicsState state = graphics.Save();
             try
             {

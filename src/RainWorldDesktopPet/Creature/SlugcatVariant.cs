@@ -17,8 +17,18 @@ namespace RainWorldDesktopPet.Creature
         Gourmand
     }
 
+    public static class SlugpupAppearanceSettings
+    {
+        // Player.setPupStatus changes the BodyChunkConnection from 17 to 12.
+        // It does not rescale either BodyChunk radius; PlayerGraphics applies
+        // the separate half-length rule only when constructing the tail.
+        public const double BodyConnectionDistance = 12.0;
+    }
+
     public sealed class SlugcatAppearance
     {
+        private double pupScale = 1.0;
+
         private SlugcatAppearance(SlugcatVariant variant, Color bodyColor,
             double runSpeedFactor, double bodyWeightFactor,
             double bodyWidthScale, double hipsWidthScale)
@@ -37,6 +47,15 @@ namespace RainWorldDesktopPet.Creature
         public readonly double BodyWeightFactor;
         public readonly double BodyWidthScale;
         public readonly double HipsWidthScale;
+        public double PupScale { get { return pupScale; } }
+        public bool RenderAsPup { get { return pupScale < 0.999999; } }
+
+        public void SetPupScale(double value)
+        {
+            if (value <= 0.0 || double.IsNaN(value) || double.IsInfinity(value))
+                throw new ArgumentOutOfRangeException("value");
+            pupScale = value;
+        }
 
         public static SlugcatAppearance For(SlugcatVariant variant)
         {

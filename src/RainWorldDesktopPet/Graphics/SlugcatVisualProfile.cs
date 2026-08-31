@@ -293,12 +293,18 @@ namespace RainWorldDesktopPet.Graphics
 
         public double ResolveBodyScale(SlugcatAppearance appearance)
         {
+            // PlayerGraphics' RenderAsPup branch does not use the 17->12 body
+            // connection ratio as a sprite-width multiplier. Keep the authored
+            // BodyA profile width here; pup-specific scaleX is a separate
+            // DrawSprites branch in the original game.
             return UsesVariantBodyProportions && appearance != null
                 ? appearance.BodyWidthScale : BodyScale;
         }
 
         public double ResolveHipsScale(SlugcatAppearance appearance)
         {
+            // As with BodyA, the original HipsA pup width is not obtained by
+            // uniformly multiplying the adult sprite by 12/17.
             return UsesVariantBodyProportions && appearance != null
                 ? appearance.HipsWidthScale : HipsScale;
         }
