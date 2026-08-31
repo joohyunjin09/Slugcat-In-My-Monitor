@@ -157,7 +157,7 @@ namespace RainWorldDesktopPet.Tests
                 MouseHookHitSnapshotsPreserveInputRules);
             Run("Radial command sectors map to Stop, Move, and Follow Me",
                 RadialCommandSectorsMapCommands);
-            Run("Radial command UI keeps exact easing and readable text",
+            Run("Radial command UI keeps exact easing and readable pixel icons",
                 RadialCommandVisualStyleUsesPixelGridAndSlowEasing);
             Run("World food mouse hit circles ignore Slugcat visual size",
                 WorldFoodMouseHitCirclesIgnoreSlugcatVisualSize);
@@ -168,6 +168,8 @@ namespace RainWorldDesktopPet.Tests
                 CommandSelectionWaitSuppressesLocomotionOnly);
             Run("Follow command mostly pursues the cursor with short natural variations",
                 FollowCommandPursuesCursorWithVariations);
+            Run("Follow command holds high jumps through the original jumpBoost window",
+                FollowCommandHoldsHighJumpInput);
             Run("Futile atlas metadata parses frame geometry", AtlasMetadataParses);
             Run("DMS part atlas overrides and restores original sprites", DmsPartAtlasOverrideRestoresBase);
             Run("DMS preserves authored source palettes over user colours", DmsAuthoredColorIsPreservedUntilCustomized);
@@ -2446,13 +2448,17 @@ namespace RainWorldDesktopPet.Tests
 
         private static void RadialCommandSectorsMapCommands()
         {
-            True(RadialCommandMenu.CommandAtAngle(-30.0) == DesktopPetCommand.Stop,
-                "upper-right sector should stop the selected Slugcat");
-            True(RadialCommandMenu.CommandAtAngle(90.0) == DesktopPetCommand.Move,
-                "lower sector should restore autonomous movement");
-            True(RadialCommandMenu.CommandAtAngle(-150.0) ==
+            Near(60.0, RadialCommandMenu.RotationDegrees, 0.000001,
+                "command wheel clockwise rotation");
+            Near(90.0, RadialCommandMenu.BottomGapAngleDegrees, 0.000001,
+                "lower command-wheel split points straight down");
+            True(RadialCommandMenu.CommandAtAngle(30.0) == DesktopPetCommand.Stop,
+                "rotated right sector should stop the selected Slugcat");
+            True(RadialCommandMenu.CommandAtAngle(150.0) == DesktopPetCommand.Move,
+                "rotated lower-left sector should restore autonomous movement");
+            True(RadialCommandMenu.CommandAtAngle(-90.0) ==
                 DesktopPetCommand.FollowMouse,
-                "upper-left sector should enable mouse following");
+                "rotated upper sector should enable mouse following");
         }
 
         private static void RadialCommandVisualStyleUsesPixelGridAndSlowEasing()
@@ -2467,6 +2473,28 @@ namespace RainWorldDesktopPet.Tests
                 "hover release duration");
             Equal(2, RadialCommandMenu.RenderPixelScale,
                 "the command wheel should render on a two-pixel grid");
+            Equal(11, RadialCommandMenu.CommandIconWidth,
+                "command icon logical width");
+            Equal(9, RadialCommandMenu.CommandIconHeight,
+                "command icon logical height");
+            string stopIcon = RadialCommandMenu.IconPatternFor(
+                DesktopPetCommand.Stop);
+            string moveIcon = RadialCommandMenu.IconPatternFor(
+                DesktopPetCommand.Move);
+            string followIcon = RadialCommandMenu.IconPatternFor(
+                DesktopPetCommand.FollowMouse);
+            Equal(99, stopIcon.Length, "stop icon pixel count");
+            Equal(99, moveIcon.Length, "move icon pixel count");
+            Equal(99, followIcon.Length, "follow icon pixel count");
+            True(stopIcon != moveIcon && stopIcon != followIcon &&
+                moveIcon != followIcon,
+                "all three commands need distinct icon silhouettes");
+            True(moveIcon.Substring(4 * 11, 11) == "..########.",
+                "move icon should be a right-facing play triangle");
+            True(followIcon.Substring(4 * 11, 11) == "..########." &&
+                followIcon[1 * 11 + 7] == '#' &&
+                followIcon[7 * 11 + 7] == '#',
+                "follow icon should be a fixed right-facing arrow");
             Near(0.0, RadialCommandMenu.SmootherStep(0.0), 0.000001,
                 "smooth easing start");
             Near(0.5, RadialCommandMenu.SmootherStep(0.5), 0.000001,
@@ -2487,9 +2515,8 @@ namespace RainWorldDesktopPet.Tests
                 const int left = 16;
                 const int top = 16;
                 const int diameter = 288;
-                bool foundHighResolutionTextPixel = false;
-                for (int y = top; y < top + diameter &&
-                    !foundHighResolutionTextPixel; y += 2)
+                bool pixelGridBroken = false;
+                for (int y = top; y < top + diameter && !pixelGridBroken; y += 2)
                 {
                     for (int x = left; x < left + diameter; x += 2)
                     {
@@ -2498,13 +2525,13 @@ namespace RainWorldDesktopPet.Tests
                             bitmap.GetPixel(x, y + 1).ToArgb() != color ||
                             bitmap.GetPixel(x + 1, y + 1).ToArgb() != color)
                         {
-                            foundHighResolutionTextPixel = true;
+                            pixelGridBroken = true;
                             break;
                         }
                     }
                 }
-                True(foundHighResolutionTextPixel,
-                    "labels should render above the two-pixel ring at full resolution");
+                True(!pixelGridBroken,
+                    "segments and command icons should share the two-pixel grid");
             }
         }
 
@@ -2609,6 +2636,44 @@ namespace RainWorldDesktopPet.Tests
             True(ai.Attention.Kind == AttentionKind.Mouse ||
                 ai.CurrentFollowVariation == FollowCommandVariation.LookAway,
                 "follow attention should normally remain on the cursor");
+        }
+
+        private static void FollowCommandHoldsHighJumpInput()
+        {
+            DesktopCollisionWorld world = new DesktopCollisionWorld(new WindowEnumerator());
+            world.RefreshFromSnapshots(new DesktopWindowSnapshot[0]);
+            MouseTracker mouse = new MouseTracker();
+            mouse.Sample(SimulationConstants.LogicStepSeconds);
+            Slugcat slugcat = new Slugcat(mouse.Position + new Vec2(-40.0, 180.0));
+            slugcat.State.Grounded = true;
+            slugcat.State.Standing = true;
+            DesktopPetAI ai = new DesktopPetAI(88123);
+            ai.SetCommand(DesktopPetCommand.FollowMouse);
+
+            VirtualInput launch = ai.Step(slugcat, world, mouse);
+            True(launch.Jump,
+                "a cursor far above the grounded Slugcat should start a jump");
+
+            slugcat.State.Grounded = false;
+            for (int airborneTick = 0; airborneTick < 6; airborneTick++)
+            {
+                VirtualInput held = ai.Step(slugcat, world, mouse);
+                True(held.Jump,
+                    "high follow jump should hold through boost tick " + airborneTick);
+            }
+
+            VirtualInput released = ai.Step(slugcat, world, mouse);
+            True(!released.Jump,
+                "follow jump should release after consuming the full boost window");
+
+            slugcat.State.Grounded = true;
+            for (int cooldownTick = 0; cooldownTick < 10; cooldownTick++)
+            {
+                VirtualInput coolingDown = ai.Step(slugcat, world, mouse);
+                True(!coolingDown.Jump,
+                    "follow jump cooldown should suppress repeated low hops at tick " +
+                    cooldownTick);
+            }
         }
 
         private static void AtlasMetadataParses()

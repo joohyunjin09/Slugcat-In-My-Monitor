@@ -3,7 +3,6 @@ using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
-using System.Drawing.Text;
 using RainWorldDesktopPet.AI;
 using RainWorldDesktopPet.Core;
 
@@ -64,6 +63,39 @@ namespace RainWorldDesktopPet.UI
         private const int PixelCanvasSize = 144;
         private const double InitialScale = 0.38;
         private const double InteractiveThreshold = 0.48;
+        private const double ChartRotationDegrees = 60.0;
+        private const int IconWidth = 11;
+        private const int IconHeight = 9;
+        private const string StopIcon =
+            "..........." +
+            "...##.##..." +
+            "...##.##..." +
+            "...##.##..." +
+            "...##.##..." +
+            "...##.##..." +
+            "...##.##..." +
+            "...##.##..." +
+            "...........";
+        private const string MoveIcon =
+            "..........." +
+            "..##......." +
+            "..####....." +
+            "..######..." +
+            "..########." +
+            "..######..." +
+            "..####....." +
+            "..##......." +
+            "...........";
+        private const string FollowIcon =
+            "..........." +
+            ".......#..." +
+            "........#.." +
+            ".........#." +
+            "..########." +
+            ".........#." +
+            "........#.." +
+            ".......#..." +
+            "...........";
         private static readonly DesktopPetCommand[] Commands =
         {
             DesktopPetCommand.Stop,
@@ -72,7 +104,6 @@ namespace RainWorldDesktopPet.UI
         };
 
         private readonly double[] hoverAmounts = new double[Commands.Length];
-        private readonly Font labelFont;
         private readonly Bitmap pixelCanvas;
         private readonly System.Drawing.Graphics pixelGraphics;
         private GameLoop target;
@@ -86,11 +117,6 @@ namespace RainWorldDesktopPet.UI
 
         internal RadialCommandMenu()
         {
-            string family = UiLocalization.Current == UiLanguage.English
-                ? "RAIN WORLD MENU" : "굴림체";
-            float size = UiLocalization.Current == UiLanguage.English
-                ? 13.0f : 13.5f;
-            labelFont = CreateLabelFont(family, size);
             pixelCanvas = new Bitmap(PixelCanvasSize, PixelCanvasSize,
                 PixelFormat.Format32bppPArgb);
             pixelGraphics = System.Drawing.Graphics.FromImage(pixelCanvas);
@@ -241,7 +267,8 @@ namespace RainWorldDesktopPet.UI
                     double hover = SmootherStep(renderHoverAmounts[i]);
                     float outer = (float)((OuterRadius + HoverExpansion * hover) *
                         scale / PixelScale);
-                    float startAngle = -88.0f + i * 120.0f;
+                    float startAngle = (float)(-88.0 + ChartRotationDegrees +
+                        i * 120.0);
                     const float sweepAngle = 116.0f;
                     bool active = activeCommand == Commands[i];
                     int alpha = ScaleAlpha(142 + (active ? 12 : 0) +
@@ -268,6 +295,21 @@ namespace RainWorldDesktopPet.UI
                             ScaleAlpha(206, eased), 220, 224, 221)))
                             pixelGraphics.FillRectangle(marker, markerX, markerY, 2, 2);
                     }
+
+                    float iconRadius = (inner + outer) * 0.5f;
+                    int iconX = (int)Math.Round(centerX +
+                        Math.Cos(middleAngle) * iconRadius);
+                    int iconY = (int)Math.Round(centerY +
+                        Math.Sin(middleAngle) * iconRadius);
+                    int iconAlpha = ScaleAlpha(196 + (active ? 12 : 0) +
+                        (int)Math.Round(47.0 * hover), eased);
+                    int iconShade = 218 + (active ? 8 : 0) +
+                        (int)Math.Round(29.0 * hover);
+                    using (SolidBrush iconBrush = new SolidBrush(Color.FromArgb(
+                        iconAlpha, iconShade, Math.Min(255, iconShade + 3),
+                        Math.Min(255, iconShade + 1))))
+                        DrawCommandIcon(pixelGraphics, Commands[i], iconX, iconY,
+                            iconBrush);
                 }
 
                 graphics.CompositingQuality = CompositingQuality.HighSpeed;
@@ -283,33 +325,6 @@ namespace RainWorldDesktopPet.UI
                     new Rectangle(left, top, diameter, diameter),
                     0, 0, PixelCanvasSize, PixelCanvasSize,
                     GraphicsUnit.Pixel);
-
-                graphics.CompositingQuality = CompositingQuality.HighQuality;
-                graphics.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
-                for (int i = 0; i < Commands.Length; i++)
-                {
-                    double hover = SmootherStep(renderHoverAmounts[i]);
-                    bool active = activeCommand == Commands[i];
-                    double outer = (OuterRadius + HoverExpansion * hover) * scale;
-                    double labelRadius = (InnerRadius * scale + outer) * 0.5;
-                    double middleAngle = (-88.0 + i * 120.0 + 58.0) *
-                        Math.PI / 180.0;
-                    float labelX = (float)(renderCenter.X - surfaceBounds.Left +
-                        Math.Cos(middleAngle) * labelRadius);
-                    float labelY = (float)(renderCenter.Y - surfaceBounds.Top +
-                        Math.Sin(middleAngle) * labelRadius);
-                    string label = LabelFor(Commands[i]);
-                    SizeF measured = graphics.MeasureString(label, labelFont,
-                        PointF.Empty, StringFormat.GenericTypographic);
-                    int textAlpha = ScaleAlpha(196 + (active ? 12 : 0) +
-                        (int)Math.Round(47.0 * hover), eased);
-                    using (SolidBrush textBrush = new SolidBrush(Color.FromArgb(
-                        textAlpha, 232, 235, 232)))
-                        graphics.DrawString(label, labelFont, textBrush,
-                            labelX - measured.Width * 0.5f,
-                            labelY - measured.Height * 0.5f,
-                            StringFormat.GenericTypographic);
-                }
             }
             finally
             {
@@ -340,6 +355,48 @@ namespace RainWorldDesktopPet.UI
         internal static int RenderPixelScale
         { get { return PixelScale; } }
 
+        internal static int CommandIconWidth
+        { get { return IconWidth; } }
+
+        internal static int CommandIconHeight
+        { get { return IconHeight; } }
+
+        internal static double RotationDegrees
+        { get { return ChartRotationDegrees; } }
+
+        internal static double BottomGapAngleDegrees
+        { get { return 30.0 + ChartRotationDegrees; } }
+
+        internal static string IconPatternFor(DesktopPetCommand command)
+        {
+            switch (command)
+            {
+                case DesktopPetCommand.Stop:
+                    return StopIcon;
+                case DesktopPetCommand.FollowMouse:
+                    return FollowIcon;
+                default:
+                    return MoveIcon;
+            }
+        }
+
+        private static void DrawCommandIcon(System.Drawing.Graphics graphics,
+            DesktopPetCommand command, int centerX, int centerY, Brush brush)
+        {
+            string pattern = IconPatternFor(command);
+            int left = centerX - IconWidth / 2;
+            int top = centerY - IconHeight / 2;
+            for (int y = 0; y < IconHeight; y++)
+            {
+                int row = y * IconWidth;
+                for (int x = 0; x < IconWidth; x++)
+                {
+                    if (pattern[row + x] == '#')
+                        graphics.FillRectangle(brush, left + x, top + y, 1, 1);
+                }
+            }
+        }
+
         private static GraphicsPath CreateRingSegment(float centerX, float centerY,
             float innerRadius, float outerRadius, float startAngle, float sweepAngle)
         {
@@ -369,25 +426,12 @@ namespace RainWorldDesktopPet.UI
 
         internal static DesktopPetCommand CommandAtAngle(double angleDegrees)
         {
-            double normalized = angleDegrees + 90.0;
+            double normalized = angleDegrees + 90.0 - ChartRotationDegrees;
             while (normalized < 0.0) normalized += 360.0;
             while (normalized >= 360.0) normalized -= 360.0;
             int index = Math.Min(Commands.Length - 1,
                 (int)Math.Floor(normalized / 120.0));
             return Commands[index];
-        }
-
-        private static string LabelFor(DesktopPetCommand command)
-        {
-            switch (command)
-            {
-                case DesktopPetCommand.Stop:
-                    return UiLocalization.Text("멈춰", "Stop");
-                case DesktopPetCommand.FollowMouse:
-                    return UiLocalization.Text("날 따라와", "Follow me");
-                default:
-                    return UiLocalization.Text("움직여", "Move");
-            }
         }
 
         private static int ScaleAlpha(int alpha, double opacity)
@@ -403,25 +447,12 @@ namespace RainWorldDesktopPet.UI
                 (value * (value * 6.0 - 15.0) + 10.0);
         }
 
-        private static Font CreateLabelFont(string preferredFamily, float size)
-        {
-            Font font = new Font(preferredFamily, size, FontStyle.Regular,
-                GraphicsUnit.Pixel);
-            if (string.Equals(font.FontFamily.Name, preferredFamily,
-                StringComparison.OrdinalIgnoreCase)) return font;
-
-            font.Dispose();
-            return new Font(FontFamily.GenericMonospace, size,
-                FontStyle.Regular, GraphicsUnit.Pixel);
-        }
-
         public void Dispose()
         {
             if (disposed) return;
             disposed = true;
             pixelGraphics.Dispose();
             pixelCanvas.Dispose();
-            labelFont.Dispose();
         }
     }
 }

@@ -231,6 +231,8 @@ namespace RainWorldDesktopPet.AI
         private FollowCommandVariation followCommandVariation;
         private int followVariationTicks;
         private int followVariationCountdown;
+        private int followJumpHoldTicks;
+        private int followJumpCooldownTicks;
 
         private int directionCommitmentTicks;
         private readonly int routePreferenceSalt;
@@ -404,6 +406,8 @@ namespace RainWorldDesktopPet.AI
             followVariationTicks = 0;
             followVariationCountdown = command == DesktopPetCommand.FollowMouse
                 ? 20 + random.Next(0, 41) : 0;
+            followJumpHoldTicks = 0;
+            followJumpCooldownTicks = 0;
         }
 
         // Allocates only when the debug overlay explicitly requests it. Release
@@ -2189,13 +2193,31 @@ namespace RainWorldDesktopPet.AI
             // receiving their normal fixed-step updates.
             if (Command == DesktopPetCommand.Stop || !slugcat.State.Conscious ||
                 slugcat.State.Dead || slugcat.State.StunCounter > 0)
+            {
+                followJumpHoldTicks = 0;
                 return VirtualInput.Neutral;
+            }
 
-            UpdateFollowCommandVariation(context);
             double horizontal = mouse.Position.X - slugcat.Center.X;
             int towardMouse = Math.Abs(horizontal) <= 1.0
                 ? slugcat.State.Facing : (horizontal < 0.0 ? -1 : 1);
             int uprightY = context.Grounded && !slugcat.State.Standing ? -1 : 0;
+            int horizontalInput = Math.Abs(horizontal) > 28.0 ? towardMouse : 0;
+
+            // A normal Player jump starts with jumpBoost=8. Retail consumes it
+            // only while the jump button remains held, so keep the virtual
+            // button down after takeoff instead of turning every follow jump
+            // into a one-tick tap.
+            if (followJumpHoldTicks > 0)
+            {
+                followJumpHoldTicks--;
+                if (followJumpHoldTicks == 0)
+                    followJumpCooldownTicks = 12 + random.Next(0, 9);
+                return new VirtualInput(horizontalInput, 0, true, false);
+            }
+
+            if (followJumpCooldownTicks > 0) followJumpCooldownTicks--;
+            UpdateFollowCommandVariation(context);
 
             switch (followCommandVariation)
             {
@@ -2212,11 +2234,25 @@ namespace RainWorldDesktopPet.AI
             // Stay close without vibrating across the cursor. Vertical cursor
             // movement requests the existing original jump path; no command moves
             // BodyChunks directly.
-            int horizontalInput = Math.Abs(horizontal) > 28.0 ? towardMouse : 0;
-            bool jump = context.Grounded &&
+            double verticalToMouse = slugcat.Center.Y - mouse.Position.Y;
+            bool jump = followJumpCooldownTicks == 0 && context.Grounded &&
                 mouse.Position.Y < slugcat.Center.Y - 78.0 &&
                 (Math.Abs(horizontal) < 270.0 || context.ObstacleAhead);
+            if (jump)
+                followJumpHoldTicks = FollowJumpHoldDuration(
+                    verticalToMouse, context.ObstacleAhead);
             return new VirtualInput(horizontalInput, uprightY, jump, false);
+        }
+
+        private static int FollowJumpHoldDuration(double verticalToMouse,
+            bool obstacleAhead)
+        {
+            // Six airborne hold ticks consume the full original 8 -> 0
+            // jumpBoost sequence (1.5 per tick). Smaller height differences
+            // retain shorter, less dramatic jumps for natural variation.
+            if (verticalToMouse >= 140.0) return 6;
+            if (verticalToMouse >= 100.0 || obstacleAhead) return 4;
+            return 2;
         }
 
         private void UpdateFollowCommandVariation(UtilityContext context)
