@@ -26,15 +26,43 @@ if (-not $SkipBuild) {
 }
 
 $releaseRoot = Join-Path $repoRoot 'artifacts\Release'
-$requiredFiles = @(
-    (Join-Path $releaseRoot 'SlugcatInMyMonitor.exe'),
-    (Join-Path $releaseRoot 'SlugcatInMyMonitor.exe.config'),
-    (Join-Path $releaseRoot 'SlugcatInMyMonitor.DirectComposition.dll'),
-    (Join-Path $repoRoot 'README.md'),
-    (Join-Path $repoRoot 'LICENSE')
+$releaseFiles = @(
+    'SlugcatInMyMonitor.exe',
+    'SlugcatInMyMonitor.exe.config',
+    'SlugcatInMyMonitor.DirectComposition.dll',
+    'Fmod5Sharp.dll',
+    'NVorbis.dll',
+    'NAudio.Core.dll',
+    'OggVorbisEncoder.dll',
+    'Microsoft.Bcl.AsyncInterfaces.dll',
+    'System.Buffers.dll',
+    'System.Memory.dll',
+    'System.Numerics.Vectors.dll',
+    'System.Runtime.CompilerServices.Unsafe.dll',
+    'System.Text.Encodings.Web.dll',
+    'System.Text.Json.dll',
+    'System.Threading.Tasks.Extensions.dll',
+    'System.ValueTuple.dll',
+    'THIRD-PARTY-NOTICES.md'
 )
-foreach ($file in $requiredFiles) {
-    if (-not (Test-Path -LiteralPath $file)) { throw "Required package file is missing: $file" }
+$repositoryFiles = @(
+    'README.md',
+    'README.ko.md',
+    'LICENSE'
+)
+
+$packageFiles = @(
+    foreach ($name in $releaseFiles) {
+        [PSCustomObject]@{ Source = Join-Path $releaseRoot $name; Name = $name }
+    }
+    foreach ($name in $repositoryFiles) {
+        [PSCustomObject]@{ Source = Join-Path $repoRoot $name; Name = $name }
+    }
+)
+foreach ($file in $packageFiles) {
+    if (-not (Test-Path -LiteralPath $file.Source -PathType Leaf)) {
+        throw "Required package file is missing: $($file.Source)"
+    }
 }
 
 New-Item -ItemType Directory -Force -Path $packageRoot | Out-Null
@@ -43,16 +71,37 @@ if (Test-Path -LiteralPath $stagingRoot) {
 }
 New-Item -ItemType Directory -Force -Path $stagingRoot | Out-Null
 
-Copy-Item -LiteralPath (Join-Path $releaseRoot 'SlugcatInMyMonitor.exe') -Destination $stagingRoot
-Copy-Item -LiteralPath (Join-Path $releaseRoot 'SlugcatInMyMonitor.exe.config') -Destination $stagingRoot
-Copy-Item -LiteralPath (Join-Path $releaseRoot 'SlugcatInMyMonitor.DirectComposition.dll') -Destination $stagingRoot
-Copy-Item -LiteralPath (Join-Path $repoRoot 'README.md') -Destination $stagingRoot
-Copy-Item -LiteralPath (Join-Path $repoRoot 'LICENSE') -Destination $stagingRoot
+foreach ($file in $packageFiles) {
+    Copy-Item -LiteralPath $file.Source -Destination (Join-Path $stagingRoot $file.Name)
+}
 
 Compress-Archive -Path (Join-Path $stagingRoot '*') -DestinationPath $archivePath -Force
+
+# Re-open the final archive so a successful copy cannot hide an incomplete ZIP.
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+$archive = [IO.Compression.ZipFile]::OpenRead($archivePath)
+try {
+    $archiveFiles = @(
+        $archive.Entries |
+            Where-Object { -not [string]::IsNullOrEmpty($_.Name) } |
+            ForEach-Object { $_.FullName.Replace('\', '/') }
+    )
+}
+finally {
+    $archive.Dispose()
+}
+
+$expectedArchiveFiles = @($packageFiles | ForEach-Object { $_.Name })
+$missingArchiveFiles = @($expectedArchiveFiles | Where-Object { $archiveFiles -notcontains $_ })
+$unexpectedArchiveFiles = @($archiveFiles | Where-Object { $expectedArchiveFiles -notcontains $_ })
+if ($missingArchiveFiles.Count -gt 0 -or $unexpectedArchiveFiles.Count -gt 0) {
+    throw "Package verification failed. Missing: $($missingArchiveFiles -join ', '); Unexpected: $($unexpectedArchiveFiles -join ', ')"
+}
+
 $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $archivePath).Hash.ToLowerInvariant()
 Set-Content -LiteralPath $checksumPath -Encoding ascii -NoNewline `
     -Value "$hash  $([IO.Path]::GetFileName($archivePath))"
 
 Write-Host "Created $archivePath"
+Write-Host "Verified $($archiveFiles.Count) packaged files"
 Write-Host "SHA-256 $hash"
