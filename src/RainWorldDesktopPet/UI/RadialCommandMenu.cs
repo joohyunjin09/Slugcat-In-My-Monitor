@@ -1,0 +1,458 @@
+using System;
+using System.Diagnostics;
+using System.Drawing;
+using System.Drawing.Drawing2D;
+using System.Drawing.Imaging;
+using RainWorldDesktopPet.AI;
+using RainWorldDesktopPet.Core;
+
+namespace RainWorldDesktopPet.UI
+{
+    internal sealed class RadialCommandHitSnapshot
+    {
+        internal static readonly RadialCommandHitSnapshot Empty =
+            new RadialCommandHitSnapshot(null, Vec2.Zero, 0.0, 0.0, false);
+
+        internal RadialCommandHitSnapshot(GameLoop target, Vec2 center,
+            double innerRadius, double outerRadius, bool interactive)
+        {
+            Target = target;
+            Center = center;
+            InnerRadius = innerRadius;
+            OuterRadius = outerRadius;
+            Interactive = interactive;
+        }
+
+        internal readonly GameLoop Target;
+        internal readonly Vec2 Center;
+        internal readonly double InnerRadius;
+        internal readonly double OuterRadius;
+        internal readonly bool Interactive;
+
+        internal bool TryHit(Vec2 point, out DesktopPetCommand command)
+        {
+            command = DesktopPetCommand.Move;
+            if (!Interactive || Target == null) return false;
+            Vec2 offset = point - Center;
+            double distance = offset.Length;
+            if (distance < InnerRadius || distance > OuterRadius) return false;
+            command = RadialCommandMenu.CommandAtAngle(
+                Math.Atan2(offset.Y, offset.X) * 180.0 / Math.PI);
+            return true;
+        }
+
+        internal bool Contains(Vec2 point)
+        {
+            if (!Interactive || Target == null) return false;
+            Vec2 offset = point - Center;
+            return offset.Length <= OuterRadius;
+        }
+    }
+
+    internal sealed class RadialCommandMenu : IDisposable
+    {
+        private const double InnerRadius = 47.0;
+        private const double OuterRadius = 124.0;
+        private const double HoverExpansion = 8.0;
+        private const double RenderMargin = 12.0;
+        private const double OpeningSpeed = 2.0;
+        private const double ClosingSpeed = 2.0;
+        private const double HoverInSpeed = 1.0 / 0.23;
+        private const double HoverOutSpeed = 1.0 / 0.23;
+        private const int PixelScale = 2;
+        private const int PixelCanvasSize = 144;
+        private const double InitialScale = 0.38;
+        private const double InteractiveThreshold = 0.48;
+        private const double ChartRotationDegrees = 60.0;
+        private const int IconWidth = 11;
+        private const int IconHeight = 9;
+        private const string StopIcon =
+            "..........." +
+            "...##.##..." +
+            "...##.##..." +
+            "...##.##..." +
+            "...##.##..." +
+            "...##.##..." +
+            "...##.##..." +
+            "...##.##..." +
+            "...........";
+        private const string MoveIcon =
+            "..........." +
+            "..##......." +
+            "..####....." +
+            "..######..." +
+            "..########." +
+            "..######..." +
+            "..####....." +
+            "..##......." +
+            "...........";
+        private const string FollowIcon =
+            "..........." +
+            ".......#..." +
+            "........#.." +
+            ".........#." +
+            "..########." +
+            ".........#." +
+            "........#.." +
+            ".......#..." +
+            "...........";
+        private static readonly DesktopPetCommand[] Commands =
+        {
+            DesktopPetCommand.Stop,
+            DesktopPetCommand.Move,
+            DesktopPetCommand.FollowMouse
+        };
+
+        private readonly double[] hoverAmounts = new double[Commands.Length];
+        private readonly Bitmap pixelCanvas;
+        private readonly System.Drawing.Graphics pixelGraphics;
+        private GameLoop target;
+        private Vec2 anchor;
+        private Vec2 center;
+        private double openness;
+        private bool closing;
+        private int hoveredIndex = -1;
+        private long lastUpdateTimestamp;
+        private bool disposed;
+
+        internal RadialCommandMenu()
+        {
+            pixelCanvas = new Bitmap(PixelCanvasSize, PixelCanvasSize,
+                PixelFormat.Format32bppPArgb);
+            pixelGraphics = System.Drawing.Graphics.FromImage(pixelCanvas);
+        }
+
+        internal bool IsVisible { get { return target != null && openness > 0.0; } }
+        internal GameLoop Target { get { return target; } }
+
+        internal void Open(GameLoop newTarget, Vec2 slugcatCenter,
+            Rectangle workArea)
+        {
+            if (newTarget == null) throw new ArgumentNullException("newTarget");
+            target = newTarget;
+            anchor = slugcatCenter;
+            center = slugcatCenter;
+            openness = 0.0;
+            closing = false;
+            hoveredIndex = -1;
+            Array.Clear(hoverAmounts, 0, hoverAmounts.Length);
+            lastUpdateTimestamp = Stopwatch.GetTimestamp();
+            UpdateCenter(workArea);
+        }
+
+        internal void Close()
+        {
+            if (target != null) closing = true;
+        }
+
+        internal void CloseImmediately()
+        {
+            target = null;
+            openness = 0.0;
+            closing = false;
+            hoveredIndex = -1;
+            Array.Clear(hoverAmounts, 0, hoverAmounts.Length);
+            lastUpdateTimestamp = 0;
+        }
+
+        internal void Update(Vec2 slugcatCenter, Rectangle workArea,
+            Vec2 pointer)
+        {
+            if (target == null) return;
+            long now = Stopwatch.GetTimestamp();
+            double elapsed = lastUpdateTimestamp == 0 ? 1.0 / 60.0 :
+                (now - lastUpdateTimestamp) / (double)Stopwatch.Frequency;
+            lastUpdateTimestamp = now;
+            elapsed = MathUtil.Clamp(elapsed, 0.0, 0.05);
+
+            anchor = slugcatCenter;
+            openness = MathUtil.Clamp01(openness + elapsed *
+                (closing ? -ClosingSpeed : OpeningSpeed));
+            UpdateCenter(workArea);
+
+            double eased = EasedOpenness;
+            double scale = InitialScale + eased * (1.0 - InitialScale);
+            double hitInner = InnerRadius * scale;
+            double hitOuter = (OuterRadius + HoverExpansion) * scale;
+            hoveredIndex = !closing && openness >= InteractiveThreshold
+                ? CommandIndexAtPoint(pointer, center, hitInner, hitOuter) : -1;
+            for (int i = 0; i < hoverAmounts.Length; i++)
+            {
+                double direction = i == hoveredIndex ? HoverInSpeed : -HoverOutSpeed;
+                hoverAmounts[i] = MathUtil.Clamp01(
+                    hoverAmounts[i] + elapsed * direction);
+            }
+
+            if (closing && openness <= 0.0) CloseImmediately();
+        }
+
+        private void UpdateCenter(Rectangle workArea)
+        {
+            double margin = OuterRadius + HoverExpansion + RenderMargin;
+            double minX = workArea.Left + margin;
+            double maxX = workArea.Right - margin;
+            double minY = workArea.Top + margin;
+            double maxY = workArea.Bottom - margin;
+            Vec2 destination = new Vec2(
+                maxX >= minX ? MathUtil.Clamp(anchor.X, minX, maxX) :
+                    workArea.Left + workArea.Width * 0.5,
+                maxY >= minY ? MathUtil.Clamp(anchor.Y, minY, maxY) :
+                    workArea.Top + workArea.Height * 0.5);
+            center = Vec2.Lerp(anchor, destination, EasedOpenness);
+        }
+
+        internal Rectangle GetRenderBounds()
+        {
+            double reach = OuterRadius + HoverExpansion + RenderMargin;
+            int left = (int)Math.Floor(center.X - reach);
+            int top = (int)Math.Floor(center.Y - reach);
+            int size = (int)Math.Ceiling(reach * 2.0);
+            return new Rectangle(left, top, size, size);
+        }
+
+        internal RadialCommandHitSnapshot CreateHitSnapshot()
+        {
+            if (target == null || closing || openness < InteractiveThreshold)
+                return RadialCommandHitSnapshot.Empty;
+            double scale = InitialScale + EasedOpenness * (1.0 - InitialScale);
+            return new RadialCommandHitSnapshot(target, center,
+                InnerRadius * scale,
+                (OuterRadius + HoverExpansion) * scale, true);
+        }
+
+        internal void Render(System.Drawing.Graphics graphics,
+            Rectangle surfaceBounds)
+        {
+            if (graphics == null) throw new ArgumentNullException("graphics");
+            if (!IsVisible) return;
+
+            RenderCore(graphics, surfaceBounds, center, EasedOpenness,
+                InitialScale + EasedOpenness * (1.0 - InitialScale),
+                hoverAmounts, target.Command);
+        }
+
+        internal void RenderPreview(System.Drawing.Graphics graphics,
+            Rectangle surfaceBounds, Vec2 previewCenter,
+            DesktopPetCommand activeCommand, int hoveredCommandIndex)
+        {
+            double[] previewHover = new double[Commands.Length];
+            if (hoveredCommandIndex >= 0 && hoveredCommandIndex < previewHover.Length)
+                previewHover[hoveredCommandIndex] = 1.0;
+            RenderCore(graphics, surfaceBounds, previewCenter, 1.0, 1.0,
+                previewHover, activeCommand);
+        }
+
+        private void RenderCore(System.Drawing.Graphics graphics,
+            Rectangle surfaceBounds, Vec2 renderCenter, double eased,
+            double scale, double[] renderHoverAmounts,
+            DesktopPetCommand activeCommand)
+        {
+            GraphicsState targetState = graphics.Save();
+            try
+            {
+                pixelGraphics.CompositingMode = CompositingMode.SourceCopy;
+                pixelGraphics.Clear(Color.Transparent);
+                pixelGraphics.CompositingMode = CompositingMode.SourceOver;
+                pixelGraphics.CompositingQuality = CompositingQuality.HighSpeed;
+                pixelGraphics.SmoothingMode = SmoothingMode.None;
+                pixelGraphics.PixelOffsetMode = PixelOffsetMode.None;
+                pixelGraphics.InterpolationMode = InterpolationMode.NearestNeighbor;
+
+                const float centerX = PixelCanvasSize * 0.5f;
+                const float centerY = PixelCanvasSize * 0.5f;
+                float inner = (float)(InnerRadius * scale / PixelScale);
+
+                for (int i = 0; i < Commands.Length; i++)
+                {
+                    double hover = SmootherStep(renderHoverAmounts[i]);
+                    float outer = (float)((OuterRadius + HoverExpansion * hover) *
+                        scale / PixelScale);
+                    float startAngle = (float)(-88.0 + ChartRotationDegrees +
+                        i * 120.0);
+                    const float sweepAngle = 116.0f;
+                    bool active = activeCommand == Commands[i];
+                    int alpha = ScaleAlpha(142 + (active ? 12 : 0) +
+                        (int)Math.Round(68.0 * hover), eased);
+                    int shade = 42 + (active ? 6 : 0) +
+                        (int)Math.Round(42.0 * hover);
+
+                    using (GraphicsPath segment = CreateRingSegment(centerX,
+                        centerY, inner, outer, startAngle, sweepAngle))
+                    using (SolidBrush fill = new SolidBrush(Color.FromArgb(alpha,
+                        shade, shade + 2, shade + 3)))
+                        pixelGraphics.FillPath(fill, segment);
+
+                    double middleAngle = (startAngle + sweepAngle * 0.5) *
+                        Math.PI / 180.0;
+                    if (active)
+                    {
+                        double markerRadius = inner + 4.0;
+                        int markerX = (int)Math.Round(centerX +
+                            Math.Cos(middleAngle) * markerRadius) - 1;
+                        int markerY = (int)Math.Round(centerY +
+                            Math.Sin(middleAngle) * markerRadius) - 1;
+                        using (SolidBrush marker = new SolidBrush(Color.FromArgb(
+                            ScaleAlpha(206, eased), 220, 224, 221)))
+                            pixelGraphics.FillRectangle(marker, markerX, markerY, 2, 2);
+                    }
+
+                    float iconRadius = (inner + outer) * 0.5f;
+                    int iconX = (int)Math.Round(centerX +
+                        Math.Cos(middleAngle) * iconRadius);
+                    int iconY = (int)Math.Round(centerY +
+                        Math.Sin(middleAngle) * iconRadius);
+                    int iconAlpha = ScaleAlpha(196 + (active ? 12 : 0) +
+                        (int)Math.Round(47.0 * hover), eased);
+                    int iconShade = 218 + (active ? 8 : 0) +
+                        (int)Math.Round(29.0 * hover);
+                    using (SolidBrush iconBrush = new SolidBrush(Color.FromArgb(
+                        iconAlpha, iconShade, Math.Min(255, iconShade + 3),
+                        Math.Min(255, iconShade + 1))))
+                        DrawCommandIcon(pixelGraphics, Commands[i], iconX, iconY,
+                            iconBrush);
+                }
+
+                graphics.CompositingQuality = CompositingQuality.HighSpeed;
+                graphics.SmoothingMode = SmoothingMode.None;
+                graphics.InterpolationMode = InterpolationMode.NearestNeighbor;
+                graphics.PixelOffsetMode = PixelOffsetMode.Half;
+                int diameter = PixelCanvasSize * PixelScale;
+                int left = (int)Math.Round(renderCenter.X - surfaceBounds.Left -
+                    diameter * 0.5);
+                int top = (int)Math.Round(renderCenter.Y - surfaceBounds.Top -
+                    diameter * 0.5);
+                graphics.DrawImage(pixelCanvas,
+                    new Rectangle(left, top, diameter, diameter),
+                    0, 0, PixelCanvasSize, PixelCanvasSize,
+                    GraphicsUnit.Pixel);
+            }
+            finally
+            {
+                graphics.Restore(targetState);
+            }
+        }
+
+        private double EasedOpenness
+        {
+            get
+            {
+                return SmootherStep(openness);
+            }
+        }
+
+        internal static double OpeningDurationSeconds
+        { get { return 1.0 / OpeningSpeed; } }
+
+        internal static double ClosingDurationSeconds
+        { get { return 1.0 / ClosingSpeed; } }
+
+        internal static double HoverInDurationSeconds
+        { get { return 1.0 / HoverInSpeed; } }
+
+        internal static double HoverOutDurationSeconds
+        { get { return 1.0 / HoverOutSpeed; } }
+
+        internal static int RenderPixelScale
+        { get { return PixelScale; } }
+
+        internal static int CommandIconWidth
+        { get { return IconWidth; } }
+
+        internal static int CommandIconHeight
+        { get { return IconHeight; } }
+
+        internal static double RotationDegrees
+        { get { return ChartRotationDegrees; } }
+
+        internal static double BottomGapAngleDegrees
+        { get { return 30.0 + ChartRotationDegrees; } }
+
+        internal static string IconPatternFor(DesktopPetCommand command)
+        {
+            switch (command)
+            {
+                case DesktopPetCommand.Stop:
+                    return StopIcon;
+                case DesktopPetCommand.FollowMouse:
+                    return FollowIcon;
+                default:
+                    return MoveIcon;
+            }
+        }
+
+        private static void DrawCommandIcon(System.Drawing.Graphics graphics,
+            DesktopPetCommand command, int centerX, int centerY, Brush brush)
+        {
+            string pattern = IconPatternFor(command);
+            int left = centerX - IconWidth / 2;
+            int top = centerY - IconHeight / 2;
+            for (int y = 0; y < IconHeight; y++)
+            {
+                int row = y * IconWidth;
+                for (int x = 0; x < IconWidth; x++)
+                {
+                    if (pattern[row + x] == '#')
+                        graphics.FillRectangle(brush, left + x, top + y, 1, 1);
+                }
+            }
+        }
+
+        private static GraphicsPath CreateRingSegment(float centerX, float centerY,
+            float innerRadius, float outerRadius, float startAngle, float sweepAngle)
+        {
+            GraphicsPath path = new GraphicsPath();
+            RectangleF outer = new RectangleF(centerX - outerRadius,
+                centerY - outerRadius, outerRadius * 2.0f, outerRadius * 2.0f);
+            RectangleF inner = new RectangleF(centerX - innerRadius,
+                centerY - innerRadius, innerRadius * 2.0f, innerRadius * 2.0f);
+            path.AddArc(outer, startAngle, sweepAngle);
+            path.AddArc(inner, startAngle + sweepAngle, -sweepAngle);
+            path.CloseFigure();
+            return path;
+        }
+
+        private static int CommandIndexAtPoint(Vec2 point, Vec2 menuCenter,
+            double innerRadius, double outerRadius)
+        {
+            Vec2 offset = point - menuCenter;
+            double distance = offset.Length;
+            if (distance < innerRadius || distance > outerRadius) return -1;
+            DesktopPetCommand command = CommandAtAngle(
+                Math.Atan2(offset.Y, offset.X) * 180.0 / Math.PI);
+            for (int i = 0; i < Commands.Length; i++)
+                if (Commands[i] == command) return i;
+            return -1;
+        }
+
+        internal static DesktopPetCommand CommandAtAngle(double angleDegrees)
+        {
+            double normalized = angleDegrees + 90.0 - ChartRotationDegrees;
+            while (normalized < 0.0) normalized += 360.0;
+            while (normalized >= 360.0) normalized -= 360.0;
+            int index = Math.Min(Commands.Length - 1,
+                (int)Math.Floor(normalized / 120.0));
+            return Commands[index];
+        }
+
+        private static int ScaleAlpha(int alpha, double opacity)
+        {
+            return Math.Max(0, Math.Min(255,
+                (int)Math.Round(alpha * MathUtil.Clamp01(opacity))));
+        }
+
+        internal static double SmootherStep(double value)
+        {
+            value = MathUtil.Clamp01(value);
+            return value * value * value *
+                (value * (value * 6.0 - 15.0) + 10.0);
+        }
+
+        public void Dispose()
+        {
+            if (disposed) return;
+            disposed = true;
+            pixelGraphics.Dispose();
+            pixelCanvas.Dispose();
+        }
+    }
+}

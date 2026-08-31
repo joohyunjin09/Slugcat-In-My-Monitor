@@ -39,12 +39,23 @@ namespace RainWorldDesktopPet.Desktop
 
         public readonly long Id;
         public readonly DesktopSurfaceKind Kind;
-        public readonly Rectangle Bounds;
+        public Rectangle Bounds { get; private set; }
         public readonly string Label;
-        public readonly Rectangle PreviousWindowBounds;
-        public readonly Rectangle CurrentWindowBounds;
+        public Rectangle PreviousWindowBounds { get; private set; }
+        public Rectangle CurrentWindowBounds { get; private set; }
         public readonly int MissingRefreshes;
         public Vec2 MovementDelta { get; internal set; }
+
+        internal void ApplyWindowTranslation(Rectangle previousWindowBounds,
+            Rectangle currentWindowBounds, int desktopDeltaX, int desktopDeltaY)
+        {
+            Bounds = new Rectangle(Bounds.X + desktopDeltaX,
+                Bounds.Y + desktopDeltaY, Bounds.Width, Bounds.Height);
+            PreviousWindowBounds = previousWindowBounds;
+            CurrentWindowBounds = currentWindowBounds;
+            MovementDelta = DesktopWorldTransform.ToSimulationDelta(
+                new Vec2(desktopDeltaX, desktopDeltaY));
+        }
 
         public bool IsHorizontal
         {

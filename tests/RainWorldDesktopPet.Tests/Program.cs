@@ -60,6 +60,21 @@ namespace RainWorldDesktopPet.Tests
                     return 1;
                 }
             }
+            if (args.Length >= 2 && args[0] == "--command-menu-preview")
+            {
+                try
+                {
+                    RenderCommandMenuPreview(args[1]);
+                    return 0;
+                }
+                catch (Exception exception)
+                {
+                    Console.WriteLine("Command menu preview failed: " +
+                        exception.GetType().FullName);
+                    Console.WriteLine(exception.Message);
+                    return 1;
+                }
+            }
 
             Run("FixedTimeStep uses 40 Hz independently of render rate", FixedStepUsesFortyHertz);
             Run("Resume timing reset discards a one-hour suspended interval",
@@ -128,6 +143,8 @@ namespace RainWorldDesktopPet.Tests
             Run("Monitor floor corners survive post-connection penetration", MonitorCornerSurvivesConnectionPenetration);
             Run("Swept high-speed travel cannot tunnel through a small window", FastHorizontalSmallWindowDoesNotTunnel);
             Run("Dragging passes through window walls", DraggingPassesThroughWindowWalls);
+            Run("Dragging replaces Crawl with the original lost-control pose",
+                DraggingClearsCrawlPoseLikeOriginalPlayer);
             Run("Slugcat dragging blocks desktop pointer interactions",
                 SlugcatDraggingBlocksDesktopInteractions);
             Run("Suspend and resume power events use the recovery path",
@@ -138,9 +155,21 @@ namespace RainWorldDesktopPet.Tests
                 ResumeRecoveryGuardsInvalidInputs);
             Run("Mouse hook hit snapshots preserve click-through and topmost order",
                 MouseHookHitSnapshotsPreserveInputRules);
+            Run("Radial command sectors map to Stop, Move, and Follow Me",
+                RadialCommandSectorsMapCommands);
+            Run("Radial command UI keeps exact easing and readable pixel icons",
+                RadialCommandVisualStyleUsesPixelGridAndSlowEasing);
             Run("World food mouse hit circles ignore Slugcat visual size",
                 WorldFoodMouseHitCirclesIgnoreSlugcatVisualSize);
             Run("AI produces VirtualInput without moving physics directly", AiDoesNotMoveCreature);
+            Run("Stop command suppresses locomotion while AI attention keeps updating",
+                StopCommandOnlySuppressesLocomotion);
+            Run("Command selection waits with neutral locomotion while AI keeps updating",
+                CommandSelectionWaitSuppressesLocomotionOnly);
+            Run("Follow command mostly pursues the cursor with short natural variations",
+                FollowCommandPursuesCursorWithVariations);
+            Run("Follow command holds high jumps through the original jumpBoost window",
+                FollowCommandHoldsHighJumpInput);
             Run("Futile atlas metadata parses frame geometry", AtlasMetadataParses);
             Run("DMS part atlas overrides and restores original sprites", DmsPartAtlasOverrideRestoresBase);
             Run("DMS preserves authored source palettes over user colours", DmsAuthoredColorIsPreservedUntilCustomized);
@@ -181,8 +210,16 @@ namespace RainWorldDesktopPet.Tests
             Run("Original blocked-wall pose applies to Slugcat and Slugpup", OriginalBlockedWallPoseAppliesToSlugcatAndSlugpup);
             Run("WallClimb hands use alternating wall targets", WallClimbHandsTargetTheWall);
             Run("Sleep curl pulls both hands to the original target", SleepCurlHandsShareOriginalTarget);
-            Run("Moving window walls carry a climbing Slugcat", MovingWindowWallCarriesClimber);
-            Run("Moving windows carry both chunks for fast motion in every direction", MovingWindowCarriesConnectedBody);
+            Run("Moving window deltas remain collision metadata",
+                MovingWindowDeltaRemainsCollisionMetadata);
+            Run("Moving windows do not translate the Slugcat body",
+                MovingWindowDoesNotCarryConnectedBody);
+            Run("Raised windows retain support through the thicker collision slab",
+                RaisedWindowPlatformRetainsSupportedChunk);
+            Run("Live window events stay bounded and allocation-stable",
+                LiveWindowEventTrackerStaysBounded);
+            Run("Live window translations move collision boxes without snapshot churn",
+                LiveWindowTranslationsAreIncremental);
             Run("Desktop window enumeration publishes snapshots asynchronously",
                 DesktopRefreshIsAsynchronous);
             Run("Transient HWND enumeration misses retain then expire surfaces", TransientWindowMissesUseGracePeriod);
@@ -191,6 +228,8 @@ namespace RainWorldDesktopPet.Tests
             Run("Monitor-ceiling window tops cannot hide the Slugcat", MonitorCeilingWindowTopIsRejected);
             Run("PlayerGraphics face frame uses the body-head axis", OriginalFaceFrameSelection);
             Run("Original face resolver matches movement and airborne states", OriginalFaceResolverMatchesDllStates);
+            Run("PlayerGraphics look snaps per logic tick and interpolates only while drawing",
+                OriginalLookDirectionUsesRenderInterpolationOnly);
             Run("Original slugcat variants match local DLL constants", OriginalVariantValues);
             Run("PlayerGraphics tail uses the original four-segment layout", OriginalTailLayout);
             Run("All render paths expose one continuous original tail mesh", OriginalTailMeshIsContinuous);
@@ -536,6 +575,24 @@ namespace RainWorldDesktopPet.Tests
                         True(audio.Muted, "mute state is applied immediately");
                     }
                 }
+            }
+        }
+
+        private static void RenderCommandMenuPreview(string outputPath)
+        {
+            using (Bitmap bitmap = new Bitmap(320, 320,
+                PixelFormat.Format32bppPArgb))
+            using (System.Drawing.Graphics graphics =
+                System.Drawing.Graphics.FromImage(bitmap))
+            using (RadialCommandMenu menu = new RadialCommandMenu())
+            {
+                graphics.Clear(Color.Transparent);
+                menu.RenderPreview(graphics, new Rectangle(0, 0,
+                    bitmap.Width, bitmap.Height), new Vec2(160.0, 160.0),
+                    DesktopPetCommand.Move, 2);
+                string directory = Path.GetDirectoryName(Path.GetFullPath(outputPath));
+                if (!Directory.Exists(directory)) Directory.CreateDirectory(directory);
+                bitmap.Save(outputPath, ImageFormat.Png);
             }
         }
 
@@ -2355,6 +2412,129 @@ namespace RainWorldDesktopPet.Tests
                 "a click outside immutable pet bounds must remain click-through");
         }
 
+        private static void DraggingClearsCrawlPoseLikeOriginalPlayer()
+        {
+            DesktopCollisionWorld world = new DesktopCollisionWorld(new WindowEnumerator());
+            world.RefreshFromSnapshots(new DesktopWindowSnapshot[0]);
+            Slugcat slugcat = new Slugcat(new Vec2(300.0, 300.0));
+            slugcat.State.BodyMode = BodyModeIndex.Crawl;
+            slugcat.State.Animation = AnimationIndex.CrawlTurn;
+            slugcat.State.Standing = true;
+            slugcat.State.Grounded = true;
+
+            True(slugcat.Grab(slugcat.BodyChunks[0].Position),
+                "crawl precondition should be grabbable");
+            True(slugcat.State.BodyMode == BodyModeIndex.Stunned &&
+                 slugcat.State.Animation == AnimationIndex.None &&
+                 !slugcat.State.Standing && !slugcat.State.Grounded,
+                "external control should immediately replace the Crawl render inputs");
+            Equal(0, slugcat.State.StunCounter,
+                "mouse dragging must not allocate a post-release stun duration");
+            True(slugcat.State.Conscious,
+                "mouse dragging changes the body pose without fabricating unconsciousness");
+
+            slugcat.Step(VirtualInput.Neutral, world,
+                slugcat.Center + new Vec2(60.0, -20.0), Vec2.Zero);
+            True(slugcat.State.BodyMode == BodyModeIndex.Stunned &&
+                 slugcat.State.Animation == AnimationIndex.None,
+                "the lost-control pose should remain stable for the complete drag");
+
+            slugcat.Release(Vec2.Zero);
+            True(slugcat.State.BodyMode == BodyModeIndex.Default &&
+                 slugcat.State.Animation == AnimationIndex.None &&
+                 !slugcat.State.Standing && !slugcat.State.Grounded,
+                "release should derive the next posture from physics instead of restoring Crawl");
+        }
+
+        private static void RadialCommandSectorsMapCommands()
+        {
+            Near(60.0, RadialCommandMenu.RotationDegrees, 0.000001,
+                "command wheel clockwise rotation");
+            Near(90.0, RadialCommandMenu.BottomGapAngleDegrees, 0.000001,
+                "lower command-wheel split points straight down");
+            True(RadialCommandMenu.CommandAtAngle(30.0) == DesktopPetCommand.Stop,
+                "rotated right sector should stop the selected Slugcat");
+            True(RadialCommandMenu.CommandAtAngle(150.0) == DesktopPetCommand.Move,
+                "rotated lower-left sector should restore autonomous movement");
+            True(RadialCommandMenu.CommandAtAngle(-90.0) ==
+                DesktopPetCommand.FollowMouse,
+                "rotated upper sector should enable mouse following");
+        }
+
+        private static void RadialCommandVisualStyleUsesPixelGridAndSlowEasing()
+        {
+            Near(0.5, RadialCommandMenu.OpeningDurationSeconds, 0.000001,
+                "command menu opening duration");
+            Near(0.5, RadialCommandMenu.ClosingDurationSeconds, 0.000001,
+                "command menu closing duration");
+            Near(0.23, RadialCommandMenu.HoverInDurationSeconds, 0.000001,
+                "hover brightening duration");
+            Near(0.23, RadialCommandMenu.HoverOutDurationSeconds, 0.000001,
+                "hover release duration");
+            Equal(2, RadialCommandMenu.RenderPixelScale,
+                "the command wheel should render on a two-pixel grid");
+            Equal(11, RadialCommandMenu.CommandIconWidth,
+                "command icon logical width");
+            Equal(9, RadialCommandMenu.CommandIconHeight,
+                "command icon logical height");
+            string stopIcon = RadialCommandMenu.IconPatternFor(
+                DesktopPetCommand.Stop);
+            string moveIcon = RadialCommandMenu.IconPatternFor(
+                DesktopPetCommand.Move);
+            string followIcon = RadialCommandMenu.IconPatternFor(
+                DesktopPetCommand.FollowMouse);
+            Equal(99, stopIcon.Length, "stop icon pixel count");
+            Equal(99, moveIcon.Length, "move icon pixel count");
+            Equal(99, followIcon.Length, "follow icon pixel count");
+            True(stopIcon != moveIcon && stopIcon != followIcon &&
+                moveIcon != followIcon,
+                "all three commands need distinct icon silhouettes");
+            True(moveIcon.Substring(4 * 11, 11) == "..########.",
+                "move icon should be a right-facing play triangle");
+            True(followIcon.Substring(4 * 11, 11) == "..########." &&
+                followIcon[1 * 11 + 7] == '#' &&
+                followIcon[7 * 11 + 7] == '#',
+                "follow icon should be a fixed right-facing arrow");
+            Near(0.0, RadialCommandMenu.SmootherStep(0.0), 0.000001,
+                "smooth easing start");
+            Near(0.5, RadialCommandMenu.SmootherStep(0.5), 0.000001,
+                "smooth easing midpoint");
+            Near(1.0, RadialCommandMenu.SmootherStep(1.0), 0.000001,
+                "smooth easing end");
+
+            using (Bitmap bitmap = new Bitmap(320, 320,
+                PixelFormat.Format32bppPArgb))
+            using (System.Drawing.Graphics graphics =
+                System.Drawing.Graphics.FromImage(bitmap))
+            using (RadialCommandMenu menu = new RadialCommandMenu())
+            {
+                graphics.Clear(Color.Transparent);
+                menu.RenderPreview(graphics, new Rectangle(0, 0, 320, 320),
+                    new Vec2(160.0, 160.0), DesktopPetCommand.Move, 2);
+
+                const int left = 16;
+                const int top = 16;
+                const int diameter = 288;
+                bool pixelGridBroken = false;
+                for (int y = top; y < top + diameter && !pixelGridBroken; y += 2)
+                {
+                    for (int x = left; x < left + diameter; x += 2)
+                    {
+                        int color = bitmap.GetPixel(x, y).ToArgb();
+                        if (bitmap.GetPixel(x + 1, y).ToArgb() != color ||
+                            bitmap.GetPixel(x, y + 1).ToArgb() != color ||
+                            bitmap.GetPixel(x + 1, y + 1).ToArgb() != color)
+                        {
+                            pixelGridBroken = true;
+                            break;
+                        }
+                    }
+                }
+                True(!pixelGridBroken,
+                    "segments and command icons should share the two-pixel grid");
+            }
+        }
+
         private static void AiDoesNotMoveCreature()
         {
             DesktopCollisionWorld world = new DesktopCollisionWorld(new WindowEnumerator());
@@ -2368,6 +2548,132 @@ namespace RainWorldDesktopPet.Tests
             Vec2 after = slugcat.Center;
             Near(0.0, Vec2.Distance(before, after), 0.000001, "AI must not set position");
             True(input.X >= -1 && input.X <= 1, "virtual horizontal input range");
+        }
+
+        private static void StopCommandOnlySuppressesLocomotion()
+        {
+            DesktopCollisionWorld world = new DesktopCollisionWorld(new WindowEnumerator());
+            world.RefreshFromSnapshots(new DesktopWindowSnapshot[0]);
+            Slugcat slugcat = new Slugcat(new Vec2(300.0, 300.0));
+            DesktopPetAI ai = new DesktopPetAI(9012);
+            MouseTracker mouse = new MouseTracker();
+            mouse.Sample(SimulationConstants.LogicStepSeconds);
+            ai.SetCommand(DesktopPetCommand.Stop);
+
+            Vec2 firstAttention = ai.Attention.Smoothed;
+            for (int tick = 0; tick < 80; tick++)
+            {
+                VirtualInput input = ai.Step(slugcat, world, mouse);
+                True(input.X == 0 && input.Y == 0 && !input.Jump && !input.Pickup,
+                    "stop command should neutralize locomotion intent at tick " + tick);
+            }
+
+            True(Vec2.Distance(firstAttention, ai.Attention.Smoothed) > 0.01,
+                "stop command should not freeze AI attention and face targets");
+            ai.SetCommand(DesktopPetCommand.Move);
+            True(ai.Command == DesktopPetCommand.Move,
+                "move command should restore the unmodified autonomous AI mode");
+        }
+
+        private static void CommandSelectionWaitSuppressesLocomotionOnly()
+        {
+            DesktopCollisionWorld world = new DesktopCollisionWorld(new WindowEnumerator());
+            world.RefreshFromSnapshots(new DesktopWindowSnapshot[0]);
+            Slugcat slugcat = new Slugcat(new Vec2(300.0, 300.0));
+            DesktopPetAI ai = new DesktopPetAI(19012);
+            MouseTracker mouse = new MouseTracker();
+            mouse.Sample(SimulationConstants.LogicStepSeconds);
+
+            Vec2 firstAttention = ai.Attention.Smoothed;
+            for (int tick = 0; tick < 80; tick++)
+            {
+                VirtualInput autonomous = ai.Step(slugcat, world, mouse);
+                VirtualInput waiting = GameLoop.ApplyCommandSelectionGate(
+                    autonomous, true);
+                True(waiting.X == 0 && waiting.Y == 0 &&
+                    !waiting.Jump && !waiting.Pickup,
+                    "selection wait should neutralize locomotion at tick " + tick);
+            }
+
+            True(Vec2.Distance(firstAttention, ai.Attention.Smoothed) > 0.01,
+                "selection wait should not freeze AI attention or face targets");
+            VirtualInput expected = new VirtualInput(1, -1, true, true);
+            VirtualInput resumed = GameLoop.ApplyCommandSelectionGate(
+                expected, false);
+            True(resumed.X == expected.X && resumed.Y == expected.Y &&
+                resumed.Jump == expected.Jump && resumed.Pickup == expected.Pickup,
+                "closing the menu should immediately restore the existing command input");
+        }
+
+        private static void FollowCommandPursuesCursorWithVariations()
+        {
+            DesktopCollisionWorld world = new DesktopCollisionWorld(new WindowEnumerator());
+            world.RefreshFromSnapshots(new DesktopWindowSnapshot[0]);
+            MouseTracker mouse = new MouseTracker();
+            mouse.Sample(SimulationConstants.LogicStepSeconds);
+            Slugcat slugcat = new Slugcat(mouse.Position - new Vec2(480.0, 0.0));
+            DesktopPetAI ai = new DesktopPetAI(77123);
+            ai.SetCommand(DesktopPetCommand.FollowMouse);
+
+            int towardTicks = 0;
+            int neutralTicks = 0;
+            int detourTicks = 0;
+            bool sawVariation = false;
+            for (int tick = 0; tick < 720; tick++)
+            {
+                VirtualInput input = ai.Step(slugcat, world, mouse);
+                if (input.X > 0) towardTicks++;
+                else if (input.X < 0) detourTicks++;
+                else neutralTicks++;
+                if (ai.CurrentFollowVariation != FollowCommandVariation.None)
+                    sawVariation = true;
+            }
+
+            True(towardTicks > 480,
+                "follow command should spend most ticks pursuing the cursor");
+            True(sawVariation && neutralTicks > 0 && detourTicks > 0,
+                "follow command should pause/look and briefly move away sometimes");
+            True(ai.Attention.Kind == AttentionKind.Mouse ||
+                ai.CurrentFollowVariation == FollowCommandVariation.LookAway,
+                "follow attention should normally remain on the cursor");
+        }
+
+        private static void FollowCommandHoldsHighJumpInput()
+        {
+            DesktopCollisionWorld world = new DesktopCollisionWorld(new WindowEnumerator());
+            world.RefreshFromSnapshots(new DesktopWindowSnapshot[0]);
+            MouseTracker mouse = new MouseTracker();
+            mouse.Sample(SimulationConstants.LogicStepSeconds);
+            Slugcat slugcat = new Slugcat(mouse.Position + new Vec2(-40.0, 180.0));
+            slugcat.State.Grounded = true;
+            slugcat.State.Standing = true;
+            DesktopPetAI ai = new DesktopPetAI(88123);
+            ai.SetCommand(DesktopPetCommand.FollowMouse);
+
+            VirtualInput launch = ai.Step(slugcat, world, mouse);
+            True(launch.Jump,
+                "a cursor far above the grounded Slugcat should start a jump");
+
+            slugcat.State.Grounded = false;
+            for (int airborneTick = 0; airborneTick < 6; airborneTick++)
+            {
+                VirtualInput held = ai.Step(slugcat, world, mouse);
+                True(held.Jump,
+                    "high follow jump should hold through boost tick " + airborneTick);
+            }
+
+            VirtualInput released = ai.Step(slugcat, world, mouse);
+            True(!released.Jump,
+                "follow jump should release after consuming the full boost window");
+
+            slugcat.State.Grounded = true;
+            for (int cooldownTick = 0; cooldownTick < 10; cooldownTick++)
+            {
+                VirtualInput coolingDown = ai.Step(slugcat, world, mouse);
+                True(!coolingDown.Jump,
+                    "follow jump cooldown should suppress repeated low hops at tick " +
+                    cooldownTick);
+            }
         }
 
         private static void AtlasMetadataParses()
@@ -3655,6 +3961,47 @@ namespace RainWorldDesktopPet.Tests
             True(state.FaceElement == "FaceDead", "dead face element");
         }
 
+        private static void OriginalLookDirectionUsesRenderInterpolationOnly()
+        {
+            Slugcat slugcat = new Slugcat(new Vec2(300.0, 300.0));
+            SlugcatGraphics graphics = new SlugcatGraphics(slugcat);
+            DesktopCollisionWorld world = new DesktopCollisionWorld(new WindowEnumerator());
+            AttentionSystem attention = new AttentionSystem();
+
+            Vec2 firstTarget = graphics.Head.Position + new Vec2(200.0, 0.0);
+            attention.SetTarget(AttentionKind.Mouse, firstTarget);
+            attention.Step();
+            graphics.Step(attention, world);
+            Vec2 previousLook = graphics.BuildPose(1.0, attention).LookDirection;
+
+            Vec2 headAtLookUpdate = graphics.Head.Position;
+            Vec2 secondTarget = headAtLookUpdate + new Vec2(0.0, -200.0);
+            attention.SetTarget(AttentionKind.Mouse, secondTarget);
+            attention.Step();
+            True(Vec2.Distance(attention.Smoothed, secondTarget) > 1.0,
+                "test setup must retain a lagging smoothed attention point");
+
+            Vec2 expectedCurrent = (secondTarget - headAtLookUpdate).Normalized;
+            graphics.Step(attention, world);
+            Vec2 atPreviousTick = graphics.BuildPose(0.0, attention).LookDirection;
+            Vec2 halfway = graphics.BuildPose(0.5, attention).LookDirection;
+            Vec2 atCurrentTick = graphics.BuildPose(1.0, attention).LookDirection;
+
+            Near(previousLook.X, atPreviousTick.X, 0.000001,
+                "timeStacker zero keeps last look x");
+            Near(previousLook.Y, atPreviousTick.Y, 0.000001,
+                "timeStacker zero keeps last look y");
+            Near(expectedCurrent.X, atCurrentTick.X, 0.000001,
+                "current logic tick follows the raw target x without extra smoothing");
+            Near(expectedCurrent.Y, atCurrentTick.Y, 0.000001,
+                "current logic tick follows the raw target y without extra smoothing");
+            Vec2 expectedHalfway = Vec2.Lerp(previousLook, expectedCurrent, 0.5);
+            Near(expectedHalfway.X, halfway.X, 0.000001,
+                "draw interpolation blends the last and current look x");
+            Near(expectedHalfway.Y, halfway.Y, 0.000001,
+                "draw interpolation blends the last and current look y");
+        }
+
         private static void WallClimbHandsTargetTheWall()
         {
             DesktopCollisionWorld world = new DesktopCollisionWorld(new WindowEnumerator());
@@ -3700,7 +4047,7 @@ namespace RainWorldDesktopPet.Tests
                 "right sleep hand target");
         }
 
-        private static void MovingWindowWallCarriesClimber()
+        private static void MovingWindowDeltaRemainsCollisionMetadata()
         {
             DesktopCollisionWorld world = new DesktopCollisionWorld(new WindowEnumerator());
             List<DesktopWindowSnapshot> snapshots = new List<DesktopWindowSnapshot>();
@@ -3719,20 +4066,6 @@ namespace RainWorldDesktopPet.Tests
             Near(20.0 / 2.2, wallDelta.X, 0.000001, "translated left-wall x delta");
             Near(30.0 / 2.2, wallDelta.Y, 0.000001, "translated left-wall y delta");
 
-            Slugcat slugcat = new Slugcat(new Vec2(80.0, 180.0));
-            slugcat.State.BodyMode = BodyModeIndex.WallClimb;
-            slugcat.BodyChunks[0].WallSurfaceId = 4321;
-            slugcat.BodyChunks[0].WallSurfaceKind = DesktopSurfaceKind.WindowLeftWall;
-            Vec2 chestBefore = slugcat.BodyChunks[0].Position;
-            Vec2 hipsBefore = slugcat.BodyChunks[1].Position;
-            Vec2 applied = slugcat.ApplyMovingSurfaceDelta(world);
-            Near(20.0 / 2.2, applied.X, 0.000001, "applied wall x delta");
-            Near(30.0 / 2.2, applied.Y, 0.000001, "applied wall y delta");
-            Near(0.0, Vec2.Distance(chestBefore + applied, slugcat.BodyChunks[0].Position), 0.000001,
-                "climbing chest follows wall");
-            Near(0.0, Vec2.Distance(hipsBefore + applied, slugcat.BodyChunks[1].Position), 0.000001,
-                "climbing hips follows wall");
-
             snapshots[0].Bounds = Rectangle.FromLTRB(140, 130, 320, 330);
             world.RefreshFromSnapshots(snapshots);
             Near(0.0, world.GetSurfaceMovement(4321, DesktopSurfaceKind.WindowTop).X, 0.000001,
@@ -3743,7 +4076,7 @@ namespace RainWorldDesktopPet.Tests
                 "left-edge resize leaves the right wall fixed");
         }
 
-        private static void MovingWindowCarriesConnectedBody()
+        private static void MovingWindowDoesNotCarryConnectedBody()
         {
             Rectangle work = System.Windows.Forms.Screen.PrimaryScreen.WorkingArea;
             Vec2[] movements =
@@ -3755,7 +4088,6 @@ namespace RainWorldDesktopPet.Tests
             for (int movement = 0; movement < movements.Length; movement++)
             {
                 Vec2 desktopDelta = movements[movement];
-                Vec2 delta = DesktopWorldTransform.ToSimulationDelta(desktopDelta);
                 int left = work.Left + work.Width / 3;
                 int top = work.Top + Math.Max(180, work.Height / 3);
                 DesktopCollisionWorld world = new DesktopCollisionWorld(new WindowEnumerator());
@@ -3782,12 +4114,10 @@ namespace RainWorldDesktopPet.Tests
                     left + (int)desktopDelta.X, top + (int)desktopDelta.Y,
                     left + 300 + (int)desktopDelta.X, top + 180 + (int)desktopDelta.Y);
                 world.RefreshFromSnapshots(snapshots);
-                Vec2 applied = slugcat.ApplyMovingSurfaceDelta(world);
-                Near(0.0, Vec2.Distance(delta, applied), 0.000001, "platform delta " + movement);
-                Near(0.0, Vec2.Distance(chestBefore + delta, slugcat.BodyChunks[0].Position),
-                    0.000001, "chest carry " + movement);
-                Near(0.0, Vec2.Distance(hipsBefore + delta, slugcat.BodyChunks[1].Position),
-                    0.000001, "hips carry " + movement);
+                Near(0.0, Vec2.Distance(chestBefore, slugcat.BodyChunks[0].Position),
+                    0.000001, "window movement does not carry chest " + movement);
+                Near(0.0, Vec2.Distance(hipsBefore, slugcat.BodyChunks[1].Position),
+                    0.000001, "window movement does not carry hips " + movement);
                 Near(connectionBefore, Vec2.Distance(slugcat.BodyChunks[0].Position,
                     slugcat.BodyChunks[1].Position), 0.000001, "body integrity " + movement);
             }
@@ -4662,6 +4992,137 @@ namespace RainWorldDesktopPet.Tests
                 "Saint head uses HeadB in every movement state");
             True(state.FaceElement.StartsWith("FaceB", StringComparison.Ordinal),
                 "Saint normal face uses the closed-eye FaceB family");
+        }
+
+        private static void RaisedWindowPlatformRetainsSupportedChunk()
+        {
+            MonitorInfo monitor = new MonitorInfo("RAISED-WINDOW-MONITOR",
+                new Rectangle(0, 0, 1600, 1000),
+                new Rectangle(0, 0, 1600, 960), true);
+            long id = 97401;
+            Rectangle initial = Rectangle.FromLTRB(300, 400, 760, 680);
+            DesktopCollisionWorld world = CreateSyntheticWorld(
+                new[] { monitor }, new[] { Window(id, initial) });
+            DesktopSurface top = world.Surfaces.First(surface =>
+                surface.Id == id && surface.Kind == DesktopSurfaceKind.WindowTop);
+            Equal(SimulationConstants.WindowPlatformThicknessDesktopPixels,
+                top.Bounds.Height, "window platform collision thickness");
+
+            double centerX = DesktopWorldTransform.ToSimulationLength(500.0);
+            BodyChunk chunk = new BodyChunk(0, new Vec2(centerX,
+                top.Top - SimulationConstants.HipsChunkRadius),
+                SimulationConstants.HipsChunkRadius,
+                SimulationConstants.HipsChunkMass);
+            chunk.ContactFloor = true;
+            chunk.SupportingSurfaceId = id;
+            chunk.SupportingSurfaceKind = DesktopSurfaceKind.WindowTop;
+            chunk.SupportingSurfaceTop = top.Top;
+            chunk.Velocity = new Vec2(0.0, -1.2);
+            Vec2 beforeWindowMove = chunk.Position;
+
+            Rectangle raised = new Rectangle(initial.X, initial.Y - 24,
+                initial.Width, initial.Height);
+            world.BeginLiveWindowTranslationBatch();
+            True(world.ApplyLiveWindowTranslation(new IntPtr(id), raised) ==
+                LiveWindowTranslationResult.Applied,
+                "raised HWND should use the translation-only collision path");
+            Near(0.0, Vec2.Distance(beforeWindowMove, chunk.Position), 0.000001,
+                "moving the collision box must not directly translate the chunk");
+
+            chunk.BeginTick();
+            chunk.Integrate(SimulationConstants.GravityPerTick,
+                SimulationConstants.AirFriction);
+            True(chunk.Velocity.Y < -0.01,
+                "precondition: original floor gate would reject this rising chunk");
+            world.Resolve(chunk);
+
+            DesktopSurface raisedTop = world.Surfaces.First(surface =>
+                surface.Id == id && surface.Kind == DesktopSurfaceKind.WindowTop);
+            True(chunk.ContactFloor && chunk.SupportingSurfaceId == id,
+                "the raised platform should retain physical support");
+            Near(raisedTop.Top - chunk.Radius, chunk.Position.Y, 0.000001,
+                "collision response places the chunk on the raised top surface");
+            Near(0.0, chunk.Velocity.Y, 0.000001,
+                "raised-platform contact removes the separating vertical velocity");
+        }
+
+        private static void LiveWindowEventTrackerStaysBounded()
+        {
+            WindowLocationChangeTracker tracker = new WindowLocationChangeTracker();
+            IntPtr[] drained = new IntPtr[WindowLocationChangeTracker.Capacity];
+            for (int i = 0; i < 10000; i++)
+            {
+                IntPtr handle = new IntPtr(1000 +
+                    (i % (WindowLocationChangeTracker.Capacity * 4)));
+                tracker.Record(handle);
+                tracker.Record(handle);
+            }
+
+            Equal(WindowLocationChangeTracker.Capacity, tracker.Drain(drained),
+                "an event storm must remain inside the fixed HWND buffer");
+            Equal(0, tracker.Drain(drained),
+                "draining should reuse the same array without retained entries");
+        }
+
+        private static void LiveWindowTranslationsAreIncremental()
+        {
+            MonitorInfo monitor = new MonitorInfo("LIVE-MONITOR",
+                new Rectangle(0, 0, 1600, 1000), new Rectangle(0, 0, 1600, 960), true);
+            long id = 97501;
+            Rectangle initial = Rectangle.FromLTRB(300, 320, 700, 600);
+            DesktopWindowSnapshot window = Window(id, initial);
+            DesktopCollisionWorld world = CreateSyntheticWorld(
+                new[] { monitor }, new[] { window });
+            DesktopCollisionSnapshot originalSnapshot = world.CurrentSnapshot;
+            DesktopSurface top = world.Surfaces.First(surface =>
+                surface.Id == id && surface.Kind == DesktopSurfaceKind.WindowTop);
+            Rectangle originalSurfaceBounds = top.Bounds;
+            Slugcat slugcat = new Slugcat(new Vec2(
+                DesktopWorldTransform.ToSimulationLength(initial.Left + 200),
+                DesktopWorldTransform.ToSimulationLength(initial.Top) -
+                    SimulationConstants.HipsChunkRadius));
+            slugcat.BodyChunks[0].SupportingSurfaceId = id;
+            slugcat.BodyChunks[1].SupportingSurfaceId = id;
+            Vec2 start = slugcat.Center;
+
+            Rectangle current = initial;
+            const int steps = 12;
+            for (int step = 1; step <= steps; step++)
+            {
+                Rectangle next = new Rectangle(current.X + 3, current.Y + 2,
+                    current.Width, current.Height);
+                world.BeginLiveWindowTranslationBatch();
+                True(world.ApplyLiveWindowTranslation(new IntPtr(id), next) ==
+                    LiveWindowTranslationResult.Applied,
+                    "translation-only WinEvent should take the lightweight path");
+                current = next;
+            }
+
+            True(ReferenceEquals(originalSnapshot, world.CurrentSnapshot),
+                "translation events must reuse the published snapshot and surface list");
+            Equal(originalSurfaceBounds.X + steps * 3, top.Bounds.X,
+                "window top follows every live X increment");
+            Equal(originalSurfaceBounds.Y + steps * 2, top.Bounds.Y,
+                "window top follows every live Y increment");
+            Near(0.0, Vec2.Distance(start, slugcat.Center), 0.000001,
+                "live collision-box movement must not translate the Slugcat");
+
+            window.Bounds = current;
+            world.RefreshFromSnapshots(new[] { window }, new[] { monitor });
+            Near(0.0, world.GetSurfaceMovement(id).Length, 0.000001,
+                "the periodic refresh sees no residual delta after live tracking");
+
+            DesktopSurface rebuiltTop = world.Surfaces.First(surface =>
+                surface.Id == id && surface.Kind == DesktopSurfaceKind.WindowTop);
+            Rectangle beforeResize = rebuiltTop.Bounds;
+            world.BeginLiveWindowTranslationBatch();
+            Rectangle resized = new Rectangle(current.X, current.Y,
+                current.Width + 20, current.Height);
+            True(world.ApplyLiveWindowTranslation(new IntPtr(id), resized) ==
+                LiveWindowTranslationResult.RequiresFullRefresh,
+                "resize and topology changes must fall back to full enumeration");
+            True(rebuiltTop.Bounds == beforeResize,
+                "the lightweight path must not approximate a resize as translation");
         }
 
         private static void SlugpupUsesOriginalAtlasFamilies()

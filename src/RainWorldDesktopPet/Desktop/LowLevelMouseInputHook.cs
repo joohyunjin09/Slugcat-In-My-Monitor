@@ -100,7 +100,10 @@ namespace RainWorldDesktopPet.Desktop
                 int mouseMessage = unchecked((int)message.ToInt64());
                 if (mouseMessage == NativeMethods.WM_LBUTTONDOWN ||
                     mouseMessage == NativeMethods.WM_LBUTTONDBLCLK ||
-                    mouseMessage == NativeMethods.WM_LBUTTONUP)
+                    mouseMessage == NativeMethods.WM_LBUTTONUP ||
+                    mouseMessage == NativeMethods.WM_RBUTTONDOWN ||
+                    mouseMessage == NativeMethods.WM_RBUTTONDBLCLK ||
+                    mouseMessage == NativeMethods.WM_RBUTTONUP)
                 {
                     try
                     {
