@@ -243,7 +243,11 @@ namespace RainWorldDesktopPet.Graphics
             lastLookDirection = lookDirection;
             lastOriginalLookDirection = originalLookDirection;
             originalLookDirection = (originalAttentionTarget - head.Position).Normalized;
-            lookDirection = (attention.Smoothed - head.Position).Normalized;
+            // PlayerGraphics.Update assigns Custom.DirVec(head.pos,
+            // mostInterestingLookPoint) directly each logic tick. Keep the
+            // original's smooth appearance in BuildPose via timeStacker, but
+            // do not add multi-tick target smoothing before that interpolation.
+            lookDirection = (attention.Target - head.Position).Normalized;
             UpdateMeowFaceAnimation();
             if (meowLookTicks > 0)
             {

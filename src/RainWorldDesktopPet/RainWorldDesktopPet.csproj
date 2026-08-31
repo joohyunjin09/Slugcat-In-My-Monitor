@@ -150,6 +150,7 @@
     <Compile Include="RainWorld\UnitySerializedFileReader.cs" />
     <Compile Include="RainWorld\UnityFsBundleReader.cs" />
     <Compile Include="UI\LayeredOverlayWindow.cs" />
+    <Compile Include="UI\RadialCommandMenu.cs" />
     <Compile Include="UI\SettingsWindow.cs" />
     <Compile Include="UI\SkinEditorWindow.cs" />
     <Compile Include="Workshop\DmsSkinCatalog.cs" />

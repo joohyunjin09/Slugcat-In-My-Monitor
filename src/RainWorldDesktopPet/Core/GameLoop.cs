@@ -149,6 +149,8 @@ namespace RainWorldDesktopPet.Core
         public double RenderFramesPerSecond { get { return renderFramesPerSecond; } }
         public double MonitorRefreshRate { get { return monitorRefreshRate; } }
         public MouseAttentionState MouseAttention { get { return mouseAttention; } }
+        public DesktopPetCommand Command { get { return AI.Command; } }
+        internal bool CommandSelectionPending { get; private set; }
         public SlugcatAppearance Appearance { get { return Slugcat.Appearance; } }
         public SlugcatSkin Skin { get { return Graphics.VisualProfile.Skin; } }
         public int OffscreenRecoveryCount { get; private set; }
@@ -157,6 +159,24 @@ namespace RainWorldDesktopPet.Core
         public string AudioStatus
         {
             get { return audioSink == null ? "audio disabled" : audioSink.Status; }
+        }
+
+        public void SetCommand(DesktopPetCommand command)
+        {
+            AI.SetCommand(command);
+        }
+
+        internal void SetCommandSelectionPending(bool pending)
+        {
+            CommandSelectionPending = pending;
+        }
+
+        internal static VirtualInput ApplyCommandSelectionGate(
+            VirtualInput input, bool selectionPending)
+        {
+            // Keep AI, attention, voice, graphics, and physics on their normal
+            // fixed-step path. Only locomotion intent waits for the user choice.
+            return selectionPending ? VirtualInput.Neutral : input;
         }
 
         public bool TryGetAtlasSprite(string name, bool original, out AtlasSprite sprite)
@@ -281,7 +301,7 @@ namespace RainWorldDesktopPet.Core
 
             if (managesWorldRefresh)
             {
-                if (World.TryApplyPendingRefresh()) ApplyMovingSurfaceDelta();
+                World.TryApplyPendingRefresh();
                 surfaceRefreshAccumulator += elapsed;
                 if (surfaceRefreshAccumulator >= SimulationConstants.WindowRefreshSeconds)
                 {
@@ -309,8 +329,10 @@ namespace RainWorldDesktopPet.Core
                     ? VirtualInput.Neutral
                     : AI.Step(Slugcat, World, mouse, mouseAttention);
                 VirtualInput foodInput;
-                if (!Slugcat.IsGrabbed && Foods.TryProduceInput(Slugcat, Graphics,
+                if (!Slugcat.IsGrabbed && AI.Command == DesktopPetCommand.Move &&
+                    Foods.TryProduceInput(Slugcat, Graphics,
                     AI.Attention, out foodInput)) input = foodInput;
+                input = ApplyCommandSelectionGate(input, CommandSelectionPending);
                 Slugcat.Step(input, World, visualPointer, visualPointerVelocity);
                 meowController.Step(Slugcat, Graphics, Foods.FullnessRatio,
                     simulationTick);
@@ -333,14 +355,6 @@ namespace RainWorldDesktopPet.Core
             // catch-up Update, preventing a stalled desktop from spiralling.
             if (steps == 3) fixedTimeStep.Reset();
             simulationStepsLastFrame = steps;
-        }
-
-        public void ApplyMovingSurfaceDelta()
-        {
-            if (Paused) return;
-            Vec2 surfaceDelta = Slugcat.ApplyMovingSurfaceDelta(World);
-            Graphics.ApplyMovingSurfaceDelta(surfaceDelta);
-            Foods.ApplyMovingSurfaceDelta(World);
         }
 
         public bool FeedDangleFruit()

@@ -14,6 +14,9 @@ namespace RainWorldDesktopPet.Desktop
         internal const int WS_EX_NOREDIRECTIONBITMAP = 0x00200000;
         internal const int WH_MOUSE_LL = 14;
         internal const uint EVENT_SYSTEM_FOREGROUND = 0x0003;
+        internal const uint EVENT_OBJECT_LOCATIONCHANGE = 0x800B;
+        internal const int OBJID_WINDOW = 0;
+        internal const int CHILDID_SELF = 0;
         internal const uint WINEVENT_OUTOFCONTEXT = 0x0000;
         internal const uint WINEVENT_SKIPOWNPROCESS = 0x0002;
         internal const int SWP_NOSIZE = 0x0001;
@@ -26,6 +29,9 @@ namespace RainWorldDesktopPet.Desktop
         internal const int WM_MOUSEMOVE = 0x0200;
         internal const int WM_LBUTTONUP = 0x0202;
         internal const int WM_LBUTTONDBLCLK = 0x0203;
+        internal const int WM_RBUTTONDOWN = 0x0204;
+        internal const int WM_RBUTTONUP = 0x0205;
+        internal const int WM_RBUTTONDBLCLK = 0x0206;
         internal const int WM_CAPTURECHANGED = 0x0215;
         internal const int WM_DISPLAYCHANGE = 0x007E;
         internal const int WM_DPICHANGED = 0x02E0;

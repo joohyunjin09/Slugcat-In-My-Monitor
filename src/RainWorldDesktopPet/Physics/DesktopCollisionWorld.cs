@@ -8,6 +8,13 @@ using RainWorldDesktopPet.Graphics;
 
 namespace RainWorldDesktopPet.Physics
 {
+    internal enum LiveWindowTranslationResult
+    {
+        Unchanged,
+        Applied,
+        RequiresFullRefresh
+    }
+
     public sealed class DesktopCollisionWorld
     {
         private sealed class PendingRefresh
@@ -66,6 +73,80 @@ namespace RainWorldDesktopPet.Physics
         public IList<DesktopSurface> Surfaces { get { return currentSnapshot.Surfaces; } }
         public DesktopCollisionSnapshot CurrentSnapshot { get { return currentSnapshot; } }
         public Rectangle VirtualBounds { get { return virtualBounds; } }
+
+        // Called once before draining a coalesced WinEvent batch. Clearing the
+        // existing values prevents a movement belonging to a different HWND
+        // from being applied twice when several windows report in one frame.
+        internal void BeginLiveWindowTranslationBatch()
+        {
+            latestDeltas.Clear();
+            latestLeftWallDeltas.Clear();
+            latestRightWallDeltas.Clear();
+            IList<DesktopSurface> snapshotSurfaces = currentSnapshot.Surfaces;
+            for (int i = 0; i < snapshotSurfaces.Count; i++)
+            {
+                DesktopSurfaceKind kind = snapshotSurfaces[i].Kind;
+                if (kind == DesktopSurfaceKind.WindowTop ||
+                    kind == DesktopSurfaceKind.WindowLeftWall ||
+                    kind == DesktopSurfaceKind.WindowRightWall)
+                    snapshotSurfaces[i].MovementDelta = Vec2.Zero;
+            }
+        }
+
+        internal LiveWindowTranslationResult ApplyLiveWindowTranslation(IntPtr handle)
+        {
+            Rectangle bounds;
+            if (!windowEnumerator.TryGetWindowBounds(handle, out bounds))
+                return cachedWindows.ContainsKey(handle.ToInt64())
+                    ? LiveWindowTranslationResult.RequiresFullRefresh
+                    : LiveWindowTranslationResult.Unchanged;
+            return ApplyLiveWindowTranslation(handle, bounds);
+        }
+
+        internal LiveWindowTranslationResult ApplyLiveWindowTranslation(IntPtr handle,
+            Rectangle newBounds)
+        {
+            CachedWindow cached;
+            long id = handle.ToInt64();
+            if (!cachedWindows.TryGetValue(id, out cached))
+                return LiveWindowTranslationResult.RequiresFullRefresh;
+
+            Rectangle previousBounds = cached.CurrentBounds;
+            if (previousBounds == newBounds)
+                return LiveWindowTranslationResult.Unchanged;
+            if (previousBounds.Width != newBounds.Width ||
+                previousBounds.Height != newBounds.Height)
+                return LiveWindowTranslationResult.RequiresFullRefresh;
+
+            int desktopDeltaX = newBounds.Left - previousBounds.Left;
+            int desktopDeltaY = newBounds.Top - previousBounds.Top;
+            cached.PreviousBounds = previousBounds;
+            cached.CurrentBounds = newBounds;
+            cached.MissingRefreshes = 0;
+
+            Vec2 delta = DesktopWorldTransform.ToSimulationDelta(
+                new Vec2(desktopDeltaX, desktopDeltaY));
+            latestDeltas[id] = delta;
+            latestLeftWallDeltas[id] = delta;
+            latestRightWallDeltas[id] = delta;
+
+            // The snapshot's lists stay fixed. Translation-only location
+            // changes update the already published surface objects in place,
+            // avoiding a list/snapshot allocation on every move event.
+            IList<DesktopSurface> snapshotSurfaces = currentSnapshot.Surfaces;
+            for (int i = 0; i < snapshotSurfaces.Count; i++)
+            {
+                DesktopSurface surface = snapshotSurfaces[i];
+                if (surface.Id != id ||
+                    (surface.Kind != DesktopSurfaceKind.WindowTop &&
+                     surface.Kind != DesktopSurfaceKind.WindowLeftWall &&
+                     surface.Kind != DesktopSurfaceKind.WindowRightWall))
+                    continue;
+                surface.ApplyWindowTranslation(previousBounds, newBounds,
+                    desktopDeltaX, desktopDeltaY);
+            }
+            return LiveWindowTranslationResult.Applied;
+        }
 
         public void Refresh(IntPtr overlayHandle)
         {
@@ -345,7 +426,10 @@ namespace RainWorldDesktopPet.Physics
             {
                 if (spans[i].End <= spans[i].Start) continue;
                 DesktopSurface surface = new DesktopSurface(id, kind,
-                    Rectangle.FromLTRB(spans[i].Start, y, spans[i].End, y + 1), label,
+                    Rectangle.FromLTRB(spans[i].Start, y, spans[i].End,
+                        y + (kind == DesktopSurfaceKind.WindowTop
+                            ? SimulationConstants.WindowPlatformThicknessDesktopPixels
+                            : 1)), label,
                     previousBounds, currentBounds, missingRefreshes);
                 surface.MovementDelta = DesktopWorldTransform.ToSimulationDelta(delta);
                 surfaces.Add(surface);
@@ -553,6 +637,10 @@ namespace RainWorldDesktopPet.Physics
                     chunk.PreviousSupportingSurfaceId == surface.Id &&
                     chunk.PreviousSupportingSurfaceKind == surface.Kind &&
                     newBottom >= surface.Top;
+                bool risingWindowSupport = retainedSupportPenetration &&
+                    surface.Kind == DesktopSurfaceKind.WindowTop &&
+                    surface.PreviousWindowBounds.Top > surface.CurrentWindowBounds.Top &&
+                    chunk.Position.Y - chunk.Radius <= surface.Bottom;
                 double sampleX = chunk.Position.X;
                 if (crossed && Math.Abs(newBottom - oldBottom) > 0.000001)
                 {
@@ -563,7 +651,8 @@ namespace RainWorldDesktopPet.Physics
                 double collisionRadius = Math.Max(0.0, chunk.Radius - 1.0);
                 bool overlapsAtImpact = sampleX >= surface.Left - collisionRadius &&
                                         sampleX <= surface.Right + collisionRadius;
-                if (chunk.Velocity.Y >= -0.01 && overlapsAtImpact &&
+                if ((chunk.Velocity.Y >= -0.01 || risingWindowSupport) &&
+                    overlapsAtImpact &&
                     (crossed || shallowPenetration || retainedSupportPenetration) &&
                     surface.Top < bestTop)
                 {

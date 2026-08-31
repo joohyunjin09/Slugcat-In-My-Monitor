@@ -145,6 +145,7 @@ namespace RainWorldDesktopPet.Creature
 
             if (grabbedChunk >= 0)
             {
+                ApplyOriginalExternalGrabPose();
                 for (int i = 0; i < BodyChunks.Length; i++)
                 {
                     if (i == grabbedChunk)
@@ -386,6 +387,7 @@ namespace RainWorldDesktopPet.Creature
         public bool Grab(Vec2 point)
         {
             grabbedChunk = PickChunk(point, 14.0);
+            if (grabbedChunk >= 0) ApplyOriginalExternalGrabPose();
             return grabbedChunk >= 0;
         }
 
@@ -397,6 +399,29 @@ namespace RainWorldDesktopPet.Creature
             }
 
             grabbedChunk = -1;
+            if (!State.Dead && State.StunCounter < 1)
+            {
+                // Do not restore the pre-grab Crawl pose. Player recovers from
+                // an externally controlled/stunned body through Default/None,
+                // then derives Stand or Crawl from new terrain contacts.
+                State.Animation = AnimationIndex.None;
+                State.BodyMode = BodyModeIndex.Default;
+                State.Standing = false;
+                State.Grounded = false;
+            }
+        }
+
+        private void ApplyOriginalExternalGrabPose()
+        {
+            if (State.Dead) return;
+            // Retail Player.Update maps lost-control frames to None/Stunned and
+            // Player.Stun drops standing. Mouse dragging is the desktop
+            // equivalent of that external physical control, without adding a
+            // stun timer or suppressing the pet after release.
+            State.Animation = AnimationIndex.None;
+            State.BodyMode = BodyModeIndex.Stunned;
+            State.Standing = false;
+            State.Grounded = false;
         }
 
         public void Reposition(Vec2 hipsPosition)
