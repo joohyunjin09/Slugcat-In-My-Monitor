@@ -276,6 +276,7 @@ namespace RainWorldDesktopPet.Audio
                 case SlugcatId.Artificer: return "Artificer";
                 case SlugcatId.Rivulet: return "Rivulet";
                 case SlugcatId.Saint: return "Saint";
+                case SlugcatId.Inv: return "Inv";
                 default: return "White";
             }
         }

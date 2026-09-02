@@ -33,9 +33,34 @@ docs/SlugcatGraphicsProfiles.md
 bin/
 obj/
 artifacts/
+packages/
+.vs/
+.idea/
 *.user
 *.suo
+*.DotSettings.user
 settings.local.ini
 
-# Temporary files.
+# Test runner and coverage output.
+TestResults/
+coverage/
+*.trx
+*.coverage
+*.coveragexml
+
+# Local diagnostics and crash dumps.
+*.log
+*.dmp
+*.mdmp
+
+# Operating-system metadata.
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Temporary and merge-backup files.
 *.tmp
+*.bak
+*.orig
+*.rej
+*~

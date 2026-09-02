@@ -92,6 +92,7 @@
     <Compile Include="Core\AudioVolumeSettings.cs" />
     <Compile Include="Core\DesktopFoodManager.cs" />
     <Compile Include="Core\GameLoop.cs" />
+    <Compile Include="Core\InvUnlockSettings.cs" />
     <Compile Include="Core\DesktopWorldTransform.cs" />
     <Compile Include="Core\DesktopRecovery.cs" />
     <Compile Include="Core\MathUtil.cs" />
@@ -111,6 +112,7 @@
     <Compile Include="Desktop\MouseTracker.cs" />
     <Compile Include="Desktop\MouseAttentionState.cs" />
     <Compile Include="Desktop\LowLevelMouseInputHook.cs" />
+    <Compile Include="Desktop\SecretWordInputHook.cs" />
     <Compile Include="Desktop\MouseHookHitSnapshot.cs" />
     <Compile Include="Desktop\NativeMethods.cs" />
     <Compile Include="Desktop\WindowEnumerator.cs" />

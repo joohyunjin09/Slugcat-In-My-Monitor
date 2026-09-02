@@ -18,8 +18,6 @@ namespace RainWorldDesktopPet.UI
     {
         private static readonly string[] PartNames = DmsSpriteGroups.SelectableParts;
 
-        private static readonly CharacterChoice[] Characters = BuildCharacterChoices();
-
         private readonly GameLoop gameLoop;
         private readonly Action stateChanged;
         private readonly Dictionary<string, ComboBox> partSelectors =
@@ -32,13 +30,22 @@ namespace RainWorldDesktopPet.UI
         private readonly Panel previewPanel;
         private readonly Label assetLabel;
         private readonly ToolStripStatusLabel statusLabel;
+        private CharacterChoice[] characters;
         private bool updatingControls;
+        private bool invUnlocked;
 
         public SkinEditorWindow(GameLoop gameLoop, Action stateChanged)
+            : this(gameLoop, stateChanged, false)
+        {
+        }
+
+        public SkinEditorWindow(GameLoop gameLoop, Action stateChanged, bool invUnlocked)
         {
             if (gameLoop == null) throw new ArgumentNullException("gameLoop");
             this.gameLoop = gameLoop;
             this.stateChanged = stateChanged;
+            this.invUnlocked = invUnlocked;
+            characters = BuildCharacterChoices(invUnlocked);
             for (int i = 0; i < PartNames.Length; i++)
                 partSelections[PartNames[i]] = gameLoop.GetDmsPartSelection(PartNames[i]) ?? "default";
 
@@ -76,7 +83,7 @@ namespace RainWorldDesktopPet.UI
 
             GroupBox characterGroup = new GroupBox { Text = T("슬러그캣", "Slugcat"), Dock = DockStyle.Fill };
             characterList = new ListBox { Dock = DockStyle.Fill, IntegralHeight = false };
-            for (int i = 0; i < Characters.Length; i++) characterList.Items.Add(Characters[i]);
+            for (int i = 0; i < characters.Length; i++) characterList.Items.Add(characters[i]);
             characterList.SelectedIndexChanged += CharacterChanged;
             characterGroup.Controls.Add(characterList);
             root.Controls.Add(characterGroup, 0, 1);
@@ -153,8 +160,8 @@ namespace RainWorldDesktopPet.UI
             updatingControls = true;
             try
             {
-                for (int i = 0; i < Characters.Length; i++)
-                    if (Characters[i].Id == gameLoop.SelectedSlugcat.Id)
+                for (int i = 0; i < characters.Length; i++)
+                    if (characters[i].Id == gameLoop.SelectedSlugcat.Id)
                         characterList.SelectedIndex = i;
                 for (int i = 0; i < PartNames.Length; i++)
                 {
@@ -171,6 +178,22 @@ namespace RainWorldDesktopPet.UI
             }
             finally { updatingControls = false; }
             previewPanel.Invalidate();
+        }
+
+        internal void SetInvUnlocked(bool value)
+        {
+            if (invUnlocked == value) return;
+            invUnlocked = value;
+            characters = BuildCharacterChoices(invUnlocked);
+            updatingControls = true;
+            try
+            {
+                characterList.Items.Clear();
+                for (int i = 0; i < characters.Length; i++)
+                    characterList.Items.Add(characters[i]);
+            }
+            finally { updatingControls = false; }
+            RefreshFromGame();
         }
 
         private void PopulateSpriteSelectors()
@@ -384,6 +407,11 @@ namespace RainWorldDesktopPet.UI
             else
                 throw new InvalidOperationException(T("슬러그캣 외형 프리셋 파일이 아닙니다.",
                     "The file is not a Slugcat appearance preset."));
+
+            if (character == SlugcatId.Inv && !invUnlocked)
+                throw new InvalidOperationException(T(
+                    "Inv는 시크릿 단어를 먼저 입력해야 사용할 수 있습니다.",
+                    "Enter the secret word before using Inv."));
 
             Dictionary<string, DmsSkinDefinition> sets =
                 new Dictionary<string, DmsSkinDefinition>(StringComparer.OrdinalIgnoreCase);
@@ -611,12 +639,13 @@ namespace RainWorldDesktopPet.UI
         private string CurrentCharacterName()
         { return gameLoop.SelectedSlugcat.DisplayName; }
 
-        private static CharacterChoice[] BuildCharacterChoices()
+        private static CharacterChoice[] BuildCharacterChoices(bool invUnlocked)
         {
-            CharacterChoice[] choices = new CharacterChoice[SlugcatProfiles.All.Count];
+            IList<SlugcatProfile> selectable = SlugcatProfiles.Selectable(invUnlocked);
+            CharacterChoice[] choices = new CharacterChoice[selectable.Count];
             for (int i = 0; i < choices.Length; i++)
             {
-                SlugcatProfile profile = SlugcatProfiles.All[i];
+                SlugcatProfile profile = selectable[i];
                 choices[i] = new CharacterChoice(
                     SlugcatProfiles.SelectionLabel(profile.Id), profile.Id);
             }

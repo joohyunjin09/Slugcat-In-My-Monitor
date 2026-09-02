@@ -185,6 +185,8 @@ namespace RainWorldDesktopPet.Tests
                 AudioMasterVolumeSupportsZeroToTwoRange);
             Run("Audio mute defaults on and restores a saved choice",
                 AudioMuteDefaultsOnAndRestoresSavedChoice);
+            Run("Sofanthiel toggles Inv visibility and persists both states",
+                SofanthielTogglesInvVisibilityAndPersists);
             Run("Push To Meow profiles and random cadence match the inspected DLL",
                 PushToMeowProfilesAndCadenceMatchDll);
             Run("Audio admission keeps movement, Downpour abilities, and Push To Meow",
@@ -304,6 +306,8 @@ namespace RainWorldDesktopPet.Tests
             Run("Expanded arm/leg/face debug overlay renders without mutation", ExpandedDebugOverlayRenders);
             Run("Mouse attention requires near clicks and refreshes its timeout", MouseAttentionClickCases);
             Run("Downpour visual profiles match local DLL constants", DownpourVisualProfilesMatchDllConstants);
+            Run("Inv adult and Slugpup appearances follow PlayerGraphics",
+                InvAdultAndSlugpupAppearancesMatchPlayerGraphics);
             Run("Runtime skin switching preserves Player physics", RuntimeSkinSwitchPreservesPhysics);
             Run("Rivulet gills use six procedural parts and shared interpolation", RivuletGillsUseOriginalProceduralLayout);
             Run("Spearmaster uses its original tail profile and speckle mapping", SpearmasterTailProfileAndSpeckles);
@@ -562,7 +566,7 @@ namespace RainWorldDesktopPet.Tests
                             StringComparison.OrdinalIgnoreCase) >= 0,
                             "movement clip loudness profile is prepared: " +
                             audio.Status);
-                        True(audio.Status.IndexOf("104/104 permitted meow clips prepared",
+                        True(audio.Status.IndexOf("106/106 permitted meow clips prepared",
                             StringComparison.OrdinalIgnoreCase) >= 0,
                             "only supported Slugcat/Slugpup meow WAVs are indexed: " +
                             audio.Status);
@@ -627,21 +631,24 @@ namespace RainWorldDesktopPet.Tests
             {
                 SlugcatId.White, SlugcatId.Yellow, SlugcatId.Red,
                 SlugcatId.Gourmand, SlugcatId.Artificer,
-                SlugcatId.SpearMaster, SlugcatId.Rivulet, SlugcatId.Saint
+                SlugcatId.SpearMaster, SlugcatId.Rivulet, SlugcatId.Saint,
+                SlugcatId.Inv
             };
             string[] shortIds =
             {
                 "SlugcatMeowNormalShort", "SlugcatMeowNormalShort",
                 "SlugcatMeowNormalShort", "SlugcatMeowFatShort",
                 "SlugcatMeowCoarseShort", "SlugcatMeowSpearShort",
-                "SlugcatMeowRivuletAShort", "SlugcatMeowSaintShort"
+                "SlugcatMeowRivuletAShort", "SlugcatMeowSaintShort",
+                "SlugcatMeowSofanthielShort"
             };
             string[] longIds =
             {
                 "SlugcatMeowNormal", "SlugcatMeowNormal",
                 "SlugcatMeowNormal", "SlugcatMeowFat",
                 "SlugcatMeowCoarse", "SlugcatMeowSpear",
-                "SlugcatMeowRivuletA", "SlugcatMeowSaint"
+                "SlugcatMeowRivuletA", "SlugcatMeowSaint",
+                "SlugcatMeowSofanthiel"
             };
             for (int i = 0; i < ids.Length; i++)
             {
@@ -3182,6 +3189,71 @@ namespace RainWorldDesktopPet.Tests
                 "an invalid setting falls back to the safe muted default");
         }
 
+        private static void SofanthielTogglesInvVisibilityAndPersists()
+        {
+            IList<SlugcatProfile> locked = SlugcatProfiles.Selectable(false);
+            Equal(8, locked.Count, "locked selector count");
+            True(!locked.Any(profile => profile.Id == SlugcatId.Inv),
+                "Inv is absent rather than disabled before unlock");
+            IList<SlugcatProfile> unlocked = SlugcatProfiles.Selectable(true);
+            Equal(9, unlocked.Count, "unlocked selector count");
+            True(unlocked[unlocked.Count - 1].Id == SlugcatId.Inv,
+                "Inv appears after unlock");
+
+            SecretWordMatcher matcher = new SecretWordMatcher();
+            string wrong = "sofanx";
+            for (int i = 0; i < wrong.Length; i++)
+                True(!matcher.AcceptVirtualKey(char.ToUpperInvariant(wrong[i])),
+                    "a wrong prefix cannot unlock at key " + i);
+            string secret = "sofanthiel";
+            for (int i = 0; i < secret.Length - 1; i++)
+                True(!matcher.AcceptVirtualKey(char.ToUpperInvariant(secret[i])),
+                    "partial secret remains locked at key " + i);
+            True(matcher.AcceptVirtualKey(char.ToUpperInvariant(
+                secret[secret.Length - 1])), "the complete secret unlocks Inv");
+            for (int i = 0; i < secret.Length - 1; i++)
+                True(!matcher.AcceptVirtualKey(char.ToUpperInvariant(secret[i])),
+                    "the second partial secret remains active at key " + i);
+            True(matcher.AcceptVirtualKey(char.ToUpperInvariant(
+                secret[secret.Length - 1])),
+                "the complete secret can toggle Inv a second time");
+
+            using (SecretWordInputHook hook = new SecretWordInputHook(delegate { }))
+                hook.Start();
+
+            string root = Path.Combine(Path.GetTempPath(),
+                "inv-unlock-test-" + Guid.NewGuid().ToString("N"));
+            try
+            {
+                string marker = Path.Combine(root, "inv-unlocked.txt");
+                InvUnlockSettings settings = new InvUnlockSettings(marker);
+                True(!settings.IsUnlocked, "a new installation starts locked");
+                string reason;
+                True(settings.TryUnlock(out reason),
+                    "unlock marker is stored: " + reason);
+                True(new InvUnlockSettings(marker).IsUnlocked,
+                    "a new settings instance restores the unlock");
+                True(string.Equals(InvUnlockSettings.MarkerContents,
+                    File.ReadAllText(marker).Trim(),
+                    StringComparison.OrdinalIgnoreCase),
+                    "only the known unlock marker is persisted");
+                True(settings.TryLock(out reason),
+                    "the second secret removes the unlock marker: " + reason);
+                True(!new InvUnlockSettings(marker).IsUnlocked,
+                    "a new settings instance restores the deactivated state");
+                True(!File.Exists(marker),
+                    "Inv is disabled by removing its exact marker file");
+                True(settings.TryUnlock(out reason),
+                    "a later secret can unlock Inv again: " + reason);
+                True(new InvUnlockSettings(marker).IsUnlocked,
+                    "the re-enabled state persists again");
+            }
+            finally
+            {
+                if (Directory.Exists(root)) Directory.Delete(root, true);
+            }
+        }
+
         private static void PushToMeowProfilesAndCadenceMatchDll()
         {
             string root = Path.Combine(Path.GetTempPath(),
@@ -3206,7 +3278,8 @@ namespace RainWorldDesktopPet.Tests
                     "{\"slugcat_id\":\"Gourmand\",\"short_meow_soundid\":\"SlugcatMeowFatShort\",\"long_meow_soundid\":\"SlugcatMeowFat\",\"volume_multiplier\":1.15}," +
                     "{\"slugcat_id\":\"Artificer\",\"short_meow_soundid\":\"SlugcatMeowCoarseShort\",\"long_meow_soundid\":\"SlugcatMeowCoarse\",\"volume_multiplier\":1.2}," +
                     "{\"slugcat_id\":\"Spear\",\"short_meow_soundid\":\"SlugcatMeowSpearShort\",\"long_meow_soundid\":\"SlugcatMeowSpear\",\"volume_multiplier\":0.55}," +
-                    "{\"slugcat_id\":\"Saint\",\"short_meow_soundid\":\"SlugcatMeowSaintShort\",\"long_meow_soundid\":\"SlugcatMeowSaint\"}]}");
+                    "{\"slugcat_id\":\"Saint\",\"short_meow_soundid\":\"SlugcatMeowSaintShort\",\"long_meow_soundid\":\"SlugcatMeowSaint\"}," +
+                    "{\"slugcat_id\":\"Inv\",\"short_meow_soundid\":\"SlugcatMeowSofanthielShort\",\"long_meow_soundid\":\"SlugcatMeowSofanthiel\"}]}");
 
                 string reason;
                 PushToMeowLibrary library = PushToMeowLibrary.LoadFromRoot(root,
@@ -3233,19 +3306,24 @@ namespace RainWorldDesktopPet.Tests
                 Near(0.85 * 0.8, sound.Volume, 0.000001, "Rivulet volume");
                 library.TryResolve(SlugcatId.Saint, false, false, out sound);
                 True(sound.SoundId == "SlugcatMeowSaint", "Saint whisper voice family");
+                library.TryResolve(SlugcatId.Inv, false, false, out sound);
+                True(sound.SoundId == "SlugcatMeowSofanthiel",
+                    "Inv uses the Sofanthiel voice family");
 
                 SlugcatId[] allIds =
                 {
                     SlugcatId.White, SlugcatId.Yellow, SlugcatId.Red,
                     SlugcatId.Gourmand, SlugcatId.Artificer,
-                    SlugcatId.SpearMaster, SlugcatId.Rivulet, SlugcatId.Saint
+                    SlugcatId.SpearMaster, SlugcatId.Rivulet, SlugcatId.Saint,
+                    SlugcatId.Inv
                 };
                 string[] adultLongIds =
                 {
                     "SlugcatMeowNormal", "SlugcatMeowNormal",
                     "SlugcatMeowNormal", "SlugcatMeowFat",
                     "SlugcatMeowCoarse", "SlugcatMeowSpear",
-                    "SlugcatMeowRivuletA", "SlugcatMeowSaint"
+                    "SlugcatMeowRivuletA", "SlugcatMeowSaint",
+                    "SlugcatMeowSofanthiel"
                 };
                 for (int i = 0; i < allIds.Length; i++)
                 {
@@ -4856,11 +4934,12 @@ namespace RainWorldDesktopPet.Tests
 
         private static void DownpourVisualProfilesMatchDllConstants()
         {
-            Equal(5, SlugcatVisualProfiles.All.Count, "profile count");
+            Equal(6, SlugcatVisualProfiles.All.Count, "profile count");
             AssertProfile(SlugcatVisualProfiles.Artificer, "Artificer", 112, 35, 60, 255, 255, 255);
             AssertProfile(SlugcatVisualProfiles.Spearmaster, "Spear", 79, 46, 105, 255, 255, 255);
             AssertProfile(SlugcatVisualProfiles.Rivulet, "Rivulet", 145, 204, 240, 16, 16, 16);
             AssertProfile(SlugcatVisualProfiles.Saint, "Saint", 170, 241, 86, 16, 16, 16);
+            AssertProfile(SlugcatVisualProfiles.Inv, "Inv", 23, 36, 79, 255, 255, 255);
             True(SlugcatVisualProfiles.Default.UsesVariantBodyColor,
                 "Default profile must preserve Survivor/Monk/Hunter/Gourmand colour selection");
             True(SlugcatVisualProfiles.Saint.HeadFamily == "HeadB",
@@ -4869,6 +4948,63 @@ namespace RainWorldDesktopPet.Tests
                 "SaintFaceCondition keeps the original Saint eyes closed");
             True(SlugcatVisualProfiles.Spearmaster.OriginalSlugcatId == "Spear",
                 "Spearmaster's DLL identifier is Spear");
+        }
+
+        private static void InvAdultAndSlugpupAppearancesMatchPlayerGraphics()
+        {
+            Slugcat slugcat = new Slugcat(new Vec2(200.0, 200.0), SlugcatId.Inv);
+            True(slugcat.AbilityController.GetType() == typeof(DefaultAbilityController),
+                "Inv adds no special ability controller");
+            Near(SlugcatProfiles.White.Movement.RunSpeedFactor,
+                slugcat.SelectedSlugcat.Movement.RunSpeedFactor, 0.000001,
+                "Inv reuses Survivor movement");
+
+            SlugcatGraphics graphics = new SlugcatGraphics(slugcat,
+                SlugcatGraphicsProfiles.Inv, null);
+            True(graphics.Extensions.Length == 0,
+                "Inv has no PlayerGraphics extension sprites");
+            SlugcatPose adult = graphics.BuildPose(1.0, new AttentionSystem());
+            True(adult.SelectedSlugcat == SlugcatId.Inv,
+                "adult pose retains the Inv selection");
+            True(adult.OriginalSlugcatId == "Inv",
+                "adult pose retains the original Inv DMS identity");
+            Equal(23, adult.VisualBodyColor.R, "adult Inv body red");
+            Equal(36, adult.VisualBodyColor.G, "adult Inv body green");
+            Equal(79, adult.VisualBodyColor.B, "adult Inv body blue");
+            Equal(255, adult.VisualEyeColor.R, "adult Inv eye red");
+            OriginalFaceState adultFace = SpriteRenderer.ResolveOriginalFaceState(adult);
+            True(adultFace.HeadElement.StartsWith("HeadA", StringComparison.Ordinal),
+                "adult Inv uses the standard HeadA family");
+            True(adultFace.FaceElement.StartsWith("FaceA", StringComparison.Ordinal),
+                "adult Inv uses the standard awake FaceA family");
+            True(SpriteRenderer.ResolveDmsSlugcatId(adult) == "Inv",
+                "adult Inv skin-editor parts resolve against the Inv identity");
+
+            graphics.SetPartColor("Body", Color.FromArgb(101, 102, 103));
+            SlugcatPose customized = graphics.BuildPose(1.0, new AttentionSystem());
+            Equal(101, customized.VisualBodyColor.R,
+                "Inv receives Skin Editor body colors");
+            graphics.ClearPartColors();
+
+            slugcat.SetPupAppearance(true);
+            graphics.Tail.SetPupGeometry(true, slugcat.BodyChunks[1].Position);
+            SlugcatPose pup = graphics.BuildPose(1.0, new AttentionSystem());
+            True(pup.RenderAsPup, "Inv can use the Slugpup appearance");
+            True(pup.OriginalSlugcatId == "Inv",
+                "Inv remains the selected source identity while rendered as a pup");
+            Equal(23, pup.VisualBodyColor.R, "pup Inv keeps navy body red");
+            Equal(255, pup.VisualEyeColor.R, "pup Inv keeps white eyes");
+            OriginalFaceState pupFace = SpriteRenderer.ResolveOriginalFaceState(pup);
+            True(pupFace.HeadElement.StartsWith("HeadC", StringComparison.Ordinal),
+                "pup Inv uses PlayerGraphics HeadC");
+            True(pupFace.FaceElement.StartsWith("PFaceA", StringComparison.Ordinal),
+                "pup Inv uses PlayerGraphics PFaceA while awake");
+            True(SpriteRenderer.ResolveDmsSlugcatId(pup) == "Slugpup",
+                "pup Inv uses the DMS Slugpup replacement identity");
+            for (int i = 0; i < graphics.Tail.Segments.Length; i++)
+                Near(SlugcatGraphicsProfiles.Inv.Tail.Lengths[i] * 0.5,
+                    graphics.Tail.Segments[i].Length, 0.000001,
+                    "pup Inv tail length " + i);
         }
 
         private static void AssertProfile(SlugcatVisualProfile profile, string id,
@@ -5239,6 +5375,9 @@ namespace RainWorldDesktopPet.Tests
             pose.RenderAsPup = false;
             True(string.Equals("Saint", SpriteRenderer.ResolveDmsSlugcatId(pose),
                 StringComparison.Ordinal), "adult rendering retains its selected DMS character identity");
+            pose.OriginalSlugcatId = "Inv";
+            True(string.Equals("Inv", SpriteRenderer.ResolveDmsSlugcatId(pose),
+                StringComparison.Ordinal), "adult Inv retains its DMS character identity");
         }
 
         private static void SlugpupGeometryMatchesPlayerGraphics()
