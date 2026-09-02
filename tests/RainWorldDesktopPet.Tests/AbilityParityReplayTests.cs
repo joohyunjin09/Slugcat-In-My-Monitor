@@ -60,8 +60,8 @@ namespace RainWorldDesktopPet.Tests
     {
         public static void Register(Action<string, Action> run)
         {
-            run("Exactly eight characters share one ordered profile selector",
-                UnifiedEightCharacterProfiles);
+            run("Nine characters share one ordered profile selector",
+                UnifiedNineCharacterProfiles);
             run("Character switching clears previous ability objects",
                 CharacterSwitchClearsAbilityState);
             run("Artificer replay matches explosive-jump chunk assignments",
@@ -114,7 +114,7 @@ namespace RainWorldDesktopPet.Tests
                 GourmandExhaustionReplay);
         }
 
-        private static void UnifiedEightCharacterProfiles()
+        private static void UnifiedNineCharacterProfiles()
         {
             SlugcatId[] expected =
             {
@@ -125,17 +125,18 @@ namespace RainWorldDesktopPet.Tests
                 SlugcatId.Artificer,
                 SlugcatId.SpearMaster,
                 SlugcatId.Rivulet,
-                SlugcatId.Saint
+                SlugcatId.Saint,
+                SlugcatId.Inv
             };
             string[] names =
             {
                 "White", "Yellow", "Red", "Gourmand",
-                "Artificer", "SpearMaster", "Rivulet", "Saint"
+                "Artificer", "SpearMaster", "Rivulet", "Saint", "Inv"
             };
 
-            Equal(8, Enum.GetValues(typeof(SlugcatId)).Length, "SlugcatId count");
-            Equal(8, SlugcatProfiles.All.Count, "profile count");
-            Equal(8, SlugcatGraphicsProfiles.All.Count, "graphics profile count");
+            Equal(9, Enum.GetValues(typeof(SlugcatId)).Length, "SlugcatId count");
+            Equal(9, SlugcatProfiles.All.Count, "profile count");
+            Equal(9, SlugcatGraphicsProfiles.All.Count, "graphics profile count");
             True(SlugcatProfiles.All.IsReadOnly, "character profile list is immutable");
             True(SlugcatGraphicsProfiles.All.IsReadOnly,
                 "graphics profile list is immutable");
@@ -160,6 +161,7 @@ namespace RainWorldDesktopPet.Tests
             AssertParse("red", SlugcatId.Red);
             AssertParse("hunter", SlugcatId.Red);
             AssertParse("spearmaster", SlugcatId.SpearMaster);
+            AssertParse("inv", SlugcatId.Inv);
             SlugcatId invalid;
             True(!SlugcatProfiles.TryParse("99", out invalid),
                 "undefined numeric character id is rejected");

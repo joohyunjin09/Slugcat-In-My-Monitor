@@ -88,7 +88,8 @@ namespace RainWorldDesktopPet.Creature
         Artificer,
         SpearMaster,
         Rivulet,
-        Saint
+        Saint,
+        Inv
     }
 
     public sealed class SlugcatMovementProfile
@@ -230,12 +231,30 @@ namespace RainWorldDesktopPet.Creature
             new SlugcatMovementProfile(1.0, 1.0, 0.0, 1.0, 1.0, 4.0, 3.0, 4.0, 2.5),
             "Tongue / rope", delegate(Slugcat s) { return new SaintAbilityController(s); });
 
-        private static readonly IList<SlugcatProfile> all = Array.AsReadOnly(
+        // MoreSlugcats' hidden Sofanthiel selection uses the Inv identity but
+        // otherwise follows Survivor movement. Keep it appearance-only here.
+        public static readonly SlugcatProfile Inv = Build(SlugcatId.Inv,
+            "Inv", SlugcatGraphicsProfiles.Inv,
+            new SlugcatMovementProfile(1.0, 1.0, 1.0, 1.0, 1.0,
+                4.0, 3.0, 4.0, 2.5),
+            "None", delegate(Slugcat s) { return new DefaultAbilityController(s); });
+
+        private static readonly IList<SlugcatProfile> standard = Array.AsReadOnly(
             new SlugcatProfile[] {
             White, Yellow, Red, Gourmand, Artificer, SpearMaster, Rivulet, Saint
         });
 
+        private static readonly IList<SlugcatProfile> all = Array.AsReadOnly(
+            new SlugcatProfile[] {
+            White, Yellow, Red, Gourmand, Artificer, SpearMaster, Rivulet, Saint, Inv
+        });
+
         public static IList<SlugcatProfile> All { get { return all; } }
+
+        public static IList<SlugcatProfile> Selectable(bool invUnlocked)
+        {
+            return invUnlocked ? all : standard;
+        }
 
         public static SlugcatProfile Get(SlugcatId id)
         {
@@ -288,6 +307,7 @@ namespace RainWorldDesktopPet.Creature
                 case SlugcatId.SpearMaster: return UiLocalization.Text("SpearMaster — 창술가", "SpearMaster");
                 case SlugcatId.Rivulet: return UiLocalization.Text("Rivulet — 물살이", "Rivulet");
                 case SlugcatId.Saint: return UiLocalization.Text("Saint — 성자", "Saint");
+                case SlugcatId.Inv: return UiLocalization.Text("Inv — 인브", "Inv");
                 default: return Get(id).DisplayName;
             }
         }

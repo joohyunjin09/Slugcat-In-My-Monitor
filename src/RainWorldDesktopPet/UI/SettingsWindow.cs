@@ -108,8 +108,6 @@ namespace RainWorldDesktopPet.UI
             appearanceLayout.Controls.Add(FieldLabel(T("캐릭터와 능력", "Character and Ability")), 0, 0);
             characterSelector = new ComboBox { Dock = DockStyle.Fill,
                 DropDownStyle = ComboBoxStyle.DropDownList };
-            for (int i = 0; i < SlugcatProfiles.All.Count; i++)
-                characterSelector.Items.Add(new CharacterChoice(SlugcatProfiles.All[i]));
             characterSelector.SelectedIndexChanged += CharacterChanged;
             appearanceLayout.Controls.Add(characterSelector, 1, 0);
             appearanceLayout.Controls.Add(FieldLabel(T("크기", "Size")), 0, 1);
@@ -271,6 +269,7 @@ namespace RainWorldDesktopPet.UI
             updating = true;
             try
             {
+                RefreshCharacterChoices();
                 string[] names = app.SettingsSlugcatNames;
                 slugcatList.BeginUpdate();
                 try
@@ -335,6 +334,30 @@ namespace RainWorldDesktopPet.UI
                         (names.Length == 1 ? string.Empty : "s"));
             }
             finally { updating = false; }
+        }
+
+        private void RefreshCharacterChoices()
+        {
+            IList<SlugcatProfile> selectable =
+                SlugcatProfiles.Selectable(app.SettingsInvUnlocked);
+            bool rebuild = characterSelector.Items.Count != selectable.Count;
+            if (!rebuild)
+            {
+                for (int i = 0; i < selectable.Count; i++)
+                {
+                    CharacterChoice choice = characterSelector.Items[i] as CharacterChoice;
+                    if (choice == null || choice.Id != selectable[i].Id)
+                    {
+                        rebuild = true;
+                        break;
+                    }
+                }
+            }
+            if (!rebuild) return;
+
+            characterSelector.Items.Clear();
+            for (int i = 0; i < selectable.Count; i++)
+                characterSelector.Items.Add(new CharacterChoice(selectable[i]));
         }
 
         private void SlugcatSelectionChanged(object sender, EventArgs e)

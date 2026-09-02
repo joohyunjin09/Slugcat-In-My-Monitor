@@ -45,6 +45,7 @@ namespace RainWorldDesktopPet.UI
         private const int WmHookMouseInput = 0x8002;
         private readonly RainWorldInstallation installation;
         private readonly SlugcatId startSlugcat;
+        private readonly InvUnlockSettings invUnlockSettings;
         private readonly Timer renderTimer;
         private readonly NotifyIcon trayIcon;
         private readonly Icon applicationIcon;
@@ -93,6 +94,7 @@ namespace RainWorldDesktopPet.UI
         private readonly NativeMethods.WinEventProc foregroundEventCallback;
         private readonly NativeMethods.WinEventProc locationEventCallback;
         private LowLevelMouseInputHook mouseHook;
+        private SecretWordInputHook secretWordHook;
         private volatile MouseHookHitSnapshot mouseHitSnapshot =
             MouseHookHitSnapshot.Empty;
         private volatile RadialCommandHitSnapshot commandMenuHitSnapshot =
@@ -111,6 +113,7 @@ namespace RainWorldDesktopPet.UI
         private int renderErrorCount;
         private bool renderingEnabled;
         private bool renderingFrame;
+        private bool invUnlocked;
         private bool powerSuspended;
         private bool resumeRenderingAfterPowerResume;
         private long lastPowerResumeTimestamp = long.MinValue;
@@ -152,7 +155,12 @@ namespace RainWorldDesktopPet.UI
             SlugcatId startSlugcat, string startDmsSkinId)
         {
             this.installation = installation;
-            this.startSlugcat = startSlugcat;
+            invUnlockSettings = new InvUnlockSettings();
+            invUnlocked = invUnlockSettings.IsUnlocked;
+            // A command-line/preset identity must not bypass the same hidden
+            // selection gate used by the visible controls.
+            this.startSlugcat = startSlugcat == SlugcatId.Inv && !invUnlocked
+                ? SlugcatId.White : startSlugcat;
             this.startDmsSkinId = startDmsSkinId;
             foregroundEventCallback = ForegroundEventCallback;
             locationEventCallback = LocationEventCallback;
@@ -213,12 +221,7 @@ namespace RainWorldDesktopPet.UI
             ToolStripMenuItem exitItem = new ToolStripMenuItem(T("종료", "Exit"));
             exitItem.Click += delegate { Close(); };
             slugcatMenu = new ToolStripMenuItem(T("캐릭터와 능력", "Character and Ability"));
-            for (int i = 0; i < SlugcatProfiles.All.Count; i++)
-            {
-                SlugcatProfile profile = SlugcatProfiles.All[i];
-                slugcatMenu.DropDownItems.Add(CreateSlugcatItem(
-                    SlugcatProfiles.SelectionLabel(profile.Id), profile.Id, startSlugcat));
-            }
+            RebuildSlugcatSelectionMenu();
             refreshWorkshopItem = new ToolStripMenuItem(T("Workshop 모드 새로 고침", "Refresh Workshop Mods"));
             refreshWorkshopItem.Click += RefreshWorkshopItemClick;
             activeSlugcatsMenu = new ToolStripMenuItem(T("슬러그캣", "Slugcats"));
@@ -316,6 +319,7 @@ namespace RainWorldDesktopPet.UI
             base.OnHandleCreated(e);
             ConfigureVirtualDesktop();
             InstallMouseHook();
+            InstallSecretWordHook();
             InstallForegroundEventHook();
             InstallLocationEventHook();
             EnsureOverlayTopMost();
@@ -339,6 +343,7 @@ namespace RainWorldDesktopPet.UI
             UnregisterForSuspendResumeNotifications();
             UninstallLocationEventHook();
             UninstallForegroundEventHook();
+            UninstallSecretWordHook();
             UninstallMouseHook();
             ReleaseGrabInput();
             if (settingsWindow != null && !settingsWindow.IsDisposed) settingsWindow.Close();
@@ -940,6 +945,83 @@ namespace RainWorldDesktopPet.UI
             }
         }
 
+        private void InstallSecretWordHook()
+        {
+            if (secretWordHook != null) return;
+            SecretWordInputHook installed = new SecretWordInputHook(QueueInvToggle);
+            try
+            {
+                installed.Start();
+                secretWordHook = installed;
+            }
+            catch (Exception exception)
+            {
+                installed.Dispose();
+                Program.LogException(exception);
+                trayIcon.ShowBalloonTip(5000,
+                    T("Inv 시크릿 입력을 감지할 수 없음", "Inv Secret Input Unavailable"),
+                    exception.Message, ToolTipIcon.Warning);
+            }
+        }
+
+        private void UninstallSecretWordHook()
+        {
+            SecretWordInputHook installed = secretWordHook;
+            secretWordHook = null;
+            if (installed != null) installed.Dispose();
+        }
+
+        private void QueueInvToggle()
+        {
+            if (IsDisposed || !IsHandleCreated) return;
+            try { BeginInvoke(new Action(ToggleInv)); }
+            catch (InvalidOperationException) { }
+        }
+
+        private void ToggleInv()
+        {
+            if (IsDisposed) return;
+            bool enable = !invUnlocked;
+            string reason;
+            bool persisted = enable
+                ? invUnlockSettings.TryUnlock(out reason)
+                : invUnlockSettings.TryLock(out reason);
+            if (!persisted)
+            {
+                trayIcon.ShowBalloonTip(5000,
+                    enable
+                        ? T("Inv 해제 저장 실패", "Unable to Save Inv Unlock")
+                        : T("Inv 비활성화 저장 실패", "Unable to Save Inv Deactivation"),
+                    reason ?? T("Inv 상태를 저장하지 못했습니다.",
+                        "The Inv state could not be saved."), ToolTipIcon.Error);
+                return;
+            }
+
+            invUnlocked = enable;
+            if (!enable)
+            {
+                for (int i = 0; i < gameLoops.Count; i++)
+                {
+                    if (gameLoops[i].SelectedSlugcat.Id == SlugcatId.Inv)
+                        gameLoops[i].SetSelectedSlugcat(SlugcatId.White);
+                }
+            }
+            RebuildSlugcatSelectionMenu();
+            if (skinEditor != null && !skinEditor.IsDisposed)
+                skinEditor.SetInvUnlocked(enable);
+            RefreshActiveSlugcatsMenu();
+            trayIcon.ShowBalloonTip(5000,
+                enable
+                    ? T("시크릿 캐릭터 해제", "Secret Character Unlocked")
+                    : T("시크릿 캐릭터 비활성화", "Secret Character Deactivated"),
+                enable
+                    ? T("Inv(인브)가 캐릭터 선택란에 추가되었습니다.",
+                        "Inv is now available in the character selector.")
+                    : T("Inv(인브)가 캐릭터 선택란에서 숨겨졌습니다.",
+                        "Inv is now hidden from the character selector."),
+                ToolTipIcon.Info);
+        }
+
         private void UninstallMouseHook()
         {
             mouseHitSnapshot = MouseHookHitSnapshot.Empty;
@@ -1483,6 +1565,20 @@ namespace RainWorldDesktopPet.UI
             }
         }
 
+        private void RebuildSlugcatSelectionMenu()
+        {
+            SlugcatId selected = gameLoop == null
+                ? startSlugcat : gameLoop.SelectedSlugcat.Id;
+            slugcatMenu.DropDownItems.Clear();
+            IList<SlugcatProfile> selectable = SlugcatProfiles.Selectable(invUnlocked);
+            for (int i = 0; i < selectable.Count; i++)
+            {
+                SlugcatProfile profile = selectable[i];
+                slugcatMenu.DropDownItems.Add(CreateSlugcatItem(
+                    SlugcatProfiles.SelectionLabel(profile.Id), profile.Id, selected));
+            }
+        }
+
         private void RefreshActiveSlugcatsMenu()
         {
             while (activeSlugcatsMenu.DropDownItems.Count > 4)
@@ -1545,7 +1641,7 @@ namespace RainWorldDesktopPet.UI
                 {
                     RefreshSlugcatSelectionMenu();
                     RefreshActiveSlugcatsMenu();
-                });
+                }, invUnlocked);
                 if (applicationIcon != null) skinEditor.Icon = applicationIcon;
                 skinEditor.FormClosed += delegate { skinEditor = null; };
                 skinEditor.Show();
@@ -1579,12 +1675,14 @@ namespace RainWorldDesktopPet.UI
         {
             ToolStripMenuItem selected = sender as ToolStripMenuItem;
             if (selected == null) return;
+            SlugcatId selectedId = (SlugcatId)selected.Tag;
+            if (selectedId == SlugcatId.Inv && !invUnlocked) return;
             for (int i = 0; i < slugcatMenu.DropDownItems.Count; i++)
             {
                 ToolStripMenuItem item = slugcatMenu.DropDownItems[i] as ToolStripMenuItem;
                 if (item != null) item.Checked = ReferenceEquals(item, selected);
             }
-            if (gameLoop != null) gameLoop.SetSelectedSlugcat((SlugcatId)selected.Tag);
+            if (gameLoop != null) gameLoop.SetSelectedSlugcat(selectedId);
             RefreshActiveSlugcatsMenu();
             if (skinEditor != null && !skinEditor.IsDisposed) skinEditor.RefreshFromGame();
         }
@@ -1672,6 +1770,7 @@ namespace RainWorldDesktopPet.UI
         internal string SettingsAudioStatus { get { return audioEngine.Status; } }
         internal SlugcatId SettingsSlugcatId
         { get { return gameLoop == null ? startSlugcat : gameLoop.SelectedSlugcat.Id; } }
+        internal bool SettingsInvUnlocked { get { return invUnlocked; } }
         internal SlugcatSize SettingsSlugcatSize
         { get { return gameLoop == null ? SlugcatSize.Large : gameLoop.Size; } }
         internal void SettingsSelectSlugcat(int index)
@@ -1684,7 +1783,7 @@ namespace RainWorldDesktopPet.UI
         internal void SettingsRemoveSelectedSlugcat() { RemoveSelectedSlugcat(null, EventArgs.Empty); }
         internal void SettingsSetSlugcat(SlugcatId id)
         {
-            if (gameLoop == null) return;
+            if (gameLoop == null || id == SlugcatId.Inv && !invUnlocked) return;
             gameLoop.SetSelectedSlugcat(id);
             RefreshSlugcatSelectionMenu();
             RefreshActiveSlugcatsMenu();
