@@ -10,10 +10,22 @@ namespace RainWorldDesktopPet.Core
         private readonly string markerPath;
 
         internal InvUnlockSettings()
-            : this(Path.Combine(Environment.GetFolderPath(
-                Environment.SpecialFolder.LocalApplicationData),
-                "SlugcatInMyMonitor", "inv-unlocked.txt"))
+            : this(BuildMarkerPath(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                typeof(InvUnlockSettings).Assembly.ManifestModule.ModuleVersionId))
         {
+        }
+
+        internal static string BuildMarkerPath(string localApplicationDataPath, Guid buildId)
+        {
+            if (string.IsNullOrWhiteSpace(localApplicationDataPath))
+                throw new ArgumentException("A local application-data path is required.",
+                    "localApplicationDataPath");
+            if (buildId == Guid.Empty)
+                throw new ArgumentException("A non-empty build ID is required.", "buildId");
+
+            return Path.Combine(localApplicationDataPath, "SlugcatInMyMonitor",
+                "inv-unlocks", buildId.ToString("N"), "inv-unlocked.txt");
         }
 
         internal InvUnlockSettings(string markerPath)
