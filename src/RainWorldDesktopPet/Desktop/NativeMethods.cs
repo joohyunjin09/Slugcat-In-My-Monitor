@@ -12,6 +12,7 @@ namespace RainWorldDesktopPet.Desktop
         internal const int WS_EX_LAYERED = 0x00080000;
         internal const int WS_EX_NOACTIVATE = 0x08000000;
         internal const int WS_EX_NOREDIRECTIONBITMAP = 0x00200000;
+        internal const int WH_KEYBOARD_LL = 13;
         internal const int WH_MOUSE_LL = 14;
         internal const uint EVENT_SYSTEM_FOREGROUND = 0x0003;
         internal const uint EVENT_OBJECT_LOCATIONCHANGE = 0x800B;
@@ -25,6 +26,8 @@ namespace RainWorldDesktopPet.Desktop
         internal const int SWP_NOOWNERZORDER = 0x0200;
         internal const int WM_NCHITTEST = 0x0084;
         internal const int WM_CANCELMODE = 0x001F;
+        internal const int WM_KEYDOWN = 0x0100;
+        internal const int WM_SYSKEYDOWN = 0x0104;
         internal const int WM_LBUTTONDOWN = 0x0201;
         internal const int WM_MOUSEMOVE = 0x0200;
         internal const int WM_LBUTTONUP = 0x0202;
@@ -64,6 +67,7 @@ namespace RainWorldDesktopPet.Desktop
 
         internal delegate bool EnumWindowsProc(IntPtr handle, IntPtr parameter);
         internal delegate IntPtr LowLevelMouseProc(int code, IntPtr message, IntPtr data);
+        internal delegate IntPtr LowLevelKeyboardProc(int code, IntPtr message, IntPtr data);
         internal delegate void WinEventProc(IntPtr hook, uint eventType, IntPtr handle,
             int objectId, int childId, uint eventThread, uint eventTime);
 
@@ -119,6 +123,16 @@ namespace RainWorldDesktopPet.Desktop
         {
             internal Point Point;
             internal uint MouseData;
+            internal uint Flags;
+            internal uint Time;
+            internal UIntPtr ExtraInfo;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        internal struct LowLevelKeyboardHookData
+        {
+            internal uint VirtualKey;
+            internal uint ScanCode;
             internal uint Flags;
             internal uint Time;
             internal UIntPtr ExtraInfo;
@@ -206,6 +220,11 @@ namespace RainWorldDesktopPet.Desktop
         [DllImport("user32.dll", SetLastError = true)]
         internal static extern IntPtr SetWindowsHookEx(int hookId,
             LowLevelMouseProc callback, IntPtr module, uint threadId);
+
+        [DllImport("user32.dll", EntryPoint = "SetWindowsHookExW",
+            CharSet = CharSet.Unicode, ExactSpelling = true, SetLastError = true)]
+        internal static extern IntPtr SetWindowsKeyboardHookEx(int hookId,
+            LowLevelKeyboardProc callback, IntPtr module, uint threadId);
 
         [DllImport("user32.dll", SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]

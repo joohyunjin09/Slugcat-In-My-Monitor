@@ -102,7 +102,8 @@ namespace RainWorldDesktopPet.Graphics
         {
             missingElement = null;
             if (Id == SlugcatId.White || Id == SlugcatId.Yellow ||
-                Id == SlugcatId.Red || Id == SlugcatId.Gourmand) return true;
+                Id == SlugcatId.Red || Id == SlugcatId.Gourmand ||
+                Id == SlugcatId.Inv) return true;
             if (atlas == null)
             {
                 missingElement = "local Downpour atlas";
@@ -237,9 +238,16 @@ namespace RainWorldDesktopPet.Graphics
             SlugcatGraphicsExtensionKind.None, new string[] { "Tongue", "Ascension(inactive)" },
             new string[] { "BodyA", "HipsA", "HeadB0", "FaceB0", "FaceStunned", "FaceDead" });
 
+        // PlayerGraphics.DefaultSlugcatColor(MoreSlugcatsEnums.SlugcatStatsName.Sofanthiel)
+        // is (0.09, 0.14, 0.31), with white eyes and the standard base sprites.
+        public static readonly SlugcatGraphicsProfile Inv = new SlugcatGraphicsProfile(
+            SlugcatId.Inv, "Inv", "Inv", Color.FromArgb(23, 36, 79), Color.White,
+            "BodyA", "HipsA", "HeadA", 1.0, 1.0, 1.0, 1.0, DefaultTail, 12, 0,
+            SlugcatGraphicsExtensionKind.None, new string[0], new string[0]);
+
         private static readonly IList<SlugcatGraphicsProfile> all = Array.AsReadOnly(
             new SlugcatGraphicsProfile[] {
-            White, Yellow, Red, Gourmand, Artificer, SpearMaster, Rivulet, Saint
+            White, Yellow, Red, Gourmand, Artificer, SpearMaster, Rivulet, Saint, Inv
         });
 
         public static IList<SlugcatGraphicsProfile> All { get { return all; } }
@@ -282,6 +290,9 @@ namespace RainWorldDesktopPet.Graphics
         public string ResolveOriginalSlugcatId(SlugcatAppearance appearance)
         {
             if (Skin != SlugcatSkin.Default || appearance == null) return OriginalSlugcatId;
+            // Compatibility variants only remap the original White facade.
+            // Standalone profiles such as Inv retain their real DMS/audio ID.
+            if (Id != SlugcatId.White) return OriginalSlugcatId;
             switch (appearance.Variant)
             {
                 case SlugcatVariant.Monk: return "Yellow";
@@ -322,10 +333,12 @@ namespace RainWorldDesktopPet.Graphics
             SlugcatSkin.Rivulet, SlugcatGraphicsProfiles.Rivulet, false, false);
         public static readonly SlugcatVisualProfile Saint = new SlugcatVisualProfile(
             SlugcatSkin.Saint, SlugcatGraphicsProfiles.Saint, false, false);
+        public static readonly SlugcatVisualProfile Inv = new SlugcatVisualProfile(
+            SlugcatSkin.Default, SlugcatGraphicsProfiles.Inv, false, false);
 
         private static readonly SlugcatVisualProfile[] all =
         {
-            Default, Artificer, Spearmaster, Rivulet, Saint
+            Default, Artificer, Spearmaster, Rivulet, Saint, Inv
         };
 
         public static IList<SlugcatVisualProfile> All { get { return all; } }
