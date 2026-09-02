@@ -3225,14 +3225,39 @@ namespace RainWorldDesktopPet.Tests
                 "inv-unlock-test-" + Guid.NewGuid().ToString("N"));
             try
             {
-                string marker = Path.Combine(root, "inv-unlocked.txt");
+                string legacyMarker = Path.Combine(root, "SlugcatInMyMonitor",
+                    "inv-unlocked.txt");
+                Directory.CreateDirectory(Path.GetDirectoryName(legacyMarker));
+                File.WriteAllText(legacyMarker, InvUnlockSettings.MarkerContents);
+
+                Guid buildId = new Guid("68b1c426-10c5-4381-8145-af9f34e5c5f1");
+                Guid otherBuildId = new Guid("5ed7ef6c-7ae4-49ce-b9c0-d8f044c51a07");
+                string marker = InvUnlockSettings.BuildMarkerPath(root, buildId);
+                string otherBuildMarker = InvUnlockSettings.BuildMarkerPath(root,
+                    otherBuildId);
+                True(string.Equals(marker,
+                        InvUnlockSettings.BuildMarkerPath(root, buildId),
+                        StringComparison.OrdinalIgnoreCase),
+                    "the same build resolves the same unlock marker");
+                True(!string.Equals(marker, otherBuildMarker,
+                        StringComparison.OrdinalIgnoreCase),
+                    "different builds cannot share an Inv unlock marker");
+                True(!string.Equals(marker, legacyMarker,
+                        StringComparison.OrdinalIgnoreCase),
+                    "the legacy global marker cannot unlock a fresh release build");
+
                 InvUnlockSettings settings = new InvUnlockSettings(marker);
-                True(!settings.IsUnlocked, "a new installation starts locked");
+                True(!settings.IsUnlocked,
+                    "a fresh release build starts locked despite a legacy marker");
+                True(!new InvUnlockSettings(otherBuildMarker).IsUnlocked,
+                    "another build starts locked independently");
                 string reason;
                 True(settings.TryUnlock(out reason),
                     "unlock marker is stored: " + reason);
                 True(new InvUnlockSettings(marker).IsUnlocked,
-                    "a new settings instance restores the unlock");
+                    "the same build restores the unlock after restart");
+                True(!new InvUnlockSettings(otherBuildMarker).IsUnlocked,
+                    "unlocking one build does not unlock another build");
                 True(string.Equals(InvUnlockSettings.MarkerContents,
                     File.ReadAllText(marker).Trim(),
                     StringComparison.OrdinalIgnoreCase),
